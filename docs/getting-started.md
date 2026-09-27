@@ -28,7 +28,7 @@ needs an Internet connection. If installation fails, use the
 |---|---|
 | Windows x86_64 | WebView2 Runtime and x86 Microsoft Visual C++ Runtime. The launcher installs missing runtimes when needed. |
 | Linux x86_64 | System Wine and the required desktop libraries. The tar.gz archive does not bundle system libraries. |
-| macOS x86_64 | Intel executable, distributed as a tar.gz archive without an app bundle. Managed Sikarugir Wine downloads on first game launch. |
+| macOS, Apple Silicon or Intel | Universal executable, distributed as a tar.gz archive without an app bundle. Managed Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for the Wine engine. |
 
 Linux and macOS game launch and client extensions remain unverified against a
 live client. See

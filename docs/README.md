@@ -37,8 +37,8 @@ used by the launcher and its boundaries. Players can usually skip them.
 
 - [Development](development.md) - prerequisites, workspace checks, browser
   checks, native tests, and platform limits.
-- [Release process](releasing.md) - tag automation, archive contents, and
-  platform limits.
+- [Release process](releasing.md) - merge-to-main version bump and tag
+  automation, archive contents, and platform limits.
 - [Win32 client module](../client/README.md) - MSVC and llvm-mingw build and
   test commands and their coverage limits.
 

@@ -37,11 +37,13 @@ python -m pip install clang-format==22.1.8
 
 ```powershell
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 node scripts/check-markdown-links.mjs
 node scripts/check-cpp-format.mjs
 actionlint
+python tools/format_lua.py install
+python tools/format_lua.py check
 ```
 
 The Markdown check validates tracked files and local targets. The C++ check
@@ -206,7 +208,7 @@ published launcher from its package directory.
 To stage the same release layout manually:
 
 ```bash
-cargo build --release -p bahamut-launcher-shell
+cargo build --release --locked -p bahamut-launcher-shell
 ./scripts/stage-unix-release.sh \
   --launcher target/release/bahamut-launcher-shell \
   --client-build out/client-mingw \
