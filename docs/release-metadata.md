@@ -30,7 +30,7 @@ The version 1 fields are:
 | `schema_version` | `1` |
 | `product` | `game` or `launcher` |
 | `channel` | `stable` |
-| `target` | `platform-independent` for game data, or `windows-x86_64`, `linux-x86_64`, or `macos-x86_64` for a launcher package |
+| `target` | `platform-independent` for game data, or `windows-x86_64`, `linux-x86_64`, or `macos-universal` for a launcher package |
 | `version` | Strict `MAJOR.MINOR.PATCH`, without a prerelease or build suffix |
 | `artifact` | `object_key`, `format` (`zip` or `tar_gz`), byte `length`, and lowercase hex `sha256` |
 | `inventory` | The identity or file entries for the product below |
