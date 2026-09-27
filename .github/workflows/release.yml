@@ -1,0 +1,197 @@
+name: Release
+
+# Merging to main releases. This workflow reads the highest vX.Y.Z tag, bumps
+# it (patch by default, minor or major from a release:minor / release:major
+# label on the merged pull request), rewrites the package versions to match,
+# commits that to main as "chore: release vX.Y.Z", pushes the annotated tag
+# atomically with the commit, and creates the GitHub Release. The tag push
+# starts release-binaries.yml. Preconditions (RELEASE_PAT, branch protection,
+# labels) are in docs/releasing.md.
+on:
+  push:
+    branches: [main]
+
+# Serialize releases so two quick merges produce monotonic tags.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # The label lookup reads the merged pull request. Without this scope the
+  # lookup fails and the bump defaults to patch with a warning.
+  pull-requests: read
+
+jobs:
+  release:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+    # The bump commit is pushed with RELEASE_PAT, so it re-triggers this
+    # workflow. Skipping the bot's own commits breaks the loop without
+    # [skip ci], which would also suppress the tag push that starts
+    # release-binaries.yml.
+    if: ${{ github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com' }}
+    steps:
+      - name: Require RELEASE_PAT
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [[ -z "$RELEASE_PAT" ]]; then
+            echo "::error::The RELEASE_PAT repository secret is not set. The default GITHUB_TOKEN cannot push the version bump to protected main; see docs/releasing.md."
+            exit 1
+          fi
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          fetch-depth: 0
+          ref: main
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Fetch all tags
+        run: git fetch --tags --force --prune
+
+      - name: Determine bump level from the merged pull request's labels
+        id: level
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # No associated pull request (a direct push) is the legitimate empty
+          # case and bumps patch. An API error is warned so a missed label is
+          # visible instead of silently downgraded.
+          if ! labels="$(gh api "repos/$GH_REPO/commits/$MERGE_SHA/pulls" --jq '[.[].labels[].name] | join(",")')"; then
+            echo "::warning::Could not query pull request labels for $MERGE_SHA; defaulting to a patch bump."
+            labels=""
+          fi
+          echo "Pull request labels: ${labels:-<none>}"
+          level="patch"
+          case ",$labels," in
+            *,release:major,*) level=major ;;
+            *,release:minor,*) level=minor ;;
+          esac
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+          echo "Bump level: $level"
+
+      - name: Compute the next version from the highest tag
+        id: ver
+        env:
+          LEVEL: ${{ steps.level.outputs.level }}
+        run: |
+          set -euo pipefail
+          # A rerun after the atomic push succeeded must not cut a second
+          # release of the same commit: main's tip already carries its tag.
+          released="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          if [[ -n "$released" ]]; then
+            echo "::notice::main is already released as $released; nothing to do."
+            {
+              echo "new="
+              echo "tag="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Prerelease tags (v1.0.0-rc.1) are published by release-binaries.yml
+          # but do not advance the stable sequence.
+          latest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          latest="${latest:-v0.0.0}"
+          echo "Highest existing stable tag: $latest"
+          base="${latest#v}"
+          major="${base%%.*}"; rest="${base#*.}"; minor="${rest%%.*}"; patch="${rest#*.}"
+          case "$LEVEL" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            *)     patch=$((patch + 1)) ;;
+          esac
+          new="${major}.${minor}.${patch}"
+          tag="v${new}"
+          echo "Next version: ${new} (tag ${tag})"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::Tag ${tag} already exists; aborting to avoid a clobber."
+            exit 1
+          fi
+          {
+            echo "new=${new}"
+            echo "tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite the package versions and sync Cargo.lock
+        if: steps.ver.outputs.tag != ''
+        env:
+          NEW_VERSION: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          # The tag is the source of truth: a hand-edited version above the
+          # highest tag is rewritten back down. Push a tag to bump out of band.
+          # Only the version key inside [workspace.package] changes, never a
+          # version under [workspace.dependencies].
+          awk -v V="$NEW_VERSION" '
+            /^\[/ { in_wp = ($0 == "[workspace.package]") }
+            in_wp && /^[[:space:]]*version[[:space:]]*=/ { print "version = \"" V "\""; next }
+            { print }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+          got="$(awk '/^\[/{w=($0=="[workspace.package]")} w&&/^[[:space:]]*version[[:space:]]*=/{split($0,a,"\"");print a[2];exit}' Cargo.toml)"
+          if [[ "$got" != "$NEW_VERSION" ]]; then
+            echo "::error::Cargo.toml [workspace.package].version is '$got', expected '$NEW_VERSION'"
+            exit 1
+          fi
+          echo "Cargo.toml [workspace.package].version = $got"
+
+          # The Tauri shell carries its own copy of the version. Rewrite only
+          # the top-level key so the file keeps its formatting, then verify
+          # the parsed value.
+          conf=src-tauri/tauri.conf.json
+          sed -E -i "s|^(  \"version\": \")[^\"]*(\",)$|\\1${NEW_VERSION}\\2|" "$conf"
+          if ! jq -e --arg v "$NEW_VERSION" '.version == $v' "$conf" >/dev/null; then
+            echo "::error::$conf .version was not rewritten to '$NEW_VERSION'"
+            exit 1
+          fi
+          echo "$conf .version = $NEW_VERSION"
+
+          # Members inherit the workspace version; keep the committed lockfile
+          # consistent so --locked builds of the tagged commit succeed.
+          cargo update --workspace
+          # A full resolution is what --locked verifies; --no-deps would skip it.
+          cargo metadata --format-version 1 --locked >/dev/null
+          echo "Cargo.lock synced and consistent."
+
+      - name: Commit, tag, and push atomically to main
+        if: steps.ver.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          LEVEL: ${{ steps.level.outputs.level }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json
+          git commit -m "chore: release ${TAG}"
+          git tag -a "${TAG}" -m "${TAG}"
+          # All or nothing: never a tag without its bump commit, or the reverse.
+          if ! git push --atomic origin HEAD:main "refs/tags/${TAG}"; then
+            git fetch origin main
+            if [[ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD~1)" ]]; then
+              if [[ "$LEVEL" != "patch" ]]; then
+                echo "::error::main advanced while this run prepared ${TAG}; nothing was pushed, and the ${LEVEL} bump requested by ${MERGE_SHA} was not applied. The queued run releases the new tip as a patch; push the intended tag by hand to apply the ${LEVEL} bump."
+                exit 1
+              fi
+              echo "::warning::main advanced while this run prepared ${TAG}; nothing was pushed. The release run queued for the new tip releases it."
+              exit 0
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+              echo "::error::Tag ${TAG} reached origin while this run prepared it; nothing was pushed."
+              exit 1
+            fi
+            echo "::error::Push to protected main was rejected. RELEASE_PAT must be an admin-owned token with Contents: write on this repository, and branch protection must keep 'Do not allow bypassing the above settings' off. See docs/releasing.md."
+            exit 1
+          fi
+          # Notes are generated from the commits since the previous tag.
+          # release-binaries.yml attaches the platform archives to this release.
+          gh release create "${TAG}" --title "Bahamut Launcher ${TAG}" --target main --generate-notes
+          echo "Released ${TAG}"

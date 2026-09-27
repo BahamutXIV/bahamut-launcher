@@ -2,11 +2,17 @@ name: Checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to check out instead of the calling event's commit"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: Install Node.js
@@ -83,6 +90,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Tauri Linux dependencies
         run: |
@@ -103,10 +112,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Install llvm-mingw
         shell: bash
@@ -150,6 +159,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust toolchain (from rust-toolchain.toml)
         run: rustup show
@@ -158,10 +169,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --locked
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Configure x86 client module
         run: cmake -S client -B out/client-debug -G "Visual Studio 17 2022" -A Win32
@@ -200,6 +211,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust toolchain (from rust-toolchain.toml)
         run: rustup show
@@ -208,7 +221,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Install llvm-mingw
         shell: bash

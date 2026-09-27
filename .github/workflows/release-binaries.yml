@@ -1,10 +1,21 @@
 name: Release Binaries
 
+# Builds the launcher archive for each platform at a vX.Y.Z tag (normally the
+# tag release.yml pushes), verifies every archive against its SHA-256 sidecar,
+# and attaches the six files to that tag's GitHub Release. A manual run either
+# rebuilds and re-attaches an existing tag or builds the selected branch
+# without publishing. See docs/releasing.md.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vMAJOR.MINOR.PATCH tag to rebuild and re-attach. Leave empty to build the selected branch without publishing."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -12,35 +23,66 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# Reruns for one tag serialize; different tags do not block each other.
 concurrency:
-  group: release-${{ github.repository }}-${{ github.ref }}
+  group: release-binaries-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  validate-tag:
-    name: Validate release tag
+  resolve:
+    name: Resolve release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      label: ${{ steps.resolve.outputs.label }}
+      publish: ${{ steps.resolve.outputs.publish }}
     steps:
-      - name: Check tag shape
-        if: github.event_name == 'push'
+      - name: Resolve the build ref and asset label
+        id: resolve
         shell: bash
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "release tags must match vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
-            exit 1
+          if [[ "$EVENT_NAME" == push ]]; then
+            tag="$REF_NAME"
+          else
+            tag="$INPUT_TAG"
           fi
+          if [[ -n "$tag" ]]; then
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "release tags must match vMAJOR.MINOR.PATCH[-PRERELEASE]: $tag" >&2
+              exit 1
+            fi
+            ref="refs/tags/$tag"
+            label="$tag"
+            publish="true"
+          else
+            ref="$SHA"
+            label="dev-${SHA:0:7}"
+            publish="false"
+          fi
+          {
+            echo "tag=$tag"
+            echo "ref=$ref"
+            echo "label=$label"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
 
   checks:
     name: Full checks
-    needs: validate-tag
+    needs: resolve
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
 
   build:
     name: Build (${{ matrix.display_name }})
-    needs: checks
+    needs: [resolve, checks]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -49,16 +91,38 @@ jobs:
           # The native client module targets the Visual Studio 2022 Win32 toolchain.
           - display_name: Windows
             os: windows-2022
+            target: windows-x86_64
+            launcher: target/release/bahamut-launcher-shell.exe
           - display_name: Linux
             os: ubuntu-latest
+            target: linux-x86_64
+            launcher: target/release/bahamut-launcher-shell
+          # One executable for Apple Silicon and Intel, built on the arm64 runner.
           - display_name: macOS
-            os: ${{ format('macos-{0}-intel', '15') }}
+            os: macos-latest
+            target: macos-universal
+            launcher: target/universal-apple-darwin/release/bahamut-launcher-shell
+    env:
+      ASSET_NAME: bahamut-launcher-${{ needs.resolve.outputs.label }}-${{ matrix.target }}
+      LAUNCHER_BINARY: ${{ matrix.launcher }}
+      TARGET: ${{ matrix.target }}
+      # build.rs stamps the runtime identity from this tag, or from git describe
+      # for a branch build.
+      BAHAMUT_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Fetch tags so build.rs can stamp the release via git describe.
+          ref: ${{ needs.resolve.outputs.ref }}
           fetch-depth: 0
+
+      - name: Record the built commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/commit"
+          git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
+          cat "$RUNNER_TEMP/commit/$TARGET"
 
       - name: Install Tauri Linux dependencies
         if: runner.os == 'Linux'
@@ -73,8 +137,14 @@ jobs:
       - name: Install Rust toolchain (from rust-toolchain.toml)
         run: rustup show
 
+      - name: Add the Intel macOS target
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin
+
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Configure x86 client module
         if: runner.os == 'Windows'
@@ -127,25 +197,49 @@ jobs:
         run: cmake --build out/client-mingw --config Release --target bahamut-loader bahamut screenshot discord-rpc
 
       - name: Build release binary
-        env:
-          BAHAMUT_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-        run: cargo build --release -p bahamut-launcher-shell
+        if: runner.os != 'macOS'
+        run: cargo build --release --locked -p bahamut-launcher-shell
+
+      - name: Build universal release binary
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --target aarch64-apple-darwin -p bahamut-launcher-shell
+          cargo build --release --locked --target x86_64-apple-darwin -p bahamut-launcher-shell
+          mkdir -p "$(dirname "$LAUNCHER_BINARY")"
+          lipo -create \
+            target/aarch64-apple-darwin/release/bahamut-launcher-shell \
+            target/x86_64-apple-darwin/release/bahamut-launcher-shell \
+            -output "$LAUNCHER_BINARY"
+          # Apple Silicon refuses an unsigned executable, so sign the combined file ad hoc.
+          codesign --force --sign - "$LAUNCHER_BINARY"
+          codesign --verify --verbose=2 "$LAUNCHER_BINARY"
+          archs="$(lipo -archs "$LAUNCHER_BINARY")"
+          echo "universal archs: $archs"
+          for arch in arm64 x86_64; do
+            case " $archs " in
+              *" $arch "*) ;;
+              *)
+                echo "universal binary is missing the $arch slice" >&2
+                exit 1
+                ;;
+            esac
+          done
 
       - name: Build Windows update helper
         if: runner.os == 'Windows'
-        run: cargo build --release --bin bahamut-update-helper
+        run: cargo build --release --locked --bin bahamut-update-helper
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          REVISION: ${{ github.sha }}
         run: |
-          $name = "bahamut-launcher-$env:REVISION-windows-x86_64"
+          $name = $env:ASSET_NAME
           $staging = Join-Path $env:RUNNER_TEMP "bahamut-release-staging-$env:GITHUB_RUN_ID"
           $dist = Join-Path $env:RUNNER_TEMP "bahamut-release-dist-$env:GITHUB_RUN_ID"
           ./scripts/windows_release_archive_manifest_and_cleanliness.ps1 `
-            -LauncherBinary target/release/bahamut-launcher-shell.exe `
+            -LauncherBinary $env:LAUNCHER_BINARY `
             -ClientBuildDirectory out/client-release/Release `
             -HelperBinary target/release/bahamut-update-helper.exe `
             -StagingRoot $staging `
@@ -161,19 +255,20 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         env:
-          REVISION: ${{ github.sha }}
+          # Keep AppleDouble sidecars out of the archive when bsdtar runs on macOS.
+          COPYFILE_DISABLE: "1"
         run: |
           set -euo pipefail
-          test "$(uname -m)" = x86_64
-          platform=$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]')
-          name="bahamut-launcher-${REVISION}-${platform}-x86_64"
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            test "$(uname -m)" = x86_64
+          fi
           mkdir -p dist
           ./scripts/stage-unix-release.sh \
-            --launcher target/release/bahamut-launcher-shell \
+            --launcher "$LAUNCHER_BINARY" \
             --client-build out/client-mingw \
             --destination staging
-          tar -czf "dist/$name.tar.gz" -C staging .
-          ( cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256" )
+          tar -czf "dist/$ASSET_NAME.tar.gz" -C staging .
+          ( cd dist && shasum -a 256 "$ASSET_NAME.tar.gz" > "$ASSET_NAME.tar.gz.sha256" )
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -182,13 +277,22 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      - name: Upload the built commit
+        uses: actions/upload-artifact@v4
+        with:
+          name: commit-${{ runner.os }}
+          path: ${{ runner.temp }}/commit/*
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub release
-    needs: build
-    if: github.event_name == 'push'
+    needs: [resolve, build]
+    if: needs.resolve.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -197,19 +301,24 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Download built commits
+        uses: actions/download-artifact@v4
+        with:
+          pattern: commit-*
+          path: build-commits
+
       - name: Validate archives and checksums
         shell: bash
-        env:
-          REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
+          prefix="bahamut-launcher-${TAG}"
           expected=(
-            "bahamut-launcher-${REVISION}-windows-x86_64.zip"
-            "bahamut-launcher-${REVISION}-windows-x86_64.zip.sha256"
-            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz"
-            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz.sha256"
-            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"
-            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz.sha256"
+            "$prefix-windows-x86_64.zip"
+            "$prefix-windows-x86_64.zip.sha256"
+            "$prefix-linux-x86_64.tar.gz"
+            "$prefix-linux-x86_64.tar.gz.sha256"
+            "$prefix-macos-universal.tar.gz"
+            "$prefix-macos-universal.tar.gz.sha256"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if ! diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}" | sort); then
@@ -218,9 +327,9 @@ jobs:
           fi
 
           for archive in \
-            "bahamut-launcher-${REVISION}-windows-x86_64.zip" \
-            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz" \
-            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"; do
+            "$prefix-windows-x86_64.zip" \
+            "$prefix-linux-x86_64.tar.gz" \
+            "$prefix-macos-universal.tar.gz"; do
             checksum="$(sha256sum "release-assets/$archive" | cut -d' ' -f1)"
             expected_line="$checksum  $archive"
             actual_line="$(<"release-assets/$archive.sha256")"
@@ -230,29 +339,15 @@ jobs:
             fi
           done
 
-      - name: Create GitHub release
+      - name: Verify the tag resolves to the built commit
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG_NAME: ${{ github.ref_name }}
-          REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          assets=(
-            "release-assets/bahamut-launcher-${REVISION}-windows-x86_64.zip"
-            "release-assets/bahamut-launcher-${REVISION}-windows-x86_64.zip.sha256"
-            "release-assets/bahamut-launcher-${REVISION}-linux-x86_64.tar.gz"
-            "release-assets/bahamut-launcher-${REVISION}-linux-x86_64.tar.gz.sha256"
-            "release-assets/bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"
-            "release-assets/bahamut-launcher-${REVISION}-macos-x86_64.tar.gz.sha256"
-          )
-          release_args=()
-          if [[ "$TAG_NAME" == *-* ]]; then
-            release_args+=(--prerelease)
-          fi
-          if ! tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG_NAME" --jq '[.object.type, .object.sha] | @tsv')"; then
-            echo "failed to resolve remote tag: $TAG_NAME" >&2
+          if ! tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '[.object.type, .object.sha] | @tsv')"; then
+            echo "failed to resolve remote tag: $TAG" >&2
             exit 1
           fi
           resolved_type=''
@@ -275,12 +370,72 @@ jobs:
                 ;;
             esac
           done
-          if [[ "$resolved_type" != 'commit' || "$resolved_sha" != "$REVISION" ]]; then
-            echo "remote tag resolves to $resolved_type $resolved_sha, expected commit $REVISION" >&2
+          if [[ "$resolved_type" != 'commit' ]]; then
+            echo "remote tag $TAG did not resolve to a commit" >&2
             exit 1
           fi
-          gh release create "$TAG_NAME" "${assets[@]}" \
-            --verify-tag \
-            --generate-notes \
-            --title "Bahamut Launcher $TAG_NAME" \
-            "${release_args[@]}"
+          echo "tag $TAG resolves to commit $resolved_sha"
+          for file in build-commits/*/*; do
+            built="$(<"$file")"
+            if [[ "$built" != "$resolved_sha" ]]; then
+              echo "$file was built from $built, but tag $TAG resolves to $resolved_sha" >&2
+              exit 1
+            fi
+          done
+
+      - name: Attach assets to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          release_args=()
+          if [[ "$TAG" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          # release.yml normally created the notes-only release already. A
+          # manually pushed tag creates it here; --verify-tag refuses to
+          # fabricate a tag, and the trailing view tolerates a lost race.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --generate-notes --title "Bahamut Launcher $TAG" "${release_args[@]}" \
+              || gh release view "$TAG" >/dev/null
+          fi
+          # --clobber replaces same-named assets so reruns are idempotent.
+          gh release upload "$TAG" release-assets/* --clobber
+          echo "Attached $(find release-assets -maxdepth 1 -type f | wc -l) files to release $TAG"
+
+      - name: Announce the release on Discord
+        # A tag push announces once; a manual rebuild must not re-announce an old tag.
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          PROJECT: Bahamut Launcher
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK:-}" ]]; then
+            echo "::warning::DISCORD_RELEASE_WEBHOOK_URL secret is not set; skipping the Discord announcement."
+            exit 0
+          fi
+          # jq --arg escapes every value, so the tag cannot break out of the payload.
+          payload="$(jq -n \
+            --arg project "$PROJECT" \
+            --arg tag "$TAG" \
+            --arg url "$RELEASE_URL" \
+            '{
+              username: ($project + " Releases"),
+              embeds: [{
+                title: ($project + " " + $tag),
+                description: ("A new " + $project + " release is available: " + $tag + "."),
+                url: $url,
+                color: 3447003
+              }]
+            }')"
+          # A notification failure must not fail the release; the assets are attached.
+          if curl -fsS --connect-timeout 10 --max-time 30 -X POST "$DISCORD_WEBHOOK" -H "Content-Type: application/json" -d "$payload"; then
+            echo "Announced $TAG to Discord."
+          else
+            echo "::warning::Discord announcement for $TAG failed (webhook unreachable or rejected)."
+          fi
