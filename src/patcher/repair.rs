@@ -3091,7 +3091,7 @@ mod tests {
 
     #[test]
     fn verification_omits_valid_rows_but_counts_the_full_inventory() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
 
         let verified = verify(&fixture.game, &fixture.cache, &fixture.package).unwrap();
@@ -3105,7 +3105,7 @@ mod tests {
 
     #[test]
     fn verification_hashes_equal_length_corruption_and_repair_preserves_user_state() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let user_state = fixture.game.join("user");
         fs::create_dir_all(&user_state).unwrap();
@@ -3165,7 +3165,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_quoted_and_restored_from_the_verified_archive_cache() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let missing = managed(&fixture.game, &fixture.package, "data/client.dat");
         fs::remove_file(&missing).unwrap();
@@ -3192,7 +3192,7 @@ mod tests {
 
     #[test]
     fn unresolved_managed_path_is_never_overwritten() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let managed_path = managed(&fixture.game, &fixture.package, "data/client.dat");
         fs::remove_file(&managed_path).unwrap();
@@ -3213,7 +3213,7 @@ mod tests {
     fn unreadable_managed_file_blocks_repair() {
         use std::os::windows::fs::OpenOptionsExt;
 
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let path = managed(&fixture.game, &fixture.package, "data/client.dat");
         let _exclusive_read = OpenOptions::new()
@@ -3233,7 +3233,7 @@ mod tests {
 
     #[test]
     fn invalid_cached_zip_is_quoted_as_a_full_transfer_and_revalidated_before_repair() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let expected_cache = fixture.cache.join(format!(
             "{}-{}.object",
@@ -3269,7 +3269,7 @@ mod tests {
 
     #[test]
     fn insufficient_cache_or_game_space_blocks_before_creating_repair_state() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let quote = RepairQuote {
             full_archive_bytes: 100,
@@ -3286,7 +3286,7 @@ mod tests {
 
     #[test]
     fn interrupted_publication_can_be_recovered_without_file_selection() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let file = find_file(&fixture.package, "data/client.dat").unwrap();
         let live = join_relative(&fixture.game, &file.path);
@@ -3325,7 +3325,7 @@ mod tests {
 
     #[test]
     fn recovery_accepts_a_legitimate_journal_larger_than_one_megabyte() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let mut fixture = fixture(temporary.path());
         let padding = "a".repeat(128);
         let extras = (0..6_000)
@@ -3387,7 +3387,7 @@ mod tests {
 
     #[test]
     fn interrupted_move_publication_before_journal_update_recovers_and_retries() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let file = find_file(&fixture.package, "data/client.dat").unwrap();
         let live = join_relative(&fixture.game, &file.path);
@@ -3415,7 +3415,7 @@ mod tests {
 
     #[test]
     fn repair_is_idempotent_when_every_managed_file_is_valid() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let fixture = fixture(temporary.path());
         let result = run_repair(&fixture.game, "https://unused.invalid/", &fixture).unwrap();
         assert!(result.complete);
@@ -3424,7 +3424,7 @@ mod tests {
 
     #[test]
     fn cancel_while_paused_during_verification_leaves_managed_files_untouched() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let mut fixture = fixture(temporary.path());
         add_large_managed_file(&mut fixture, "zz-large.dat", 64 * 1024 * 1024);
         let corrupt_path = managed(&fixture.game, &fixture.package, "data/client.dat");
@@ -3479,7 +3479,7 @@ mod tests {
 
     #[test]
     fn cancel_during_final_verification_rolls_back_published_repairs() {
-        let temporary = tempfile::tempdir().unwrap();
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
         let mut fixture = fixture(temporary.path());
         add_large_managed_file(&mut fixture, "zz-large.dat", 64 * 1024 * 1024);
         let repaired_path = managed(&fixture.game, &fixture.package, "data/client.dat");

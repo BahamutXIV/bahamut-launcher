@@ -130,7 +130,7 @@ jobs:
       - name: Configure x86 client module (cross)
         run: |
           cmake -S client -B out/client-mingw \
-            -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/client/cmake/llvm-mingw-i686.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT"
 
@@ -232,7 +232,7 @@ jobs:
       - name: Configure x86 client module (cross)
         run: |
           cmake -S client -B out/client-mingw \
-            -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/client/cmake/llvm-mingw-i686.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT"
 

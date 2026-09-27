@@ -8,7 +8,7 @@
 #
 # Usage:
 #   cmake -S client -B out/client-mingw \
-#     -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+#     -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" \
 #     -DCMAKE_BUILD_TYPE=Release
 #
 # The toolchain root is taken from -DLLVM_MINGW_ROOT=<dir>, then the

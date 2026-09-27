@@ -26,7 +26,7 @@ are not supported.
 
 ```bash
 cmake -S client -B out/client-mingw \
-  -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_MINGW_ROOT=<dir>
 cmake --build out/client-mingw
@@ -52,7 +52,7 @@ Configure with the emulator, then build and run CTest:
 
 ```bash
 cmake -S client -B out/client-mingw \
-  -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_MINGW_ROOT=<dir> \
   -DCMAKE_CROSSCOMPILING_EMULATOR=$PWD/client/tools/run-under-wine.sh
