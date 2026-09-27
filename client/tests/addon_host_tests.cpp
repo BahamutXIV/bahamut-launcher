@@ -1,4 +1,5 @@
 #include "addon_host.h"
+#include "enemy_cast.h"
 #include "packet_observer.h"
 #include "player_state.h"
 #include "target_distance.h"
@@ -152,10 +153,59 @@ void ResetDrawCapture(DrawCapture& capture)
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc != 15)
+    if (argc != 17)
     {
-        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <targethp-manifest> <combatparser-manifest> <targetlines-manifest> <settings> <chat-logs>\n";
+        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <enemycast-manifest> <targethp-manifest> <customtimer-manifest> <combatparser-manifest> <targetlines-manifest> <settings> <chat-logs>\n";
         return 2;
+    }
+    bahamut_client::PlayerStateService  castPlayer;
+    bahamut_client::PlayerStateSnapshot castPlayerSnapshot;
+    castPlayerSnapshot.actorId = 0x10000001u;
+    castPlayerSnapshot.zoneId  = 1u;
+    if (!castPlayer.Publish(castPlayerSnapshot))
+    {
+        std::cerr << "enemy cast test player state failed\n";
+        return 1;
+    }
+    bahamut_client::EnemyCastService castService(&castPlayer, nullptr);
+    packet_observer::GameMessage     actorState;
+    actorState.opcode   = 0x0134u;
+    actorState.sourceId = 0x40000001u;
+    actorState.payload  = { 2u, 0u, 0u, 0u, 0u, 0u, 0u, 0u };
+    castService.Observe(actorState);
+    const auto engagedRows = castService.Snapshot();
+    if (engagedRows.size() != 1u || engagedRows.front().casting ||
+        engagedRows.front().name != "Watching for next skill")
+    {
+        std::cerr << "engaged enemy did not show an idle cast row\n";
+        return 1;
+    }
+    actorState.payload[0] = 0u;
+    castService.Observe(actorState);
+    if (!castService.Snapshot().empty())
+    {
+        std::cerr << "passive enemy kept an idle cast row\n";
+        return 1;
+    }
+    packet_observer::GameMessage lateAction;
+    lateAction.opcode     = 0x013Cu;
+    lateAction.payload    = std::vector<std::uint8_t>(0x28u);
+    lateAction.payload[0] = 1u;
+    lateAction.payload[3] = 0x40u;
+    castService.Observe(lateAction);
+    if (!castService.Snapshot().empty())
+    {
+        std::cerr << "late battle action restored a passive enemy row\n";
+        return 1;
+    }
+    actorState.payload[0] = 2u;
+    castService.Observe(actorState);
+    actorState.payload[0] = 1u;
+    castService.Observe(actorState);
+    if (!castService.Snapshot().empty())
+    {
+        std::cerr << "dead enemy kept an idle cast row\n";
+        return 1;
     }
     const std::filesystem::path                fpsManifest(argv[1]);
     const std::filesystem::path                errorIsolationManifest(argv[2]);
@@ -165,16 +215,16 @@ int wmain(int argc, wchar_t** argv)
     const std::filesystem::path                zonenameManifest(argv[6]);
     const std::filesystem::path                packetloggerManifest(argv[7]);
     const std::filesystem::path                faultPacketloggerManifest(argv[8]);
-    const std::array<std::filesystem::path, 2> lockManifests = {
-        argv[9], argv[10]
+    const std::array<std::filesystem::path, 4> lockManifests = {
+        argv[9], argv[10], argv[11], argv[12]
     };
-    const std::array<std::string_view, 2> lockIds = {
-        "distance", "targethp"
+    const std::array<std::string_view, 4> lockIds = {
+        "distance", "enemycast", "targethp", "customtimer"
     };
-    const std::filesystem::path combatParserManifest(argv[11]);
-    const std::filesystem::path targetlinesManifest(argv[12]);
-    const std::filesystem::path settings(argv[13]);
-    const std::filesystem::path chatLogs(argv[14]);
+    const std::filesystem::path combatParserManifest(argv[13]);
+    const std::filesystem::path targetlinesManifest(argv[14]);
+    const std::filesystem::path settings(argv[15]);
+    const std::filesystem::path chatLogs(argv[16]);
     const std::time_t           now = std::time(nullptr);
     std::tm                     local{};
     localtime_s(&local, &now);
@@ -211,7 +261,9 @@ int wmain(int argc, wchar_t** argv)
              settings / L"pos" / L"settings.ini",
              settings / L"wiki" / L"settings.ini",
              settings / L"distance" / L"settings.ini",
+             settings / L"enemycast" / L"settings.ini",
              settings / L"targethp" / L"settings.ini",
+             settings / L"customtimer" / L"settings.ini",
              settings / L"combatparser" / L"settings.ini",
              dailyChatLog,
              namedChatLog,
@@ -1312,7 +1364,7 @@ end
     bahamut_client::TargetDistanceService targetService(&targetPlayer, nullptr);
     AddonHost                             targetHost(&targetPlayer);
     targetHost.SetTargetDistanceService(&targetService);
-    targetHost.LoadManifests({ lockManifests[0], lockManifests[1] }, settings, chatLogs);
+    targetHost.LoadManifests({ lockManifests[0], lockManifests[2] }, settings, chatLogs);
     if (!targetPlayer.Publish(targetPlayerSnapshot) || targetHost.LoadedCount() != 2)
     {
         std::cerr << "target addons did not load with player state\n";

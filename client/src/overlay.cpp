@@ -358,10 +358,11 @@ void DrawAddonWindow(void* context, const char* addonId, const char* title, cons
                                 ImVec2(0.0f, 0.5f));
         ImGui::SetNextWindowSizeConstraints(ImVec2(380.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
     }
-    else if (id == "targethp")
+    else if (id == "targethp" || id == "customtimer")
     {
+        const float horizontalPosition = id == "targethp" ? 0.25f : 0.75f;
         ImGui::SetNextWindowPos(ImVec2(
-                                    viewport->WorkPos.x + viewport->WorkSize.x * 0.25f,
+                                    viewport->WorkPos.x + viewport->WorkSize.x * horizontalPosition,
                                     viewport->WorkPos.y + 16.0f),
                                 ImGuiCond_FirstUseEver,
                                 ImVec2(0.5f, 0.0f));
@@ -373,6 +374,14 @@ void DrawAddonWindow(void* context, const char* addonId, const char* title, cons
                                     viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
                                 ImGuiCond_FirstUseEver,
                                 ImVec2(1.0f, 0.5f));
+    }
+    else if (id == "enemycast")
+    {
+        ImGui::SetNextWindowPos(ImVec2(
+                                    viewport->WorkPos.x + viewport->WorkSize.x * 0.75f,
+                                    viewport->WorkPos.y + 80.0f),
+                                ImGuiCond_FirstUseEver,
+                                ImVec2(0.5f, 0.0f));
     }
     else if (headerless)
     {

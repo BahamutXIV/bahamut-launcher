@@ -362,7 +362,15 @@ mod tests {
     fn gameplay_overlay_lock_commands_are_discoverable() {
         for (id, text) in [
             ("distance", include_str!("../../addons/distance/addon.toml")),
+            (
+                "enemycast",
+                include_str!("../../addons/enemycast/addon.toml"),
+            ),
             ("targethp", include_str!("../../addons/targethp/addon.toml")),
+            (
+                "customtimer",
+                include_str!("../../addons/customtimer/addon.toml"),
+            ),
         ] {
             let manifest = toml::from_str::<AddonManifest>(text).unwrap();
             assert_eq!(manifest.id, id);

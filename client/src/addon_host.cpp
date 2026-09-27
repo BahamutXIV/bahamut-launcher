@@ -2,6 +2,8 @@
 
 #include "actor_name.h"
 #include "area_names.h"
+#include "custom_timer.h"
+#include "enemy_cast.h"
 #include "player_state.h"
 #include "target_distance.h"
 
@@ -200,6 +202,8 @@ struct AddonHost::Instance
     const AddonWindowSink*                 drawSink             = nullptr;
     bahamut_client::PlayerStateService*    playerState          = nullptr;
     bahamut_client::TargetDistanceService* targetDistance       = nullptr;
+    bahamut_client::CustomTimerService*    customTimer          = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast            = nullptr;
     const AddonClipboardSink*              clipboardSink        = nullptr;
     const AddonChatSink*                   chatSink             = nullptr;
     const AddonUrlSink*                    urlSink              = nullptr;
@@ -259,6 +263,26 @@ void AddonHost::SetTargetDistanceService(
     for (const auto& addon : addons_)
     {
         addon->targetDistance = targetDistance;
+    }
+}
+
+void AddonHost::SetCustomTimerService(
+    bahamut_client::CustomTimerService* customTimer)
+{
+    customTimer_ = customTimer;
+    for (const auto& addon : addons_)
+    {
+        addon->customTimer = customTimer;
+    }
+}
+
+void AddonHost::SetEnemyCastService(
+    bahamut_client::EnemyCastService* enemyCast)
+{
+    enemyCast_ = enemyCast;
+    for (const auto& addon : addons_)
+    {
+        addon->enemyCast = enemyCast;
     }
 }
 
@@ -398,7 +422,7 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
     {
         return true;
     }
-    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
     if (addon == nullptr)
     {
         return false;
@@ -471,7 +495,7 @@ bool AddonHost::Reload(std::string_view addonId)
         combatDropped_ = 0;
     }
     Close(**found);
-    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
     if (replacement == nullptr)
     {
         addons_.erase(found);
@@ -560,8 +584,8 @@ bool AddonHost::TargetlinesEnabled() const
 bool AddonHost::HasCommandAddons() const
 {
     return IsLoaded("pos") || IsLoaded("fps") || IsLoaded("wiki") ||
-           IsLoaded("distance") || IsLoaded("targethp") ||
-           IsLoaded("combatparser") || IsLoaded("packetlogger");
+           IsLoaded("distance") || IsLoaded("enemycast") || IsLoaded("targethp") ||
+           IsLoaded("customtimer") || IsLoaded("combatparser") || IsLoaded("packetlogger");
 }
 
 bool AddonHost::DispatchCommand(std::string_view command)
@@ -1040,6 +1064,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     AddonHost*                             owner,
     bahamut_client::PlayerStateService*    playerState,
     bahamut_client::TargetDistanceService* targetDistance,
+    bahamut_client::CustomTimerService*    customTimer,
+    bahamut_client::EnemyCastService*      enemyCast,
     const AddonClipboardSink*              clipboardSink,
     const AddonChatSink*                   chatSink,
     const AddonUrlSink*                    urlSink)
@@ -1061,6 +1087,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     addon->owner          = owner;
     addon->playerState    = playerState;
     addon->targetDistance = targetDistance;
+    addon->customTimer    = customTimer;
+    addon->enemyCast      = enemyCast;
     addon->clipboardSink  = clipboardSink;
     addon->chatSink       = chatSink;
     addon->urlSink        = urlSink;
@@ -1145,6 +1173,14 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     if (addon->id == "targethp")
     {
         registerFunction("target_hp", &LuaTargetHp);
+    }
+    if (addon->id == "customtimer")
+    {
+        registerFunction("custom_timer", &LuaCustomTimer);
+    }
+    if (addon->id == "enemycast")
+    {
+        registerFunction("enemy_casts", &LuaEnemyCasts);
     }
     registerFunction("window", &LuaWindow);
     registerFunction("raw_text", &LuaRawText);
@@ -1762,6 +1798,63 @@ int AddonHost::LuaTargetHp(lua_State* state)
         lua_pushnil(state);
     }
     return 4;
+}
+
+int AddonHost::LuaCustomTimer(lua_State* state)
+{
+    auto*      addon    = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto snapshot = addon != nullptr && addon->customTimer != nullptr
+                              ? addon->customTimer->Snapshot()
+                              : std::nullopt;
+    if (!snapshot)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    lua_newtable(state);
+    lua_pushlstring(state, snapshot->title.data(), snapshot->title.size());
+    lua_setfield(state, -2, "instance_name");
+    lua_pushlstring(state, snapshot->objective.data(), snapshot->objective.size());
+    lua_setfield(state, -2, "objective");
+    lua_pushinteger(state, static_cast<lua_Integer>(snapshot->remainingSeconds));
+    lua_setfield(state, -2, "remaining_seconds");
+    return 1;
+}
+
+int AddonHost::LuaEnemyCasts(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    lua_newtable(state);
+    if (addon == nullptr || addon->enemyCast == nullptr)
+    {
+        return 1;
+    }
+    const auto casts = addon->enemyCast->Snapshot();
+    for (std::size_t index = 0; index < std::min<std::size_t>(casts.size(), 4u); ++index)
+    {
+        const auto& cast = casts[index];
+        lua_newtable(state);
+        lua_pushinteger(state, static_cast<lua_Integer>(cast.actorId));
+        lua_setfield(state, -2, "actor_id");
+        lua_pushinteger(state, static_cast<lua_Integer>(cast.commandId));
+        lua_setfield(state, -2, "command_id");
+        lua_pushlstring(state, cast.name.data(), cast.name.size());
+        lua_setfield(state, -2, "name");
+        lua_pushlstring(state, cast.actorName.data(), cast.actorName.size());
+        lua_setfield(state, -2, "actor_name");
+        lua_pushnumber(state, cast.remainingSeconds);
+        lua_setfield(state, -2, "remaining_seconds");
+        lua_pushnumber(state, cast.durationSeconds);
+        lua_setfield(state, -2, "duration_seconds");
+        lua_pushnumber(state, cast.progress);
+        lua_setfield(state, -2, "progress");
+        lua_pushboolean(state, cast.casting);
+        lua_setfield(state, -2, "casting");
+        lua_pushboolean(state, cast.completed);
+        lua_setfield(state, -2, "completed");
+        lua_rawseti(state, -2, static_cast<int>(index + 1));
+    }
+    return 1;
 }
 
 int AddonHost::LuaWindow(lua_State* state)

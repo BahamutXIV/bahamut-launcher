@@ -2,7 +2,9 @@
 #include "addon_host.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
+#include "custom_timer.h"
 #include "dat_overlay.h"
+#include "enemy_cast.h"
 #include "input.h"
 #include "native_plugin_host.h"
 #include "object_distance.h"
@@ -266,6 +268,8 @@ public:
         }
         addonHost_.SetPlayerStateService(&playerState_);
         addonHost_.SetTargetDistanceService(&targetDistance_);
+        addonHost_.SetCustomTimerService(&customTimer_);
+        addonHost_.SetEnemyCastService(&enemyCast_);
         addonHost_.SetActorNameService(&actorNames_);
         addonHost_.SetClipboardSink({ nullptr, &SetAddonClipboardText });
         addonHost_.SetChatSink({ nullptr, &PrintAddonChatText });
@@ -290,6 +294,8 @@ public:
                                     actorNames_.Observe(message);
                                     targetDistance_.Observe(message);
                                     targetlines_.Observe(message);
+                                    customTimer_.Observe(message);
+                                    enemyCast_.Observe(message);
                                     addonHost_.QueueCombatResult(message);
                                 });
         packetObserver_.SetFrameSink([this](packet_observer::Direction    direction,
@@ -519,6 +525,8 @@ private:
     bahamut_client::ActorNameService      actorNames_{ &playerState_ };
     bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
     bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
+    bahamut_client::CustomTimerService    customTimer_;
+    bahamut_client::EnemyCastService      enemyCast_{ &playerState_, &actorNames_ };
     packet_observer::PacketObserver       packetObserver_;
     bahamut_client::ObjectDistanceService objectDistance_;
     bahamut_client::CameraZoomService     cameraZoom_;

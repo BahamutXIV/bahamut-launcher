@@ -33,7 +33,9 @@ $chatlogsAddonDestination = Join-Path $destinationPath 'addons\chatlogs'
 $zonenameAddonDestination = Join-Path $destinationPath 'addons\zonename'
 $packetloggerAddonDestination = Join-Path $destinationPath 'addons\packetlogger'
 $combatParserAddonDestination = Join-Path $destinationPath 'addons\combatparser'
+$customTimerAddonDestination = Join-Path $destinationPath 'addons\customtimer'
 $distanceAddonDestination = Join-Path $destinationPath 'addons\distance'
+$enemyCastAddonDestination = Join-Path $destinationPath 'addons\enemycast'
 $targetHpAddonDestination = Join-Path $destinationPath 'addons\targethp'
 $fpsAddonDestination = Join-Path $destinationPath 'addons\fps'
 $posAddonDestination = Join-Path $destinationPath 'addons\pos'
@@ -45,7 +47,9 @@ foreach ($directory in @(
     $zonenameAddonDestination
     $packetloggerAddonDestination
     $combatParserAddonDestination
+    $customTimerAddonDestination
     $distanceAddonDestination
+    $enemyCastAddonDestination
     $targetHpAddonDestination
     $fpsAddonDestination
     $posAddonDestination
@@ -87,8 +91,12 @@ $copies = @(
     @{ Source = Join-Path $repositoryRoot 'addons/packetlogger/packetlogger.lua'; Destination = Join-Path $packetloggerAddonDestination 'packetlogger.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/combatparser/addon.toml'; Destination = Join-Path $combatParserAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/combatparser/combatparser.lua'; Destination = Join-Path $combatParserAddonDestination 'combatparser.lua' }
+    @{ Source = Join-Path $repositoryRoot 'addons/customtimer/addon.toml'; Destination = Join-Path $customTimerAddonDestination 'addon.toml' }
+    @{ Source = Join-Path $repositoryRoot 'addons/customtimer/customtimer.lua'; Destination = Join-Path $customTimerAddonDestination 'customtimer.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/distance/addon.toml'; Destination = Join-Path $distanceAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/distance/distance.lua'; Destination = Join-Path $distanceAddonDestination 'distance.lua' }
+    @{ Source = Join-Path $repositoryRoot 'addons/enemycast/addon.toml'; Destination = Join-Path $enemyCastAddonDestination 'addon.toml' }
+    @{ Source = Join-Path $repositoryRoot 'addons/enemycast/enemycast.lua'; Destination = Join-Path $enemyCastAddonDestination 'enemycast.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/targethp/addon.toml'; Destination = Join-Path $targetHpAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/targethp/targethp.lua'; Destination = Join-Path $targetHpAddonDestination 'targethp.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/fps/addon.toml'; Destination = Join-Path $fpsAddonDestination 'addon.toml' }

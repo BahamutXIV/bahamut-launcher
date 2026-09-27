@@ -171,6 +171,10 @@ add_library(bahamut SHARED
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/custom_timer.cpp
+    src/custom_timer.h
+    src/enemy_cast.cpp
+    src/enemy_cast.h
     src/player_state.cpp
     src/player_state.h
     src/packet_observer.cpp
@@ -311,11 +315,38 @@ add_executable(bahamut-input-policy-tests
 )
 target_include_directories(bahamut-input-policy-tests PRIVATE src)
 
+add_executable(bahamut-custom-timer-tests
+    src/custom_timer.cpp
+    src/custom_timer.h
+    tests/custom_timer_tests.cpp
+)
+target_include_directories(bahamut-custom-timer-tests PRIVATE src)
+
+add_executable(bahamut-enemy-cast-tests
+    src/actor_name.cpp
+    src/actor_name.h
+    src/enemy_cast.cpp
+    src/enemy_cast.h
+    src/player_state.cpp
+    src/player_state.h
+    tests/enemy_cast_tests.cpp
+)
+target_include_directories(bahamut-enemy-cast-tests PRIVATE
+    api
+    src
+    vendor/minhook/include
+)
+target_link_libraries(bahamut-enemy-cast-tests PRIVATE minhook)
+
 add_executable(bahamut-addon-host-tests
     src/actor_name.cpp
     src/actor_name.h
     src/addon_host.cpp
     src/addon_host.h
+    src/custom_timer.cpp
+    src/custom_timer.h
+    src/enemy_cast.cpp
+    src/enemy_cast.h
     src/player_state.cpp
     src/player_state.h
     src/target_distance.cpp
@@ -339,6 +370,10 @@ add_executable(bahamut-command-boundary-tests
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/custom_timer.cpp
+    src/custom_timer.h
+    src/enemy_cast.cpp
+    src/enemy_cast.h
     src/player_state.cpp
     src/player_state.h
     src/retail_identity.cpp
@@ -515,13 +550,17 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/packetlogger/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fault-packetlogger/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/distance/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/enemycast/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targethp/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/customtimer/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/combatparser/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targetlines/addon.toml
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-settings
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )
 add_test(NAME bahamut-command-boundary COMMAND bahamut-command-boundary-tests)
+add_test(NAME bahamut-custom-timer COMMAND bahamut-custom-timer-tests)
+add_test(NAME bahamut-enemy-cast COMMAND bahamut-enemy-cast-tests)
 add_test(NAME bahamut-player-state COMMAND bahamut-player-state-tests)
 add_test(NAME bahamut-target-distance COMMAND bahamut-target-distance-tests)
 add_test(NAME bahamut-world-projection COMMAND bahamut-world-projection-tests)

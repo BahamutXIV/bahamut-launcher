@@ -539,8 +539,12 @@ const CLIENT_EXTENSION_PATHS: &[&str] = &[
     "addons/packetlogger/packetlogger.lua",
     "addons/combatparser/addon.toml",
     "addons/combatparser/combatparser.lua",
+    "addons/customtimer/addon.toml",
+    "addons/customtimer/customtimer.lua",
     "addons/distance/addon.toml",
     "addons/distance/distance.lua",
+    "addons/enemycast/addon.toml",
+    "addons/enemycast/enemycast.lua",
     "addons/fps/addon.toml",
     "addons/fps/fps.lua",
     "addons/pos/addon.toml",
@@ -1264,7 +1268,9 @@ fn validate_archive_directory(
                 | "addons/zonename"
                 | "addons/packetlogger"
                 | "addons/combatparser"
+                | "addons/customtimer"
                 | "addons/distance"
+                | "addons/enemycast"
                 | "addons/fps"
                 | "addons/pos"
                 | "addons/targethp"
