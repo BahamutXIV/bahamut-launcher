@@ -6,7 +6,7 @@ resolver = "3"
 
 # release.yml sets this version and src-tauri/tauri.conf.json's version from the release tag; workspace fields inherit via `<field>.workspace = true`.
 [workspace.package]
-version = "1.0.0"
+version = "0.0.1"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
