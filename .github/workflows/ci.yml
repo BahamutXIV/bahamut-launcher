@@ -62,26 +62,14 @@ jobs:
         with:
           args: -color
 
-      - name: Check documentation links
-        run: node scripts/check-markdown-links.mjs
-
-  lua-format:
-    name: Lua format
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Install Lua formatter
         run: python tools/format_lua.py install
 
       - name: Check Lua formatting
         run: python tools/format_lua.py check
+
+      - name: Check documentation links
+        run: node scripts/check-markdown-links.mjs
 
   workspace:
     name: Checks (Linux)

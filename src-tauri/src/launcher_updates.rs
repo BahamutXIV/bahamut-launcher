@@ -1925,7 +1925,7 @@ mod tests {
 
     #[test]
     fn pending_update_requires_an_explicit_operation() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let pending = PendingUpdate {
             schema_version: 1,
             target: root.path().to_path_buf(),
@@ -1957,7 +1957,7 @@ mod tests {
 
     #[test]
     fn missing_config_is_blocked_without_network() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let status = get_launcher_update_status(root.path());
         assert_eq!(status.state, "blocked");
         assert!(status.message.contains("launcher-updates.json"));
@@ -1970,7 +1970,7 @@ mod tests {
 
     #[test]
     fn missing_bootstrap_blocks_before_configured_loopback_endpoints_are_read() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         fs::create_dir(root.path().join("config")).unwrap();
         fs::write(root.path().join("config/key.bin"), [0; 32]).unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
@@ -2027,7 +2027,7 @@ mod tests {
 
     #[test]
     fn signed_downgrade_is_rejected_before_offer_is_persisted() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let lower = fixture.release("0.9.0");
@@ -2043,7 +2043,7 @@ mod tests {
 
     #[test]
     fn new_signed_offer_rejects_legacy_seed_overlay_manifest() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let next = fixture.legacy_release("1.1.0");
@@ -2064,7 +2064,7 @@ mod tests {
 
     #[test]
     fn new_signed_offer_requires_the_official_overlay_manifest() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let mut next = fixture.release("1.1.0");
@@ -2087,7 +2087,7 @@ mod tests {
 
     #[test]
     fn apply_rejects_legacy_seed_overlay_manifest_on_a_new_offer() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let next = fixture.legacy_release("1.1.0");
@@ -2132,7 +2132,7 @@ mod tests {
 
     #[test]
     fn verified_monotonic_offer_is_persisted_with_its_signed_receipt() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let next = fixture.release("1.1.0");
@@ -2161,7 +2161,7 @@ mod tests {
 
     #[test]
     fn metadata_check_is_download_free_and_apply_downloads_before_handoff() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let next = fixture.release("1.1.0");
@@ -2223,7 +2223,7 @@ mod tests {
 
     #[test]
     fn tampered_signature_is_rejected_and_stage_is_a_sibling() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
         fixture.prepare_root(root.path(), "1.0.0");
         let mut offer = fixture.release("1.1.0");
@@ -2256,7 +2256,7 @@ mod tests {
             fixture.key.public_key().as_ref(),
         )
         .unwrap();
-        let temp = tempfile::tempdir().unwrap();
+        let temp = crate::test_support::tempdir().unwrap();
         let target = temp.path().join("install");
         let stage = temp.path().join("stage");
         fs::create_dir(&target).unwrap();
@@ -2315,7 +2315,7 @@ mod tests {
             version: &str,
             overlay_ownership: FileOwnership,
         ) -> FixtureRelease {
-            let temp = tempfile::tempdir().unwrap();
+            let temp = crate::test_support::tempdir().unwrap();
             let archive_path = temp.path().join("launcher.zip");
             let exe = b"fixture launcher executable";
             let helper = b"fixture trusted update helper";

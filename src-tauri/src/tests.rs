@@ -33,18 +33,6 @@ use crate::presentation::{
 };
 use crate::state::{BackupIpcState, GameIpcState, PatcherIpcState, PatcherRun};
 
-/// Temporary directory whose ancestors are real directories: macOS places
-/// `env::temp_dir()` under `/var`, a symlink the installer's path checks refuse.
-/// Windows keeps the plain path because `canonicalize` yields a verbatim prefix.
-/// Mirrors `test_support::tempdir` in the core crate's `patcher` module.
-fn tempdir() -> std::io::Result<tempfile::TempDir> {
-    #[cfg(windows)]
-    let base = std::env::temp_dir();
-    #[cfg(not(windows))]
-    let base = std::env::temp_dir().canonicalize()?;
-    tempfile::Builder::new().tempdir_in(base)
-}
-
 #[test]
 fn game_state_reserves_one_launch_and_releases_on_exit() {
     let state = Arc::new(GameIpcState::default());
@@ -796,7 +784,7 @@ fn poisoned_patcher_state_returns_error() {
 fn content_worker_reserves_game_and_backups_until_download_stops() {
     use std::io::Read;
     use std::net::TcpListener;
-    let temp = tempdir().unwrap();
+    let temp = crate::test_support::tempdir().unwrap();
     let game_dir = temp.path().join("game");
     std::fs::create_dir(&game_dir).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -895,7 +883,7 @@ fn active_game_or_backup_rejects_content_before_worker_dispatch() {
 fn shutdown_joins_slow_writer_before_allowing_a_new_start() {
     let state = PatcherIpcState::default();
     let shared = bahamut_launcher::patcher::PatcherShared::new();
-    let temp = tempdir().unwrap();
+    let temp = crate::test_support::tempdir().unwrap();
     let output = temp.path().join("patch-output.tmp");
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
@@ -994,7 +982,7 @@ fn idle_shutdown_is_immediate_and_paused_shutdown_cancels() {
 #[test]
 fn shutdown_cancels_and_joins_a_real_paused_patcher_worker() {
     let state = PatcherIpcState::default();
-    let temp = tempdir().unwrap();
+    let temp = crate::test_support::tempdir().unwrap();
     let shared = PatcherShared::new();
     shared.request_pause();
     let worker_shared = Arc::clone(&shared);
