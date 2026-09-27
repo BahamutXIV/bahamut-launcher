@@ -1,6 +1,6 @@
 [workspace]
 members = ["src-tauri"]
-# icon-gen has its own lockfile; see docs/troubleshooting.md for regeneration.
+# icon-gen has its own lockfile; see docs/development.md#generated-icon-assets.
 exclude = ["tools/icon-gen"]
 resolver = "3"
 

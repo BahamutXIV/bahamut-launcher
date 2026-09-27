@@ -38,8 +38,7 @@ launcher bugs and focused feature requests in the [issue tracker](https://github
 ## Documentation
 
 Use the [documentation index](docs/README.md) for setup, configuration,
-extension packages, troubleshooting, development, and release procedures.
-For development, see [Development](docs/development.md).
+extension packages, and troubleshooting.
 
 ## Acknowledgement
 

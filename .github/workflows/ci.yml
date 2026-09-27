@@ -71,6 +71,12 @@ jobs:
       - name: Check documentation links
         run: node scripts/check-markdown-links.mjs
 
+      - name: Test content intake output safety
+        run: python scripts/test-intake-full-client.py
+
+      - name: Test Unix package publication
+        run: python scripts/test-unix-package.py
+
   workspace:
     name: Checks (Linux)
     runs-on: ubuntu-latest

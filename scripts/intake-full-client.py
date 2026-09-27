@@ -5,6 +5,8 @@ import argparse
 import collections
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 import runpy
 import stat
@@ -168,6 +170,35 @@ def inspect_archive(path):
     return base_files, final_files, excluded, empty_directories, len(metadata)
 
 
+def validate_distinct_output(archive, output):
+    if archive.resolve() == output.resolve():
+        fail("Archive input and manifest output must be different files.")
+    if output.is_symlink():
+        fail("Manifest output must not be a symbolic link.")
+    if output.exists() and os.path.samefile(archive, output):
+        fail("Archive input and manifest output refer to the same file.")
+
+
+def write_manifest(archive, output, manifest):
+    validate_distinct_output(archive, output)
+    payload = (json.dumps(manifest, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=output.parent, prefix=f".{output.name}.", suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Archive inspection can take time; recheck before replacing the output.
+        validate_distinct_output(archive, output)
+        os.replace(temporary, output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, required=True)
@@ -175,6 +206,7 @@ def main():
     parser.add_argument("--staging-bytes", type=int, required=True)
     args = parser.parse_args()
     try:
+        validate_distinct_output(args.archive, args.output)
         base_files, final_files, excluded, empty_dirs, metadata_count = inspect_archive(args.archive)
         final_bytes = sum(item["length"] for item in final_files)
         if args.staging_bytes < final_bytes:
@@ -199,7 +231,7 @@ def main():
                 "staging_bytes": args.staging_bytes,
             },
         }
-        args.output.write_text(json.dumps(manifest, ensure_ascii=True, separators=(",", ":")) + "\n", encoding="ascii")
+        write_manifest(args.archive, args.output, manifest)
         print(json.dumps({"archive_sha256": ARCHIVE_SHA256, "base_files": len(base_files),
                           "final_files": len(final_files), "excluded_files": len(excluded),
                           "empty_directories": len(empty_dirs), "apple_metadata_files": metadata_count,

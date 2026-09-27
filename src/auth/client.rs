@@ -202,7 +202,7 @@ fn ensure_trailing_slash(url: &mut url::Url) {
 }
 
 fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "127.0.0.1" | "localhost" | "::1")
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
 }
 
 async fn decode_response<Resp: DeserializeOwned>(
@@ -320,6 +320,13 @@ mod tests {
     fn new_accepts_loopback_http() {
         AuthClient::new("http://127.0.0.1:8080/api/v1").unwrap();
         AuthClient::new("http://localhost:8080/api/v1").unwrap();
+        AuthClient::new("http://[::1]:8080/api/v1").unwrap();
+    }
+
+    #[test]
+    fn new_rejects_non_loopback_ipv6_http() {
+        let error = AuthClient::new("http://[2001:db8::1]:8080/api/v1").unwrap_err();
+        assert!(matches!(error, AuthClientError::InsecureNonLoopback(_)));
     }
 
     #[test]

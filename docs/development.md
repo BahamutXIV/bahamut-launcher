@@ -128,6 +128,15 @@ library. Its synthetic tests need no game files or storage credentials:
 
 ```powershell
 python scripts/test-package-game-content.py
+python scripts/test-intake-full-client.py
+```
+
+On Linux or macOS, test package publication with synthetic build and staging
+inputs. This checks destination links and file preservation, not compilation
+or game launch:
+
+```bash
+python3 scripts/test-unix-package.py
 ```
 
 Full-client intake is optional because it reads the complete retail ZIP. Use
@@ -208,6 +217,18 @@ Run `bahamut-launcher` from the staged folder. On macOS and Linux the tree
 carries the loader, `bahamut.dll`, and the plugins and addons maintained in this
 repository, so Play takes the extension launch. The bare Cargo shell has none
 of them.
+
+## Additional launcher logs
+
+To enable debug detail in a staged Windows package, run from the repository root:
+
+```powershell
+$env:RUST_LOG = "bahamut_launcher=debug,wry=warn"
+.\out\dev\bahamut-launcher.exe
+```
+
+Use the complete staged package, not the unpackaged Cargo shell. Review logs
+for private paths and account information before sharing them.
 
 ## Exact-binary checks
 

@@ -93,6 +93,11 @@ pub(crate) fn launch_game_inner(
         .map_err(|error| translate_client_error(error, AuthOp::Login))?;
     let game_dir = resolve_game_dir_for_preferences(&config.preferences)
         .ok_or_else(|| AuthError::bare("no-install"))?;
+    if game_dir.is_dir() && patcher::repair::recovery_pending(&game_dir) {
+        return Err(AuthError::server(
+            "Game repair recovery is required. Choose Repair Install in Settings before launching.",
+        ));
+    }
     if !patcher::check_game_version(&game_dir) {
         return Err(AuthError::bare("not-patched"));
     }

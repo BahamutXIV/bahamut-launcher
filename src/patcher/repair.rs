@@ -403,6 +403,32 @@ struct CacheStatus {
     problem: Option<String>,
 }
 
+/// A recovery directory blocks launch even when executable and version files are intact.
+/// Inspection failures also block readiness; only Repair may recover or remove this state.
+pub fn recovery_pending(destination: &Path) -> bool {
+    let Ok(game) = fs::canonicalize(destination) else {
+        return true;
+    };
+    let Ok(transaction) = transaction_path(&game) else {
+        return true;
+    };
+    !matches!(fs::symlink_metadata(transaction),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn acquire_repair_lock(game: &Path) -> Result<crate::atomic_fs::ExclusiveProcessLock, String> {
+    // Keep this sibling file after release: deleting it could split the lock across inodes.
+    let mut lock_path = transaction_path(game)?.into_os_string();
+    lock_path.push(".lock");
+    crate::atomic_fs::try_lock_exclusive(Path::new(&lock_path)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            "Another launcher is repairing this game directory. Wait for it to finish.".into()
+        } else {
+            format!("Could not lock the game directory for repair: {error}")
+        }
+    })
+}
+
 /// Resolve a selected game directory through the same safety checks as verification and repair.
 pub fn canonical_game_root(destination: &Path) -> Result<PathBuf, String> {
     resolve_existing_directory(destination)
@@ -450,6 +476,7 @@ fn repair_all_inner(
     package.validate()?;
     let sources = repair_sources(package)?;
     let game = resolve_existing_directory(destination)?;
+    let _repair_lock = acquire_repair_lock(&game)?;
     let cache_path = resolve_cache_path(cache)?;
     let package_sha256 = package_identity(package);
     let transaction = transaction_path(&game)?;
@@ -3089,6 +3116,113 @@ mod tests {
         fs::write(large_path, bytes).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn dangling_recovery_link_blocks_readiness_without_being_removed() {
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
+        let fixture = fixture(temporary.path());
+        let transaction = transaction_path(&fixture.game).unwrap();
+        std::os::unix::fs::symlink(temporary.path().join("missing"), &transaction).unwrap();
+        assert!(recovery_pending(&fixture.game));
+        assert!(!crate::patcher::check_game_version(&fixture.game));
+        assert!(
+            fs::symlink_metadata(transaction)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn second_process_cannot_recover_active_repair() {
+        const CHILD_ROOT: &str = "BAHAMUT_TEST_REPAIR_LOCK_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let root = PathBuf::from(root);
+            let package: BasePackage =
+                serde_json::from_slice(&fs::read(root.join("package.json")).unwrap()).unwrap();
+            let error = repair_all(
+                &root.join("game"),
+                "https://unused.invalid/",
+                &root.join("cache"),
+                &package,
+                &RepairShared::new(),
+            )
+            .unwrap_err();
+            assert!(error.contains("Another launcher is repairing"), "{error}");
+            return;
+        }
+
+        let temporary = crate::patcher::test_support::tempdir().unwrap();
+        let fixture = fixture(temporary.path());
+        let game = canonical_game_root(&fixture.game).unwrap();
+        let lock = acquire_repair_lock(&game).unwrap();
+        let file = find_file(&fixture.package, "data/client.dat").unwrap();
+        let live = join_relative(&game, &file.path);
+        fs::write(&live, b"corrupt original").unwrap();
+        let before = scan_selected(&game, &[file]);
+        let identity = package_identity(&fixture.package);
+        let transaction = transaction_path(&game).unwrap();
+        create_transaction(&transaction, &fixture.package, &identity).unwrap();
+        let owner_bytes = fs::read(transaction.join(OWNER_FILE)).unwrap();
+        fs::write(
+            temporary.path().join("package.json"),
+            serde_json::to_vec(&fixture.package).unwrap(),
+        )
+        .unwrap();
+
+        for journaled in [false, true] {
+            if journaled {
+                write_staged_bytes(
+                    &transaction.join(STAGED_DIR),
+                    file,
+                    &fixture.contents["data/client.dat"],
+                )
+                .unwrap();
+                let journal = make_journal(&identity, &before, Vec::new()).unwrap();
+                write_journal(&transaction, &journal).unwrap();
+            }
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "patcher::repair::tests::second_process_cannot_recover_active_repair",
+                    "--nocapture",
+                ])
+                .env(CHILD_ROOT, temporary.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "child failed: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "child test was not discovered: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(fs::read(transaction.join(OWNER_FILE)).unwrap(), owner_bytes);
+            assert_eq!(fs::read(&live).unwrap(), b"corrupt original");
+            assert_eq!(transaction.join(JOURNAL_FILE).is_file(), journaled);
+            if journaled {
+                assert_eq!(
+                    fs::read(join_relative(&transaction.join(STAGED_DIR), &file.path)).unwrap(),
+                    fixture.contents["data/client.dat"]
+                );
+            }
+        }
+        drop(lock);
+        assert!(
+            run_repair(&game, "https://unused.invalid/", &fixture)
+                .unwrap()
+                .complete
+        );
+        assert!(!transaction.exists());
+        assert_eq!(fs::read(live).unwrap(), fixture.contents["data/client.dat"]);
+        // The stable lock remains reusable after the completed repair.
+        assert!(acquire_repair_lock(&game).is_ok());
+    }
+
     #[test]
     fn verification_omits_valid_rows_but_counts_the_full_inventory() {
         let temporary = crate::patcher::test_support::tempdir().unwrap();
@@ -3308,8 +3442,14 @@ mod tests {
         write_journal(&transaction, &journal).unwrap();
         let rollback = join_relative(&rollback_root, &file.path);
         fs::rename(&live, &rollback).unwrap();
+        assert!(!crate::patcher::check_game_version(&fixture.game));
+        assert_ne!(
+            crate::install_check::check_install(Some(&fixture.game)).state,
+            crate::install_check::InstallState::Ready
+        );
         crate::atomic_fs::rename_noreplace(&join_relative(&staged_root, &file.path), &live)
             .unwrap();
+        assert!(recovery_pending(&fixture.game));
         let mut journal = journal;
         journal.files[0].published = true;
         write_journal(&transaction, &journal).unwrap();
@@ -3321,6 +3461,11 @@ mod tests {
         assert!(result.complete);
         assert!(!transaction.exists());
         assert_eq!(fs::read(live).unwrap(), fixture.contents["data/client.dat"]);
+        assert!(!recovery_pending(&fixture.game));
+        assert_eq!(
+            crate::install_check::check_install(Some(&fixture.game)).state,
+            crate::install_check::InstallState::Ready
+        );
     }
 
     #[test]

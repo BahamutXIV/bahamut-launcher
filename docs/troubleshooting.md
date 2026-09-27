@@ -2,48 +2,11 @@
 
 [Back to the documentation index](README.md)
 
-This guide covers current launcher behavior. Use [Configuration](configuration.md),
-[Authentication](auth.md), and [Handshake](handshake.md) for the authoritative
-file and protocol shapes.
-
-## Build and test
-
-Routine prerequisites and checks are in [Development](development.md). The
-hosted workflow also builds and tests the x86 client module on Windows and
-cross-compiles it on macOS without running the tests. See
-[`client/README.md`](../client/README.md) for local commands and test coverage.
-
-### Windows package staging
-
-Use the staged package commands in [Development](development.md#staged-windows-package).
-If staging fails, close the launcher and game before retrying. Updates retain
-local settings, custom packages, and existing `scripts/default.txt` commands.
-The current package stays intact when a build or staging step fails. For
-multi-platform archives, use [Release process](releasing.md).
-
-### Exact-binary checks
-
-See [Development](development.md#exact-binary-checks) for the workflow and
-input identity. A failed exact-binary check identifies a specific pinned input
-or patch fact. It does not establish live client behavior.
-
-## Tauri and WebView
-
-For shell prerequisites and commands, see
-[Development](development.md#tauri-and-webview). The frontend is vanilla HTML,
-CSS, and JavaScript with no separate build step. Diagnose runtime issues with a
-[staged Windows package](development.md#staged-windows-package) or a
-[staged Linux or macOS tree](development.md#staged-linux-or-macos-tree). A bare
-Cargo shell has no extensions. Copying only `bahamut-loader.exe` and
-`bahamut.dll` is not enough because Screenshot and DiscordRPC are enabled by
-default and their DLLs are required.
-
-For more launcher detail, enable the existing structured logger:
-
-```powershell
-$env:RUST_LOG = "bahamut_launcher=debug,wry=warn"
-.\out\dev\bahamut-launcher.exe
-```
+For installation steps, see [Getting started](getting-started.md). Use
+[Install failures](#install-failures), [Authentication failures](#authentication-failures),
+or [Game closes after Play](#game-closes-after-play) for the problem you are seeing.
+For further help, [join the Bahamut Discord](https://discord.gg/PxK5RJYQjm).
+Build, test, and package instructions are in [Development](development.md).
 
 ## Launcher logs
 
@@ -219,8 +182,10 @@ the Home Install Strip, with Pause and Cancel controls. A verified ZIP of the
 complete client can be reused. Without it, even one damaged file may require
 downloading the complete archive.
 
-The launcher recovers its interrupted repair transaction before starting a new
-one. It verifies the managed inventory again before reporting success.
+An interrupted repair blocks login and Play until recovery finishes. Choose
+Repair Install again and keep any recovery folder named in an error. A repair
+running in another launcher must finish before a second repair can start.
+The launcher verifies the managed inventory again before reporting success.
 
 An unresolved read or access error is not permission to replace that file.
 Resolve the reported access problem and retry Repair Install. Stop the game

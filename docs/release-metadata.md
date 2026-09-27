@@ -20,7 +20,7 @@ The metadata file is UTF-8 JSON. Its detached signature contains exactly 64 raw
 Ed25519 bytes over the file's exact bytes. Reformatting JSON invalidates the
 signature. Metadata is limited to 1 MiB, the game delivery manifest to 64 MiB,
 and accepted state to 2 MiB. The verifier rejects unsupported fields and schema
-versions and reads exactly 32 raw public key bytes from a separate file selected
+versions and reads exactly 32 raw public key bytes from a separately selected
 file. Metadata cannot authorize its own key.
 
 The version 1 fields are:
