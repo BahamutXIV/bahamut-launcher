@@ -1,7 +1,7 @@
 //! Bounded portable backups for retail user data and writable extension state.
 
 use std::collections::{BTreeSet, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -253,18 +253,21 @@ fn create_backup_in(
         return Err(BackupError::NoSource(target.label()));
     }
 
+    ensure_no_link_ancestors(&layout.launcher_root, &layout.backups_root)?;
     fs::create_dir_all(&layout.backups_root)
         .map_err(|error| io_error("creating the backup folder", &layout.backups_root, error))?;
-    let archive_path = unique_archive_path(target, &layout.backups_root, timestamp);
-    let partial_path = archive_path.with_extension("zip.partial");
-    let result = write_archive(&partial_path, &files).and_then(|_| {
-        fs::rename(&partial_path, &archive_path)
-            .map_err(|error| io_error("publishing the backup", &archive_path, error))
-    });
-    if let Err(error) = result {
-        let _ = fs::remove_file(&partial_path);
-        return Err(error);
-    }
+    ensure_no_link_ancestors(&layout.launcher_root, &layout.backups_root)?;
+    let (partial_path, file) = create_backup_partial(&layout.backups_root)?;
+    let result = write_archive(file, &partial_path, &files)
+        .and_then(|()| publish_backup(target, &layout.backups_root, timestamp, &partial_path));
+    let archive_path = match result {
+        Ok(path) => path,
+        Err(error) => {
+            // This operation exclusively created the partial file.
+            let _ = fs::remove_file(&partial_path);
+            return Err(error);
+        }
+    };
     if let Err(error) = prune_backups(target, &layout.backups_root) {
         tracing::warn!(
             path = %layout.backups_root.display(),
@@ -342,19 +345,115 @@ fn backup_timestamp() -> String {
     Local::now().format("%Y%m%d-%H%M%S-%3f").to_string()
 }
 
-fn unique_archive_path(target: BackupTarget, root: &Path, timestamp: &str) -> PathBuf {
-    let base = format!("{}_{}", target.file_prefix(), timestamp);
-    let first = root.join(format!("{base}.zip"));
-    if !first.exists() {
-        return first;
-    }
-    for suffix in 2_u32.. {
-        let candidate = root.join(format!("{base}-{suffix}.zip"));
-        if !candidate.exists() {
-            return candidate;
+fn create_backup_partial(root: &Path) -> Result<(PathBuf, File), BackupError> {
+    loop {
+        let counter = TRANSACTION_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = root.join(format!(
+            ".bahamut-backup-{}-{counter}.partial",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(io_error("creating a backup", &path, error)),
         }
     }
-    unreachable!()
+}
+
+fn publish_backup(
+    target: BackupTarget,
+    root: &Path,
+    timestamp: &str,
+    partial: &Path,
+) -> Result<PathBuf, BackupError> {
+    loop {
+        let destination = unique_archive_path(target, root, timestamp)?;
+        match crate::atomic_fs::rename_noreplace(partial, &destination) {
+            Ok(()) => return Ok(destination),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(io_error("publishing the backup", &destination, error)),
+        }
+    }
+}
+
+fn unique_archive_path(
+    target: BackupTarget,
+    root: &Path,
+    timestamp: &str,
+) -> Result<PathBuf, BackupError> {
+    let base = format!("{}_{}", target.file_prefix(), timestamp);
+    let mut highest = 0_u32;
+    for entry in read_sorted_dir(root)? {
+        let name = entry.file_name();
+        let Some(tail) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(&base))
+            .and_then(|name| name.strip_suffix(".zip"))
+        else {
+            continue;
+        };
+        let sequence = if tail.is_empty() {
+            Some(1)
+        } else {
+            tail.strip_prefix('-')
+                .and_then(|value| value.parse::<u32>().ok())
+        };
+        highest = highest.max(sequence.unwrap_or(0));
+    }
+    // Do not reuse a lower sequence removed by retention at the same timestamp.
+    let mut sequence = highest.checked_add(1).ok_or_else(|| {
+        io_error(
+            "allocating a backup name",
+            root,
+            io::Error::other("backup sequence exhausted"),
+        )
+    })?;
+    loop {
+        let name = if sequence == 1 {
+            format!("{base}.zip")
+        } else {
+            format!("{base}-{sequence}.zip")
+        };
+        let candidate = root.join(name);
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(candidate),
+            Err(error) => return Err(io_error("checking a backup name", &candidate, error)),
+            Ok(_) => {
+                // Include dangling links and case aliases on case-insensitive filesystems.
+                sequence = sequence.checked_add(1).ok_or_else(|| {
+                    io_error(
+                        "allocating a backup name",
+                        root,
+                        io::Error::other("backup sequence exhausted"),
+                    )
+                })?;
+            }
+        }
+    }
+}
+
+fn backup_order(path: &Path) -> (String, u32) {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let stem = name.strip_suffix(".zip").unwrap_or(name);
+    if let Some((base, suffix)) = stem.rsplit_once('-')
+        && let Some((_, timestamp)) = base.split_once('_')
+        && timestamp.len() == 19
+        && timestamp.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 15) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        && let Ok(sequence) = suffix.parse::<u32>()
+        && sequence >= 2
+    {
+        return (base.to_owned(), sequence);
+    }
+    (stem.to_owned(), 1)
 }
 
 fn unique_transaction_root(parent: &Path) -> PathBuf {
@@ -460,8 +559,7 @@ fn read_sorted_dir(path: &Path) -> Result<Vec<fs::DirEntry>, BackupError> {
     Ok(entries)
 }
 
-fn write_archive(path: &Path, files: &[(PathBuf, PathBuf)]) -> Result<(), BackupError> {
-    let file = File::create(path).map_err(|error| io_error("creating a backup", path, error))?;
+fn write_archive(file: File, path: &Path, files: &[(PathBuf, PathBuf)]) -> Result<(), BackupError> {
     let mut archive = zip::ZipWriter::new(BufWriter::new(file));
     let options = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -533,7 +631,7 @@ fn latest_backup(
                 .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".zip"))
         })
         .collect::<Vec<_>>();
-    paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    paths.sort_by_key(|path| std::cmp::Reverse(backup_order(path)));
     Ok(paths.into_iter().next())
 }
 
@@ -548,7 +646,7 @@ fn prune_backups(target: BackupTarget, backups_root: &Path) -> Result<(), Backup
                 .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".zip"))
         })
         .collect::<Vec<_>>();
-    backups.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    backups.sort_by_key(|path| std::cmp::Reverse(backup_order(path)));
     for stale in backups.into_iter().skip(BACKUP_KEEP) {
         fs::remove_file(&stale)
             .map_err(|error| io_error("pruning an old backup", &stale, error))?;
@@ -1203,6 +1301,109 @@ mod tests {
                 "scripts/default.txt",
             ]
         );
+    }
+
+    #[test]
+    fn backup_collision_order_survives_retention_and_double_digit_suffixes() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = fixture_layout(&temp);
+        fs::create_dir_all(&layout.user_settings_root).unwrap();
+        let source = layout.user_settings_root.join("config.pad");
+        let timestamp = "20000103-173524-123";
+        let mut created = Vec::new();
+        for sequence in 1..=12 {
+            fs::write(&source, format!("backup {sequence}")).unwrap();
+            let path = create_backup_in(BackupTarget::UserSettings, &layout, timestamp).unwrap();
+            assert_eq!(
+                latest_backup(BackupTarget::UserSettings, &layout.backups_root).unwrap(),
+                Some(path.clone())
+            );
+            created.push(path);
+        }
+        for (index, path) in created.iter().enumerate() {
+            assert_eq!(path.exists(), index >= 12 - BACKUP_KEEP);
+        }
+        fs::write(&source, b"changed after backup").unwrap();
+        restore_latest_backup_in(BackupTarget::UserSettings, &layout).unwrap();
+        assert_eq!(fs::read(&source).unwrap(), b"backup 12");
+        fs::write(&source, b"next millisecond").unwrap();
+        let later =
+            create_backup_in(BackupTarget::UserSettings, &layout, "20000103-173524-124").unwrap();
+        assert_eq!(
+            latest_backup(BackupTarget::UserSettings, &layout.backups_root).unwrap(),
+            Some(later)
+        );
+    }
+
+    #[test]
+    fn concurrent_backups_have_distinct_complete_archives() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = fixture_layout(&temp);
+        fs::create_dir_all(&layout.user_settings_root).unwrap();
+        fs::write(layout.user_settings_root.join("config.pad"), b"pad").unwrap();
+        let timestamp = "20000103-173524-123";
+        let paths = std::thread::scope(|scope| {
+            let first =
+                scope.spawn(|| create_backup_in(BackupTarget::UserSettings, &layout, timestamp));
+            let second =
+                scope.spawn(|| create_backup_in(BackupTarget::UserSettings, &layout, timestamp));
+            [
+                first.join().unwrap().unwrap(),
+                second.join().unwrap().unwrap(),
+            ]
+        });
+        assert_ne!(paths[0], paths[1]);
+        for path in &paths {
+            assert_eq!(zip_names(path), ["config.pad"]);
+        }
+        assert_eq!(fs::read_dir(&layout.backups_root).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn backup_does_not_truncate_an_existing_partial_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = fixture_layout(&temp);
+        fs::create_dir_all(&layout.user_settings_root).unwrap();
+        fs::write(layout.user_settings_root.join("config.pad"), b"pad").unwrap();
+        fs::create_dir_all(&layout.backups_root).unwrap();
+        let partial = layout.backups_root.join("UserSettings_fixture.zip.partial");
+        fs::write(&partial, b"another operation").unwrap();
+        let archive = create_backup_in(BackupTarget::UserSettings, &layout, FIXTURE_LABEL).unwrap();
+        assert_eq!(zip_names(&archive), ["config.pad"]);
+        assert_eq!(fs::read(partial).unwrap(), b"another operation");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_preserves_partial_links_and_rejects_a_linked_output_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = fixture_layout(&temp);
+        fs::create_dir_all(&layout.user_settings_root).unwrap();
+        fs::write(layout.user_settings_root.join("config.pad"), b"pad").unwrap();
+        fs::create_dir_all(&layout.backups_root).unwrap();
+        let sentinel = temp.path().join("sentinel");
+        fs::write(&sentinel, b"keep").unwrap();
+        let partial = layout.backups_root.join("UserSettings_fixture.zip.partial");
+        std::os::unix::fs::symlink(&sentinel, &partial).unwrap();
+        create_backup_in(BackupTarget::UserSettings, &layout, FIXTURE_LABEL).unwrap();
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+        assert!(
+            fs::symlink_metadata(&partial)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+
+        let other = tempfile::tempdir().unwrap();
+        let linked_layout = fixture_layout(&other);
+        fs::create_dir_all(&linked_layout.user_settings_root).unwrap();
+        fs::write(linked_layout.user_settings_root.join("config.pad"), b"pad").unwrap();
+        fs::create_dir_all(&linked_layout.launcher_root).unwrap();
+        std::os::unix::fs::symlink(temp.path(), &linked_layout.backups_root).unwrap();
+        assert!(
+            create_backup_in(BackupTarget::UserSettings, &linked_layout, FIXTURE_LABEL).is_err()
+        );
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
     }
 
     #[test]

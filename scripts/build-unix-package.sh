@@ -62,8 +62,26 @@ require_tool() {
     command -v "$1" > /dev/null 2>&1 || fail "$1 is required; $2"
 }
 
+assert_safe_publish_path() {
+    local path="${1%/}" current
+    case "$path" in
+        "$out_root" | "$out_root"/*) ;;
+        *) fail "package destination escaped the repository output root: $path" ;;
+    esac
+    current="$path"
+    while [[ "$current" != "$repo_root" ]]; do
+        [[ ! -L "$current" ]] || fail "refusing a symbolic link in package destination: $current"
+        if [[ "$current" != "$path" && -e "$current" && ! -d "$current" ]]; then
+            fail "package destination ancestor is not a directory: $current"
+        fi
+        current="${current%/*}"
+    done
+}
+
 require_tool cmake "install CMake 3.25 or newer"
 require_tool cargo "install the Rust toolchain from rust-toolchain.toml"
+
+assert_safe_publish_path "$out_root"
 
 if [[ -z "$llvm_mingw_root" && -x "$HOME/.local/llvm-mingw/bin/i686-w64-mingw32-clang++" ]]; then
     llvm_mingw_root="$HOME/.local/llvm-mingw"
@@ -93,6 +111,8 @@ else
 fi
 launcher_binary="$repo_root/target/$cargo_profile/bahamut-launcher-shell"
 emulator="$repo_root/client/tools/run-under-wine.sh"
+assert_safe_publish_path "$destination"
+assert_safe_publish_path "$client_build"
 
 if [[ $skip_build -eq 0 ]]; then
     cmake -S "$repo_root/client" -B "$client_build" \
@@ -145,13 +165,17 @@ case "$destination" in
 esac
 [[ -z "$(find "$staging" -type l -print -quit)" ]] || fail "staging tree contains a symbolic link"
 
+assert_safe_publish_path "$destination"
 mkdir -p "$destination"
 find "$staging" -type d | while IFS= read -r directory; do
-    mkdir -p "$destination/${directory#"$staging"}"
+    target="$destination${directory#"$staging"}"
+    assert_safe_publish_path "$target"
+    mkdir -p "$target"
 done
 find "$staging" -type f | while IFS= read -r file; do
     relative="${file#"$staging"/}"
     target="$destination/$relative"
+    assert_safe_publish_path "$target"
     if [[ "$relative" == "scripts/default.txt" && -f "$target" ]]; then
         continue
     fi

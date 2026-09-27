@@ -109,7 +109,9 @@ fn collect_patch_files(root: &Path) -> Result<HashMap<String, PathBuf>, PatchPla
 
 /// Return whether `<game_location>/game.ver` records the target build.
 pub fn check_game_version(game_location: &Path) -> bool {
-    if super::installation_in_progress(game_location) {
+    if super::installation_in_progress(game_location)
+        || super::repair::recovery_pending(game_location)
+    {
         return false;
     }
     match fs::read_to_string(game_location.join("game.ver")) {

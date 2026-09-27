@@ -1,10 +1,10 @@
 [workspace]
 members = ["src-tauri"]
-# icon-gen has its own lockfile; see docs/troubleshooting.md for regeneration.
+# icon-gen has its own lockfile; see docs/development.md#generated-icon-assets.
 exclude = ["tools/icon-gen"]
 resolver = "3"
 
-# Keep src-tauri/tauri.conf.json's JSON version in sync manually; workspace fields inherit via `<field>.workspace = true`.
+# release.yml sets this version and src-tauri/tauri.conf.json's version from the release tag; workspace fields inherit via `<field>.workspace = true`.
 [workspace.package]
 version = "1.0.0"
 edition = "2024"

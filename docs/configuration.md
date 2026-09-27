@@ -485,8 +485,8 @@ Other plugin command forms remain reserved and rejected because no native
 plugin package loader exists. `/screenshot` and `/fillmode` are
 implemented only as startup binding targets. Typing them into retail chat is
 not supported. `/fps` uses the same addon command whether invoked from F12 or
-retail chat. This surface is available only at startup and is separate from the
-narrow FPS and Pos command boundary.
+retail chat. This startup interface is separate from addon commands entered in
+game chat.
 
 Every release archive carries repository addons under `addons/`, including
 `chatlogs` for daily game chat logs and `wiki` for the Bahamut wiki and

@@ -61,8 +61,8 @@ pub enum Target {
     WindowsX86_64,
     #[serde(rename = "linux-x86_64")]
     LinuxX86_64,
-    #[serde(rename = "macos-x86_64")]
-    MacosX86_64,
+    #[serde(rename = "macos-universal")]
+    MacosUniversal,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -364,7 +364,7 @@ fn validate_product_target(product: Product, target: Target) -> Result<()> {
         Product::Game => target == Target::PlatformIndependent,
         Product::Launcher => matches!(
             target,
-            Target::WindowsX86_64 | Target::LinuxX86_64 | Target::MacosX86_64
+            Target::WindowsX86_64 | Target::LinuxX86_64 | Target::MacosUniversal
         ),
     };
     if valid {
@@ -379,7 +379,7 @@ fn validate_artifact_location(metadata: &ReleaseMetadata, version: &Version) -> 
     let expected_format = match (metadata.product, metadata.target) {
         (Product::Game, Target::PlatformIndependent)
         | (Product::Launcher, Target::WindowsX86_64) => ArtifactFormat::Zip,
-        (Product::Launcher, Target::LinuxX86_64 | Target::MacosX86_64) => ArtifactFormat::TarGz,
+        (Product::Launcher, Target::LinuxX86_64 | Target::MacosUniversal) => ArtifactFormat::TarGz,
         _ => return Err(invalid("Release product and target are invalid.")),
     };
     if metadata.artifact.format != expected_format {
@@ -558,7 +558,7 @@ fn allowed_launcher_managed_path(path: &str, target: Target) -> bool {
                     | "addons/wiki/addon.toml"
                     | "addons/wiki/wiki.lua"
             ),
-            Target::LinuxX86_64 | Target::MacosX86_64 => path == "bahamut-launcher",
+            Target::LinuxX86_64 | Target::MacosUniversal => path == "bahamut-launcher",
             Target::PlatformIndependent => false,
         }
 }
@@ -587,7 +587,7 @@ fn target_name(target: Target) -> &'static str {
         Target::PlatformIndependent => "platform-independent",
         Target::WindowsX86_64 => "windows-x86_64",
         Target::LinuxX86_64 => "linux-x86_64",
-        Target::MacosX86_64 => "macos-x86_64",
+        Target::MacosUniversal => "macos-universal",
     }
 }
 
@@ -1762,7 +1762,7 @@ mod tests {
         );
         validate_metadata(&metadata, None).unwrap();
 
-        for target in [Target::LinuxX86_64, Target::MacosX86_64] {
+        for target in [Target::LinuxX86_64, Target::MacosUniversal] {
             let seed = vec![file(
                 "plugins/dats/bahamut-dats-overlay/overlay.toml",
                 b"seed",
@@ -1859,7 +1859,7 @@ mod tests {
     ) -> (ReleaseMetadata, PathBuf) {
         let format = match target {
             Target::WindowsX86_64 => ArtifactFormat::Zip,
-            Target::LinuxX86_64 | Target::MacosX86_64 => ArtifactFormat::TarGz,
+            Target::LinuxX86_64 | Target::MacosUniversal => ArtifactFormat::TarGz,
             Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
         };
         let extension = match format {

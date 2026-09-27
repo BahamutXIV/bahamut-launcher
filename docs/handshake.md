@@ -46,10 +46,10 @@ unchanged. The result is base64 encoded, then `+` becomes `-` and `/` becomes
 
 ## Session token
 
-The Bahamut API returns a 56-character lowercase hexadecimal session id. The
-launcher validates the length of server responses and requires both the length
-and hexadecimal shape for manually supplied developer tokens. Neither rule is
-claimed as a retail client requirement.
+The launcher accepts login responses only when the session ID contains exactly
+56 lowercase hexadecimal characters. Manually supplied developer tokens accept
+56 ASCII hexadecimal characters in either case. These are launcher rules, not
+verified retail token requirements.
 
 ## PE patches
 

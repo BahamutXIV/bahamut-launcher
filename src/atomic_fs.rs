@@ -21,15 +21,23 @@ pub fn try_lock_exclusive(path: &Path) -> io::Result<ExclusiveProcessLock> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        options.share_mode(0);
+        // Open the link itself so validation cannot lock an unrelated target.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
         let file = options.open(path).map_err(map_windows_lock_error)?;
+        validate_lock_file(&file)?;
         Ok(ExclusiveProcessLock { _file: file })
     }
 
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         let file = options.open(path)?;
+        validate_lock_file(&file)?;
         // SAFETY: `file` owns a valid descriptor for the duration of this call.
         let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if result == 0 {
@@ -54,6 +62,28 @@ pub fn try_lock_exclusive(path: &Path) -> io::Result<ExclusiveProcessLock> {
             "exclusive process locks are unsupported on this platform",
         ))
     }
+}
+
+#[cfg(any(windows, unix))]
+fn validate_lock_file(file: &File) -> io::Result<()> {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "process lock must be a regular file",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "process lock must not be a reparse point",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Acquire an exclusive lock, waiting until the current owner releases it.
@@ -205,6 +235,28 @@ mod tests {
 
         assert!(!source.exists());
         assert_eq!(fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
+    fn exclusive_lock_rejects_a_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let sentinel = directory.path().join("sentinel");
+        fs::write(&sentinel, b"keep").unwrap();
+        assert!(try_lock_exclusive(directory.path()).is_err());
+        assert_eq!(fs::read(sentinel).unwrap(), b"keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_lock_does_not_follow_a_symbolic_link() {
+        let directory = tempfile::tempdir().unwrap();
+        let sentinel = directory.path().join("sentinel");
+        let lock = directory.path().join("process.lock");
+        fs::write(&sentinel, b"keep").unwrap();
+        std::os::unix::fs::symlink(&sentinel, &lock).unwrap();
+        assert!(try_lock_exclusive(&lock).is_err());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+        assert!(fs::symlink_metadata(lock).unwrap().file_type().is_symlink());
     }
 
     #[test]

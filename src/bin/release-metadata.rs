@@ -14,7 +14,7 @@ use bahamut_launcher::release::{
 use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
-const USAGE: &str = "Usage:\n  release-metadata sign --metadata FILE --signature-out FILE (--key-file FILE | --key-stdin) --artifact FILE [--delivery-manifest FILE]\n  release-metadata verify --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --artifact FILE [--delivery-manifest FILE]\n  release-metadata trust --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --starting-version VERSION --artifact FILE [--delivery-manifest FILE]\n  release-metadata accept --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --artifact FILE [--delivery-manifest FILE]\n  release-metadata record-installed --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --artifact FILE [--delivery-manifest FILE]\n\nProducts: game, launcher\nTargets: platform-independent, windows-x86_64, linux-x86_64, macos-x86_64\nKey files and key stdin use raw bytes: 32-byte Ed25519 seed/public key, 64-byte signature.\nMetadata is signed and verified as its exact file bytes. Game commands require --delivery-manifest.";
+const USAGE: &str = "Usage:\n  release-metadata sign --metadata FILE --signature-out FILE (--key-file FILE | --key-stdin) --artifact FILE [--delivery-manifest FILE]\n  release-metadata verify --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --artifact FILE [--delivery-manifest FILE]\n  release-metadata trust --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --starting-version VERSION --artifact FILE [--delivery-manifest FILE]\n  release-metadata accept --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --artifact FILE [--delivery-manifest FILE]\n  release-metadata record-installed --metadata FILE --signature FILE --public-key FILE --product PRODUCT --channel stable --target TARGET --state FILE --artifact FILE [--delivery-manifest FILE]\n\nProducts: game, launcher\nTargets: platform-independent, windows-x86_64, linux-x86_64, macos-universal\nKey files and key stdin use raw bytes: 32-byte Ed25519 seed/public key, 64-byte signature.\nMetadata is signed and verified as its exact file bytes. Game commands require --delivery-manifest.";
 
 #[derive(Default)]
 struct Options {
@@ -301,7 +301,7 @@ fn parse_target(value: &str) -> Result<Target, ReleaseError> {
         "platform-independent" => Ok(Target::PlatformIndependent),
         "windows-x86_64" => Ok(Target::WindowsX86_64),
         "linux-x86_64" => Ok(Target::LinuxX86_64),
-        "macos-x86_64" => Ok(Target::MacosX86_64),
+        "macos-universal" => Ok(Target::MacosUniversal),
         _ => Err(ReleaseError::Invalid("Unknown release target.".into())),
     }
 }
@@ -358,7 +358,7 @@ fn target_name(target: Target) -> &'static str {
         Target::PlatformIndependent => "platform-independent",
         Target::WindowsX86_64 => "windows-x86_64",
         Target::LinuxX86_64 => "linux-x86_64",
-        Target::MacosX86_64 => "macos-x86_64",
+        Target::MacosUniversal => "macos-universal",
     }
 }
 
@@ -374,7 +374,12 @@ mod tests {
             parse_target("windows-x86_64").unwrap(),
             Target::WindowsX86_64
         );
+        assert_eq!(
+            parse_target("macos-universal").unwrap(),
+            Target::MacosUniversal
+        );
         assert!(parse_target("windows-aarch64").is_err());
+        assert!(parse_target("macos-x86_64").is_err());
         assert!(parse_channel("beta").is_err());
     }
 
