@@ -1,0 +1,31 @@
+/target/
+/tools/icon-gen/target/
+/out/
+/.idea/
+/.vscode/
+*.log
+*.tmp
+*.patch
+*.zip
+*.7z
+*.rar
+*.exe
+*.dll
+*.dylib
+*.so
+configs/local.toml
+settings/
+
+# Tauri build-script-generated schemas and any future codegen output.
+src-tauri/gen/
+
+# Session-scoped working notes; not part of the long-lived doc set.
+docs/active-task.md
+
+# Agent / AI tooling
+.claude/
+.agents/
+AGENTS.md
+CLAUDE.md
+docs/ai_agents/local/
+

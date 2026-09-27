@@ -1,0 +1,98 @@
+[workspace]
+members = ["src-tauri"]
+# icon-gen has its own lockfile; see docs/troubleshooting.md for regeneration.
+exclude = ["tools/icon-gen"]
+resolver = "3"
+
+# Keep src-tauri/tauri.conf.json's JSON version in sync manually; workspace fields inherit via `<field>.workspace = true`.
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+
+[package]
+name = "bahamut-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Companion launcher for the BahamutXIV FFXIV 1.23b preservation server"
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "bahamut_launcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bahamut-launcher"
+path = "src/main.rs"
+
+[[bin]]
+name = "release-metadata"
+path = "src/bin/release-metadata.rs"
+
+[dependencies]
+base64 = "0.22"
+blowfish = "0.9"
+byteorder = "1"
+chrono = "0.4"
+cipher = "0.4"
+crc32fast = "1"
+directories = "5"
+flate2 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+ring = "0.17"
+serde = { workspace = true }
+serde_json = "1"
+semver = "1"
+sha2 = "0.10"
+tar = "0.4"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "time"] }
+toml = "0.8"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
+url = "2"
+zeroize = { version = "1", features = ["serde"] }
+# Deflate and ZIP64 support portable game and local patch archives.
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+# Wine patching translates client PE RVAs to file offsets on Linux and macOS.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+object = { version = "0.36", features = ["read"] }
+
+# clock_gettime supplies the Wine launch tick; see docs/handshake.md#wine-launch.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS bundles Sikarugir Wine, downloading and extracting it to a temp dir on first launch.
+[target.'cfg(target_os = "macos")'.dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.55"
+
+[dev-dependencies]
+httpmock = "0.7"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

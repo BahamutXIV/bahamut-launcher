@@ -1,0 +1,3 @@
+client/vendor/lua/** -whitespace
+client/vendor/miniz/** -whitespace
+src-tauri/ui/assets/licenses/*.txt -whitespace
