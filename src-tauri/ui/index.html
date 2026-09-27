@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bahamut Launcher</title>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/screens.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body data-theme="dark">
+  <!-- Selected SVG glyphs are Lucide 0.548.0; see assets/licenses/Lucide-LICENSE.txt. -->
+  <div class="launcher-shell">
+    <header class="topbar" data-window-drag-region>
+      <div class="brand">
+        <img src="assets/brand-logo-night.png" alt="">
+        <span class="brand-copy">
+          <span class="brand-title" aria-label="Bahamut"><span class="brand-title-main">BAHAMUT</span></span>
+        </span>
+      </div>
+
+      <nav class="route-tabs" aria-label="Launcher" role="tablist" data-window-no-drag>
+        <button class="route-tab" type="button" role="tab" aria-selected="true" aria-controls="screen-home" data-route="home">
+          <svg class="icon" data-icon="house" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          Home
+        </button>
+        <button class="route-tab" type="button" role="tab" aria-selected="false" aria-controls="screen-extensions" data-route="extensions">
+          <svg class="icon" data-icon="plug" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
+          Extensions
+        </button>
+        <button class="route-tab" type="button" role="tab" aria-selected="false" aria-controls="screen-settings" data-route="settings">
+          <svg class="icon" data-icon="settings" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>
+          Settings
+        </button>
+      </nav>
+
+      <div class="topbar-actions">
+        <div class="utility-cluster" aria-label="Utilities" data-window-no-drag>
+          <button class="icon-button" type="button" data-utility="gamepad" aria-label="Gamepad settings" aria-pressed="false">
+            <svg class="icon" data-icon="gamepad-2" viewBox="0 0 24 24" aria-hidden="true"><line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/></svg>
+          </button>
+          <button class="icon-button" type="button" data-utility="help" aria-label="Help" aria-pressed="false">
+            <svg class="icon" data-icon="circle-question-mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+          </button>
+          <button class="icon-button" type="button" data-link="github" aria-label="Open Bahamut GitHub">
+            <svg class="icon" data-icon="github" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.28-.36 6.72-1.61 6.72-7.5A5.8 5.8 0 0 0 19.22 3 5.4 5.4 0 0 0 19.08 0S17.9-.35 15 1.5a13.4 13.4 0 0 0-7 0C5.1-.35 3.92 0 3.92 0A5.4 5.4 0 0 0 3.78 3a5.8 5.8 0 0 0-1.5 4c0 5.88 3.44 7.12 6.72 7.5A4.8 4.8 0 0 0 8 18v4"/><path d="M8 19c-3 .9-3-1.5-4-2"/></svg>
+          </button>
+          <button class="icon-button" type="button" data-link="wiki" aria-label="Open Bahamut wiki">
+            <svg class="icon" data-icon="book-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+          </button>
+          <button class="icon-button" type="button" data-utility="theme" aria-label="Use day theme">
+            <img class="theme-icon theme-icon-day" data-icon="theme-day" src="assets/theme-day.png" alt="" aria-hidden="true">
+            <img class="theme-icon theme-icon-night" data-icon="theme-night" src="assets/theme-night.png" alt="" aria-hidden="true">
+          </button>
+        </div>
+        <div class="window-cluster" aria-label="Window controls" data-window-no-drag>
+          <button class="icon-button" type="button" data-window="minimize" aria-label="Minimize window">
+            <svg class="icon" data-icon="minus" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="icon-button close" type="button" data-window="close" aria-label="Close window">
+            <svg class="icon" data-icon="x" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section class="screen" id="screen-home" role="tabpanel" data-screen="home" data-active>
+        <div class="home-layout" id="home-layout" data-lifecycle="no-valid-install">
+          <div class="home-left">
+            <article class="session-card glass-panel" id="session-card" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+              <div class="home-eyebrow" id="home-eyebrow"></div>
+              <h1 id="home-title">Account Login</h1>
+              <div id="home-session-content">
+                <form id="login-form" autocomplete="off" inert>
+                  <div class="field"><label for="login-username">Username</label><input class="input" id="login-username" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter a username..."></div>
+                  <div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" required autocomplete="off" placeholder="Enter a password..."></div>
+                  <label class="check-line"><input type="checkbox" id="login-remember" checked>Remember Login</label>
+                  <div class="inline-alert" id="login-alert" role="alert"></div>
+                  <button class="login-action" type="submit" id="login-submit" disabled>Login</button>
+                  <div class="account-links">
+                    <button class="text-button" type="button" data-action="open-register">Create account</button>
+                    <button class="text-button" type="button" data-action="open-profiles">Profiles</button>
+                  </div>
+                </form>
+              </div>
+            </article>
+            <button class="primary-action" type="button" id="home-primary" data-gamepad-region data-gamepad-region-order="4">Install</button>
+            <div class="home-version" id="launcher-version" aria-label="Launcher version">v-</div>
+          </div>
+
+          <div class="home-right">
+            <article class="news-panel glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+              <header class="news-header">
+                <h2>Recent News</h2>
+                <div class="news-actions">
+                  <button class="icon-button" type="button" data-link="discord" data-gamepad-social aria-label="Open Discord">
+                    <svg class="icon" data-icon="discord" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.08.08 0 0 0-.08.04c-.21.38-.44.86-.61 1.25a18.3 18.3 0 0 0-5.48 0 12.7 12.7 0 0 0-.62-1.25.08.08 0 0 0-.08-.04 19.7 19.7 0 0 0-4.88 1.52.07.07 0 0 0-.03.03C.53 9.05-.32 13.58.1 18.06a.08.08 0 0 0 .03.06 19.9 19.9 0 0 0 5.99 3.03.08.08 0 0 0 .08-.03c.46-.62.86-1.28 1.23-1.99a.08.08 0 0 0-.04-.11c-.65-.25-1.28-.55-1.87-.89a.08.08 0 0 1-.01-.13l.37-.29a.07.07 0 0 1 .08-.01c3.93 1.79 8.18 1.79 12.06 0a.07.07 0 0 1 .08.01l.37.29a.08.08 0 0 1-.01.13c-.59.35-1.22.64-1.87.89a.08.08 0 0 0-.04.11c.36.7.77 1.36 1.23 1.99a.08.08 0 0 0 .08.03 19.8 19.8 0 0 0 6-3.03.08.08 0 0 0 .03-.06c.5-5.18-.84-9.67-3.55-13.66a.06.06 0 0 0-.03-.03ZM8.02 15.33c-1.18 0-2.16-1.08-2.16-2.42 0-1.33.96-2.42 2.16-2.42 1.21 0 2.18 1.1 2.16 2.42 0 1.34-.96 2.42-2.16 2.42Zm7.98 0c-1.18 0-2.16-1.08-2.16-2.42 0-1.33.96-2.42 2.16-2.42 1.21 0 2.18 1.1 2.16 2.42 0 1.34-.95 2.42-2.16 2.42Z"/></svg>
+                  </button>
+                  <button class="icon-button" type="button" data-link="youtube" data-gamepad-social aria-label="Open YouTube">
+                    <svg class="icon" data-icon="youtube" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg>
+                  </button>
+                </div>
+              </header>
+              <div class="news-list" id="news-list" role="list" aria-label="Recent updates" aria-live="polite">
+                <article class="news-entry" role="listitem" tabindex="0"><div class="news-media" aria-hidden="true">B</div><div class="news-entry-content"><div class="news-date">Loading</div><div class="news-title">Checking for launcher news</div></div></article>
+              </div>
+            </article>
+            <aside class="lifecycle-strip glass-panel" id="lifecycle-strip" aria-live="polite" data-gamepad-region data-gamepad-region-order="3" tabindex="-1">
+              <div class="lifecycle-location" id="lifecycle-location" hidden>
+                <div class="lifecycle-title" id="lifecycle-location-title">Install Game</div>
+                <div class="lifecycle-location-help" id="lifecycle-location-help">Install the client. Change the destination with PATH.</div>
+                <div class="lifecycle-path-picker">
+                  <div class="lifecycle-path" id="lifecycle-location-path">Choose a folder for the new game install</div>
+                  <button class="small-button lifecycle-path-action accent-action" id="lifecycle-path-action" type="button" data-action="install-folder">PATH</button>
+                </div>
+              </div>
+              <div class="lifecycle-status" id="lifecycle-status">
+                <div class="lifecycle-summary">
+                  <div class="lifecycle-copy-block">
+                    <div class="lifecycle-title" id="lifecycle-title">Checking Local Client</div>
+                    <div class="lifecycle-copy" id="lifecycle-copy">Reading the configured install path.</div>
+                  </div>
+                  <div class="lifecycle-metric" id="lifecycle-metric"></div>
+                </div>
+                <div class="lifecycle-body" id="lifecycle-body">
+                  <div class="lifecycle-status-content">
+                    <div class="lifecycle-detail" id="lifecycle-detail"></div>
+                    <div class="inline-alert lifecycle-alert" id="patch-home-alert" aria-live="polite"></div>
+                    <div class="progress-row" id="lifecycle-progress" hidden>
+                      <div class="progress-track"><div class="progress-fill" id="lifecycle-progress-fill"></div></div>
+                      <span class="progress-text" id="lifecycle-progress-text">0%</span>
+                    </div>
+                  </div>
+                  <div class="lifecycle-actions" id="lifecycle-actions" hidden>
+                    <button class="small-button accent-action" type="button" id="lifecycle-pause">Pause</button>
+                    <button class="small-button accent-action" type="button" id="lifecycle-cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+      <section class="screen" id="screen-extensions" role="tabpanel" data-screen="extensions">
+        <div class="extensions-page">
+          <aside class="extension-library glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1" aria-label="Installed extensions">
+            <input class="input extension-search" id="extension-search" type="search" placeholder="Search extensions" autocomplete="off" aria-label="Search extensions">
+            <div class="extension-groups" id="extension-groups" aria-live="polite"><div class="extension-empty">Reading installed packages.</div></div>
+          </aside>
+          <div class="extension-detail-column">
+            <div class="extension-detail" id="extension-detail" data-gamepad-region data-gamepad-region-order="2" tabindex="-1"><div class="extension-empty">Select an installed package.</div></div>
+          </div>
+          <div class="extension-folder-actions glass-panel" data-gamepad-region data-gamepad-region-order="3" tabindex="-1">
+            <button class="secondary-button accent-action" type="button" data-extension-folder="plugins">Open Plugins Folder</button>
+            <button class="secondary-button accent-action" type="button" data-extension-folder="addons">Open Addons Folder</button>
+          </div>
+        </div>
+      </section>
+      <section class="screen" id="screen-settings" role="tabpanel" data-screen="settings">
+        <div class="settings-page">
+          <div class="settings-tabs" role="tablist" aria-label="Settings groups">
+            <button class="settings-tab" type="button" role="tab" aria-selected="true" data-settings-tab="general">General</button>
+            <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="graphics">Graphics</button>
+            <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="misc">Misc</button>
+          </div>
+          <div class="game-settings-status" id="game-settings-status" aria-live="polite"></div>
+
+          <div class="settings-pane" data-settings-pane="general" data-active>
+            <div class="settings-grid">
+              <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="close-launcher-label">Close Launcher on Game Start</div><div class="choice-row" role="group" aria-labelledby="close-launcher-label"><button class="choice-option" type="button" data-launcher-setting-choice="close_on_game_start" data-launcher-setting-value="true" aria-pressed="true">On</button><button class="choice-option" type="button" data-launcher-setting-choice="close_on_game_start" data-launcher-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="hardware-mouse-label">Hardware Mouse</div><div class="choice-row" role="group" aria-labelledby="hardware-mouse-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.hardware_mouse" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.hardware_mouse" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="game-audio-label">Sound</div><div class="choice-row" role="group" aria-labelledby="game-audio-label"><button class="choice-option" type="button" data-game-setting-choice="audio.enabled" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="audio.enabled" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="background-audio-label">Always Play Sound</div><div class="choice-row" role="group" aria-labelledby="background-audio-label"><button class="choice-option" type="button" data-game-setting-choice="audio.play_in_background" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="audio.play_in_background" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+              </article>
+              <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="display-mode-label">Display Mode</div><div class="choice-row choice-row--compact" role="group" aria-labelledby="display-mode-label"><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="windowed" aria-pressed="false">Windowed</button><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="borderless" aria-pressed="false">Borderless</button><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="fullscreen" aria-pressed="false">Fullscreen</button></div></div>
+                <div class="settings-field" id="borderless-monitor-row" role="group" tabindex="-1" data-gamepad-settings-row hidden><label class="settings-label" for="borderless-monitor">Borderless Monitor</label><div><select class="input" id="borderless-monitor" autocomplete="off" aria-describedby="borderless-monitor-status"><option value="">Default Monitor</option></select><div class="settings-status" id="borderless-monitor-status" aria-live="polite"></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-resolution">Window Resolution</label><select class="input" id="game-resolution" autocomplete="off" data-game-setting="resolution"></select></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="native-resolution-override-label">Native Resolution Override</div><div class="choice-row" role="group" aria-labelledby="native-resolution-override-label"><button class="choice-option" type="button" data-launcher-setting-choice="native_resolution_override" data-launcher-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-launcher-setting-choice="native_resolution_override" data-launcher-setting-value="false" aria-pressed="true">Off</button></div></div>
+              </article>
+            </div>
+          </div>
+
+          <div class="settings-pane" data-settings-pane="graphics">
+            <div class="settings-grid">
+              <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="multisampling-label">Multisampling</div><div class="choice-row choice-row--compact" role="group" aria-labelledby="multisampling-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="none" aria-pressed="false">No AA</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="2x" aria-pressed="false">2x</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="4x" aria-pressed="false">4x</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="8x" aria-pressed="false">8x</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-general-quality">General Drawing Quality</label><div class="settings-range"><input id="game-general-quality" type="range" min="1" max="10" step="1" autocomplete="off" data-game-setting="graphics.general_quality"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-background-quality">Background Drawing Quality</label><div class="settings-range"><input id="game-background-quality" type="range" min="1" max="5" step="1" autocomplete="off" data-game-setting="graphics.background_quality"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="object-distance-range">Extended Draw Distance</label><div class="settings-range"><input id="object-distance-range" type="range" min="0" max="4" step="1" value="0" autocomplete="off" data-object-distance-selection data-graphics-values="off,125,150,175,200" disabled><div class="settings-range-labels"><span>Off</span><span>2x</span></div><div class="settings-status" id="object-distance-status" aria-live="polite"></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-shadow-detail">Shadow Detail</label><div class="settings-range"><input id="game-shadow-detail" type="range" min="0" max="4" step="1" autocomplete="off" data-game-setting="graphics.shadow_detail" data-game-setting-values="lowest,low,standard,high,highest"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="cutscene-effects-label">Cutscene Effects</div><div class="choice-row" role="group" aria-labelledby="cutscene-effects-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+              </article>
+              <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="texture-quality-label">Texture Quality</div><div class="choice-row" role="group" aria-labelledby="texture-quality-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="low" aria-pressed="false">Low</button><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="standard" aria-pressed="false">Standard</button><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="high" aria-pressed="false">High</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-texture-filtering">Texture Filtering</label><div class="settings-range"><input id="game-texture-filtering" type="range" min="0" max="3" step="1" autocomplete="off" data-game-setting="graphics.texture_filtering" data-game-setting-values="low,standard,high,highest"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="ambient-occlusion-label">Ambient Occlusion</div><div class="choice-row" role="group" aria-labelledby="ambient-occlusion-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.ambient_occlusion" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.ambient_occlusion" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="depth-of-field-label">Depth Of Field</div><div class="choice-row" role="group" aria-labelledby="depth-of-field-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.depth_of_field" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.depth_of_field" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="camera-zoom-range">Extended Camera Zoom</label><div class="settings-range"><input id="camera-zoom-range" type="range" min="0" max="5" step="1" value="0" autocomplete="off" data-camera-zoom-selection data-graphics-values="off,11,12,13,14,15" disabled><div class="settings-range-labels"><span>Off</span><span>15</span></div><div class="settings-status" id="camera-zoom-status" aria-live="polite"></div></div></div>
+              </article>
+            </div>
+          </div>
+
+          <div class="settings-pane" data-settings-pane="misc">
+            <div class="settings-grid">
+              <article class="settings-card settings-card--locations glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+                <h2>Install Location</h2>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Install location"><div class="settings-path-picker"><div class="settings-value" id="settings-game-path">Checking...</div><button class="settings-action settings-path-action accent-action" type="button" data-settings-action="browse-game">Path</button></div></div>
+                <div class="settings-field settings-field--full settings-update-field" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Launcher update"><button class="settings-action accent-action" type="button" data-launcher-update-action="check">Check for Updates</button></div>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Repair game install"><button class="settings-action accent-action" type="button" data-game-files-action="repair">Repair Install</button></div>
+                <div class="settings-status settings-update-status" id="launcher-update-status" role="status" aria-live="polite"></div>
+              </article>
+              <article class="settings-card settings-card--client-patches glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+                <h2>User Settings and Macros</h2>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="User Settings and Macros backups"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-backup-action="create" data-backup-target="user-settings">Backup</button><button class="settings-action settings-action--secondary" type="button" data-backup-action="restore" data-backup-target="user-settings">Restore</button></div></div>
+                <h2>Extensions</h2>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Extensions backups"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-backup-action="create" data-backup-target="extensions">Backup</button><button class="settings-action settings-action--secondary" type="button" data-backup-action="restore" data-backup-target="extensions">Restore</button></div></div>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Backup and install folders"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-extension-folder="backups">Open Backup Folder</button><button class="settings-action settings-action--secondary" type="button" data-extension-folder="install">Open Install Folder</button></div></div>
+                <div class="settings-status" id="settings-backup-status" aria-live="polite"></div>
+                <div class="settings-status" id="settings-patch-status" aria-live="polite"></div>
+                <div class="settings-field settings-field--full settings-field--screenshots" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Open screenshots folder"><button class="settings-action accent-action" type="button" data-extension-folder="screenshots">Open Screenshots Folder</button></div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="screen" id="screen-register" aria-labelledby="register-page-title" data-screen="register" data-gamepad-back-route="home">
+        <div class="register-page">
+          <article class="register-card glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+            <h1 id="register-page-title">Create Account</h1>
+            <button type="button" class="icon-button account-page-back" data-action="close-register" data-gamepad-back aria-label="Back to login">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+            </button>
+            <form id="register-form" autocomplete="off" novalidate>
+              <div class="register-grid">
+                <div class="field"><label for="register-username">Username</label><input class="input" id="register-username" required autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="register-username-error"></div>
+                <p class="register-field-error" id="register-username-error" aria-live="polite"></p>
+                <div class="field"><label for="register-password">Password</label><input class="input" id="register-password" type="password" required autocomplete="off" aria-describedby="register-password-error"></div>
+                <p class="register-field-error" id="register-password-error" aria-live="polite"></p>
+                <div class="field"><label for="register-confirm">Confirm password</label><input class="input" id="register-confirm" type="password" required autocomplete="off" aria-describedby="register-confirm-error"></div>
+                <p class="register-field-error" id="register-confirm-error" aria-live="polite"></p>
+              </div>
+              <div class="inline-alert register-submit-error" id="register-alert" aria-live="polite"></div>
+              <button type="submit" class="login-action register-submit" disabled>Create account</button>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-profiles" aria-label="Profiles" data-screen="profiles" data-gamepad-back-route="home">
+        <div class="profiles-page">
+          <button type="button" class="icon-button account-page-back profiles-back" data-action="close-profiles" data-gamepad-back aria-label="Back to login">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+          </button>
+          <div class="profiles-grid">
+            <article class="profile-card glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+              <div class="field"><label for="profile-server-select">Server profile</label><select class="input" id="profile-server-select" autocomplete="off"></select></div>
+              <div class="session-summary">
+                <div class="summary-row"><div class="summary-label">Auth endpoint</div><div class="summary-value" id="profile-server-auth">Checking...</div></div>
+                <div class="summary-row"><div class="summary-label">Lobby endpoint</div><div class="summary-value" id="profile-server-lobby">Checking...</div></div>
+              </div>
+              <div class="profile-feedback" id="profile-server-select-status" role="status" aria-live="polite"></div>
+            </article>
+            <article class="profile-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+              <form class="server-form" id="profile-form" autocomplete="off">
+                <div class="field"><label for="profile-name">Display name</label><input class="input" id="profile-name" required autocomplete="off"></div>
+                <div class="field"><label for="profile-host">Host</label><input class="input" id="profile-host" required autocomplete="off"></div>
+                <div class="field"><label for="profile-auth-port">Auth port</label><input class="input" id="profile-auth-port" type="number" min="1" max="65535" required autocomplete="off"></div>
+                <div class="field"><label for="profile-lobby-port">Lobby port</label><input class="input" id="profile-lobby-port" type="number" min="1" max="65535" required autocomplete="off"></div>
+                <label class="check-line"><input type="checkbox" id="profile-https">Use HTTPS for authentication</label>
+                <button class="login-action" type="submit">Save profile</button>
+                <div class="profile-feedback" id="profile-save-status" role="status" aria-live="polite"></div>
+              </form>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-gamepad" aria-labelledby="gamepad-page-title" data-screen="gamepad" data-gamepad-back-route="home">
+        <div class="gamepad-page">
+          <div class="gamepad-grid">
+            <article class="gamepad-card glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+              <h1 id="gamepad-page-title">Gamepad Settings</h1>
+              <div class="gamepad-card-body">
+                <p class="gamepad-status" id="active-controller">No gamepad detected.</p>
+                <div class="gamepad-setting" role="group" tabindex="-1" data-gamepad-settings-row>
+                  <div class="gamepad-setting-label">Launcher Gamepad Navigation</div>
+                  <div class="choice-row"><button class="choice-option" type="button" data-gamepad-choice="true" aria-pressed="true">On</button><button class="choice-option" type="button" data-gamepad-choice="false" aria-pressed="false">Off</button></div>
+                </div>
+                <div class="gamepad-config-row">
+                  <button class="settings-action gamepad-config-action accent-action" id="gamepad-config-tool-button" type="button" data-settings-action="open-config" hidden>XIV Config</button>
+                </div>
+                <div class="gamepad-action-status" id="gamepad-action-status" role="status" aria-live="polite"></div>
+              </div>
+            </article>
+            <article class="gamepad-card gamepad-card--stub glass-panel" aria-labelledby="steam-deck-title">
+              <h1 id="steam-deck-title">Steam Deck</h1>
+              <div class="gamepad-card-body">
+                <p class="gamepad-status">Steam Deck not detected.</p>
+                <div class="gamepad-setting">
+                  <div class="gamepad-setting-label">Use Steam Deck Recommended Graphics</div>
+                  <div class="choice-row"><button class="choice-option" type="button" aria-pressed="false" disabled>On</button><button class="choice-option" type="button" aria-pressed="true" disabled>Off</button></div>
+                </div>
+                <div class="gamepad-setting">
+                  <div class="gamepad-setting-label">Force Auto-Detect Gamepad</div>
+                  <div class="choice-row"><button class="choice-option" type="button" aria-pressed="false" disabled>On</button><button class="choice-option" type="button" aria-pressed="true" disabled>Off</button></div>
+                </div>
+                <div class="gamepad-config-row">
+                  <button class="settings-action gamepad-config-action accent-action" type="button" disabled>Apply Steam Deck Defaults</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section class="screen" id="screen-help" aria-labelledby="help-page-title" data-screen="help" data-gamepad-back-route="home">
+        <div class="help-page">
+          <article class="help-shell glass-panel">
+            <header class="help-header">
+              <div class="help-copy">
+                <h1 class="help-title" id="help-page-title">Need help?</h1>
+                <p class="help-subtitle">If you need additional assistance, post your logs in <span class="help-channel">#install-support</span> in Discord.</p>
+              </div>
+              <div class="help-actions" aria-label="Help actions" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
+                <div class="help-actions-buttons">
+                  <button class="help-action primary" type="button" data-help-action="copy">Copy Logs</button>
+                  <button class="help-action" type="button" data-help-action="open">Open Logs</button>
+                </div>
+                <div class="help-status" id="help-status" role="status"></div>
+              </div>
+            </header>
+            <pre class="help-log-window" id="help-log" aria-label="Launcher logs" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">Loading launcher logs...</pre>
+          </article>
+        </div>
+      </section>
+    </main>
+    <dialog class="confirmation-dialog glass-panel" id="settings-confirmation-dialog" data-gamepad-region aria-labelledby="settings-confirmation-title" aria-describedby="settings-confirmation-copy">
+      <h2 id="settings-confirmation-title">Confirm Action</h2>
+      <p id="settings-confirmation-copy"></p>
+      <div class="confirmation-dialog-actions">
+        <button class="settings-action accent-action" id="settings-confirmation-confirm" type="button">Confirm</button>
+        <button class="settings-action settings-action--secondary" id="settings-confirmation-cancel" type="button">Cancel</button>
+      </div>
+    </dialog>
+    <dialog class="confirmation-dialog glass-panel" id="launcher-closing-dialog" aria-labelledby="launcher-closing-title" aria-describedby="launcher-closing-copy">
+      <h2 id="launcher-closing-title" tabindex="-1" autofocus>Closing Launcher</h2>
+      <p id="launcher-closing-copy" role="status">Finishing current work safely. The launcher will close automatically when it completes.</p>
+    </dialog>
+    <aside class="gamepad-prompt-bar" id="gamepad-prompts" hidden aria-label="Gamepad shortcuts">
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><img class="gamepad-prompt-bar__glyph" data-gamepad-face="confirm" src="assets/gamepad/xbox/a.png" alt="" aria-hidden="true"></span><span class="gamepad-prompt-bar__label">Confirm</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><img class="gamepad-prompt-bar__glyph" data-gamepad-face="secondary" src="assets/gamepad/xbox/x.png" alt="" aria-hidden="true"></span><span class="gamepad-prompt-bar__label">Toggle</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><img class="gamepad-prompt-bar__glyph" data-gamepad-face="settings" src="assets/gamepad/xbox/y.png" alt="" aria-hidden="true"></span><span class="gamepad-prompt-bar__label">Tabs</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><img class="gamepad-prompt-bar__glyph" data-gamepad-face="back" src="assets/gamepad/xbox/b.png" alt="" aria-hidden="true"></span><span class="gamepad-prompt-bar__label">Back</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><span class="gamepad-prompt-bar__badge" data-gamepad-badge="previous-region">LB</span><span class="gamepad-prompt-bar__badge" data-gamepad-badge="next-region">RB</span></span><span class="gamepad-prompt-bar__label">Focus</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><span class="gamepad-prompt-bar__badge" data-gamepad-badge="previous-route">LT</span><span class="gamepad-prompt-bar__badge" data-gamepad-badge="next-route">RT</span></span><span class="gamepad-prompt-bar__label">Menu</span></span>
+      <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><span class="gamepad-prompt-bar__badge" data-gamepad-badge="utility">&#x2630;</span></span><span class="gamepad-prompt-bar__label">Util</span></span>
+      <span class="gamepad-prompt-bar__item" data-gamepad-prompt-scope="contextual"><span class="gamepad-prompt-bar__glyphs"><span class="gamepad-prompt-bar__badge" data-gamepad-badge="social">&#x29c9;</span></span><span class="gamepad-prompt-bar__label">Social</span></span>
+    </aside>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

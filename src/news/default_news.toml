@@ -1,0 +1,6 @@
+# Each [[items]] block becomes a Main-screen card; edit this feed for private-server announcements, and it reloads on each UI load.
+
+[[items]]
+date = "September 27"
+title = "Open Beta is Live"
+body = "Bahamut's open beta is now live!"

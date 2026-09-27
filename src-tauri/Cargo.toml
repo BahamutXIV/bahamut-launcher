@@ -1,0 +1,52 @@
+[package]
+name = "bahamut-launcher-shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Tauri frontend shell for the Bahamut Launcher"
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "bahamut-launcher-shell"
+path = "src/main.rs"
+
+[features]
+# Build-only isolation route for comparing the direct patched launch against
+# the injected client runtime. This is intentionally not a persisted setting.
+diagnostic-no-injection = []
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+zeroize = "1"
+bahamut-launcher = { path = ".." }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.55"
+
+# The non-Windows default game directory hint resolves the user's home directory.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+directories = "5"
+
+[dev-dependencies]
+ring = "0.17"
+tempfile = "3"

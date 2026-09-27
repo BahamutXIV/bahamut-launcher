@@ -1,0 +1,6 @@
+# Use aws-lc-sys prebuilt objects so Windows MSVC builds do not require NASM.
+[env]
+AWS_LC_SYS_PREBUILT_NASM = "1"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

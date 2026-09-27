@@ -1,0 +1,20 @@
+# Embedded fresh-install profiles.
+# The first entry becomes [servers] selected in the generated launcher INI.
+
+# The hosted Bahamut test server. Its lobby listens on the stock port the
+# client learns from the patched binary, so only the host matters here.
+# Auth goes through the stegall.me nginx TLS proxy on 443; the auth
+# client refuses to send passwords over plain http to non-loopback hosts.
+[[server]]
+display_name = "Bahamut"
+host = "bahamut.stegall.me"
+auth_port = 443
+lobby_port = 54994
+use_https = true
+
+[[server]]
+display_name = "Bahamut Local"
+host = "127.0.0.1"
+auth_port = 8080
+lobby_port = 54994
+use_https = false

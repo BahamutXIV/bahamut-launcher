@@ -1,0 +1,2 @@
+id = "error-isolation-test"
+entry = "error.lua"

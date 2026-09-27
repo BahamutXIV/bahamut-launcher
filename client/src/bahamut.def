@@ -1,0 +1,4 @@
+LIBRARY bahamut
+EXPORTS
+    BahamutRuntimeApiVersion
+    BahamutRuntimeInitialize=_BahamutRuntimeInitialize@4

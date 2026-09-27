@@ -1,0 +1,3 @@
+LIBRARY screenshot
+EXPORTS
+    BahamutNativePluginGetApi=_BahamutNativePluginGetApi@12

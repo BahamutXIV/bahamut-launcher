@@ -1,0 +1,4 @@
+LIBRARY xinput1_3
+EXPORTS
+    XInputGetState=_StubXInputGetState@8
+    BahamutTestSetXInputState=_BahamutTestSetXInputState@4

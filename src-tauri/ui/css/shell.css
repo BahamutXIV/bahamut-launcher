@@ -1,0 +1,167 @@
+    * { box-sizing: border-box; }
+    [hidden] { display:none !important; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body {
+      background:var(--bg);
+      color:var(--text);
+      font:15px/1.5 var(--font-body);
+      -webkit-user-select:none;
+      user-select:none;
+    }
+    input, textarea, [contenteditable="true"], .help-log-window { -webkit-user-select:text; user-select:text; }
+    button, input, select { font:inherit; }
+    button { color:inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+      outline:none;
+      box-shadow:var(--focus);
+    }
+    body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) button:focus,
+    body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) input:focus,
+    body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) select:focus,
+    body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) [tabindex]:focus {
+      outline:none;
+      box-shadow:var(--focus);
+    }
+    body[data-input-mode="gamepad"] :is(button, a[href], [role="button"], [data-gamepad-region], .extension-row, .news-entry, .settings-field, input, select) {
+      transition:none;
+    }
+    body[data-input-mode="gamepad"] [data-gamepad-region]:focus-within {
+      outline:none;
+      box-shadow:var(--focus);
+    }
+    body[data-input-mode="gamepad"] .glass-panel[data-gamepad-region]:focus-within {
+      box-shadow:var(--focus), var(--card-shadow);
+    }
+    .launcher-shell {
+      position:relative;
+      display:flex;
+      flex-direction:column;
+      width:100%;
+      height:100%;
+      max-width:1280px;
+      max-height:800px;
+      margin:auto;
+      overflow:hidden;
+      isolation:isolate;
+    }
+    .launcher-shell::before {
+      content:"";
+      position:absolute;
+      inset:0;
+      z-index:-2;
+      background:var(--hero-image) center/cover no-repeat;
+    }
+    .launcher-shell::after {
+      content:"";
+      position:absolute;
+      inset:0;
+      z-index:-1;
+      background:var(--hero-filter);
+      pointer-events:none;
+    }
+    .topbar {
+      position:relative;
+      height:77px;
+      flex:0 0 77px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      padding:0 18px;
+      background:var(--topbar);
+      border-bottom:1px solid var(--border);
+      box-shadow:0 12px 34px rgba(0,0,0,.28);
+      user-select:none;
+    }
+    .brand {
+      display:flex;
+      align-items:center;
+      gap:14px;
+      min-width:0;
+      flex:1 1 0;
+      color:var(--text);
+    }
+    .brand img { width:72px; height:72px; object-fit:contain; filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+    .brand-copy { display:flex; align-items:center; min-width:0; line-height:1; }
+    .brand-title { display:inline-flex; align-items:baseline; gap:0; font:700 40px/1 var(--font-display); letter-spacing:.04em; text-transform:uppercase; white-space:nowrap; }
+    .brand-title-main { color:var(--text); }
+    .route-tabs {
+      position:absolute;
+      left:50%;
+      top:12px;
+      transform:translateX(-50%);
+      display:flex;
+      gap:2px;
+      height:52px;
+      padding:4px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--panel-sunk);
+    }
+    .route-tab {
+      min-width:0;
+      height:44px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      padding:0 16px;
+      border:0;
+      border-radius:9px;
+      background:transparent;
+      color:var(--muted);
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.1em;
+      text-transform:uppercase;
+      cursor:pointer;
+    }
+    .route-tab[data-route="home"] { width:101px; }
+    .route-tab[data-route="extensions"] { width:153px; }
+    .route-tab[data-route="settings"] { width:132px; }
+    .route-tab:hover { color:var(--text); background:var(--chrome-subtle-bg); }
+    .route-tab[aria-selected="true"] {
+      color:var(--accent-text);
+      background:var(--chrome-selected-bg);
+      box-shadow:inset 0 0 0 1px var(--chrome-selected-border);
+    }
+    .icon { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+    .topbar-actions { display:flex; align-items:center; justify-content:flex-end; gap:14px; flex:1 1 0; }
+    .utility-cluster, .window-cluster { display:inline-flex; align-items:center; gap:8px; padding:4px 6px; border-radius:999px; background:var(--chrome-cluster-bg); box-shadow:inset 0 1px rgba(255,255,255,.18); }
+    .icon-button {
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      padding:0;
+      border:1px solid var(--border);
+      border-radius:999px;
+      background:var(--chrome-subtle-bg);
+      cursor:pointer;
+      transition:transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .icon-button:hover { transform:translateY(-1px); color:var(--accent-text); border-color:var(--border-accent); background:var(--accent-soft-bg); }
+    .icon-button.close:hover { color:#fff; border-color:#b53e49; background:#a92d38; }
+    .theme-icon { width:32px; height:32px; display:block; pointer-events:none; }
+    .theme-icon-night { display:none; }
+    body[data-theme="light"] .theme-icon-day { display:none; }
+    body[data-theme="light"] .theme-icon-night { display:block; }
+    .stage { flex:1; min-height:0; padding:24px 30px 30px; }
+    .screen { display:none; width:100%; height:100%; }
+    .screen[data-active] { display:block; }
+    .glass-panel {
+      border:1px solid var(--border-accent);
+      border-radius:var(--card-radius);
+      background:var(--panel);
+      box-shadow:var(--card-shadow);
+      backdrop-filter:blur(18px);
+    }
+    .glass-panel:focus-visible,
+    body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) .glass-panel:focus { box-shadow:var(--focus), var(--card-shadow); }
+    .home-layout {
+      display:grid;
+      grid-template-columns:430px minmax(0,1fr);
+      gap:24px;
+      width:100%;
+      height:100%;
+    }
