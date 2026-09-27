@@ -1,0 +1,12 @@
+##########################################################################
+#
+# BahamutXIV Launcher Default Script
+#
+# The injected Bahamut client runtime executes this file after applying the
+# auto load selection from config/extensions.ini. Commands affect this game
+# session only and never rewrite launcher configuration.
+#
+##########################################################################
+
+/bind f11 /fillmode
+/bind f12 /fps

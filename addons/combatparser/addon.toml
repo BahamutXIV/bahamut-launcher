@@ -1,0 +1,15 @@
+manifest_schema_version = 1
+id = "combatparser"
+kind = "addon"
+name = "combatparser"
+author = "Aeshur"
+version = "1.0"
+description = "Combat parsing tool."
+entry = "combatparser.lua"
+api_version = "0.1"
+minimum_runtime_version = "0.1.0"
+supported_client_builds = ["2012.09.19.0001"]
+capabilities = ["ui.draw", "chat.print"]
+commands = [
+    { name = "/combatparser", usage = "/combatparser", description = "Show combat meter commands." },
+]

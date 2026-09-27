@@ -1,0 +1,286 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag shape
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tags must match vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
+            exit 1
+          fi
+
+  checks:
+    name: Full checks
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build (${{ matrix.display_name }})
+    needs: checks
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The native client module targets the Visual Studio 2022 Win32 toolchain.
+          - display_name: Windows
+            os: windows-2022
+          - display_name: Linux
+            os: ubuntu-latest
+          - display_name: macOS
+            os: ${{ format('macos-{0}-intel', '15') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Fetch tags so build.rs can stamp the release via git describe.
+          fetch-depth: 0
+
+      - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Configure x86 client module
+        if: runner.os == 'Windows'
+        run: cmake -S client -B out/client-release -G "Visual Studio 17 2022" -A Win32
+
+      - name: Build x86 client module
+        if: runner.os == 'Windows'
+        run: cmake --build out/client-release --config Release
+
+      - name: Test x86 client module
+        if: runner.os == 'Windows'
+        run: ctest --test-dir out/client-release -C Release --output-on-failure
+
+      - name: Install llvm-mingw (Linux and macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)
+              asset=llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+              # SHA-256 for the pinned mstorsjo/llvm-mingw release asset.
+              sha256=bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21
+              ;;
+            macOS)
+              asset=llvm-mingw-20260922-ucrt-macos-universal.tar.xz
+              sha256=52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3
+              ;;
+            *)
+              echo "unsupported runner OS for llvm-mingw: $RUNNER_OS" >&2
+              exit 1
+              ;;
+          esac
+          curl -sSfL -o "$RUNNER_TEMP/$asset" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/$asset"
+          echo "$sha256  $RUNNER_TEMP/$asset" | shasum -a 256 -c -
+          tar -xJf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP"
+          echo "LLVM_MINGW_ROOT=$RUNNER_TEMP/${asset%.tar.xz}" >> "$GITHUB_ENV"
+
+      - name: Configure x86 client module (cross)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S client -B out/client-mingw \
+            -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT"
+
+      - name: Build x86 client module (cross)
+        if: runner.os != 'Windows'
+        run: cmake --build out/client-mingw --config Release --target bahamut-loader bahamut screenshot discord-rpc
+
+      - name: Build release binary
+        env:
+          BAHAMUT_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: cargo build --release -p bahamut-launcher-shell
+
+      - name: Build Windows update helper
+        if: runner.os == 'Windows'
+        run: cargo build --release --bin bahamut-update-helper
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          $name = "bahamut-launcher-$env:REVISION-windows-x86_64"
+          $staging = Join-Path $env:RUNNER_TEMP "bahamut-release-staging-$env:GITHUB_RUN_ID"
+          $dist = Join-Path $env:RUNNER_TEMP "bahamut-release-dist-$env:GITHUB_RUN_ID"
+          ./scripts/windows_release_archive_manifest_and_cleanliness.ps1 `
+            -LauncherBinary target/release/bahamut-launcher-shell.exe `
+            -ClientBuildDirectory out/client-release/Release `
+            -HelperBinary target/release/bahamut-update-helper.exe `
+            -StagingRoot $staging `
+            -ArchivePath (Join-Path $dist "$name.zip")
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $hash = (Get-FileHash (Join-Path $dist "$name.zip") -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii -NoNewline (Join-Path $dist "$name.zip.sha256")
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -LiteralPath (Join-Path $dist "$name.zip") -Destination dist
+          Copy-Item -LiteralPath (Join-Path $dist "$name.zip.sha256") -Destination dist
+
+      - name: Package (Linux and macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          platform=$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]')
+          name="bahamut-launcher-${REVISION}-${platform}-x86_64"
+          mkdir -p dist
+          ./scripts/stage-unix-release.sh \
+            --launcher target/release/bahamut-launcher-shell \
+            --client-build out/client-mingw \
+            --destination staging
+          tar -czf "dist/$name.tar.gz" -C staging .
+          ( cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256" )
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate archives and checksums
+        shell: bash
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "bahamut-launcher-${REVISION}-windows-x86_64.zip"
+            "bahamut-launcher-${REVISION}-windows-x86_64.zip.sha256"
+            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz"
+            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz.sha256"
+            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"
+            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz.sha256"
+          )
+          mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          if ! diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}" | sort); then
+            echo "release artifact set does not contain exactly the expected six files" >&2
+            exit 1
+          fi
+
+          for archive in \
+            "bahamut-launcher-${REVISION}-windows-x86_64.zip" \
+            "bahamut-launcher-${REVISION}-linux-x86_64.tar.gz" \
+            "bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"; do
+            checksum="$(sha256sum "release-assets/$archive" | cut -d' ' -f1)"
+            expected_line="$checksum  $archive"
+            actual_line="$(<"release-assets/$archive.sha256")"
+            if [[ "$actual_line" != "$expected_line" ]]; then
+              echo "checksum sidecar mismatch: $archive" >&2
+              exit 1
+            fi
+          done
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          assets=(
+            "release-assets/bahamut-launcher-${REVISION}-windows-x86_64.zip"
+            "release-assets/bahamut-launcher-${REVISION}-windows-x86_64.zip.sha256"
+            "release-assets/bahamut-launcher-${REVISION}-linux-x86_64.tar.gz"
+            "release-assets/bahamut-launcher-${REVISION}-linux-x86_64.tar.gz.sha256"
+            "release-assets/bahamut-launcher-${REVISION}-macos-x86_64.tar.gz"
+            "release-assets/bahamut-launcher-${REVISION}-macos-x86_64.tar.gz.sha256"
+          )
+          release_args=()
+          if [[ "$TAG_NAME" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          if ! tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG_NAME" --jq '[.object.type, .object.sha] | @tsv')"; then
+            echo "failed to resolve remote tag: $TAG_NAME" >&2
+            exit 1
+          fi
+          resolved_type=''
+          resolved_sha=''
+          for ((depth = 0; depth < 8; depth++)); do
+            IFS=$'\t' read -r resolved_type resolved_sha <<< "$tag_ref"
+            case "$resolved_type" in
+              commit)
+                break
+                ;;
+              tag)
+                if ! tag_ref="$(gh api "repos/$GH_REPO/git/tags/$resolved_sha" --jq '[.object.type, .object.sha] | @tsv')"; then
+                  echo "failed to resolve annotated tag object: $resolved_sha" >&2
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "remote tag did not resolve to a commit or tag object" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [[ "$resolved_type" != 'commit' || "$resolved_sha" != "$REVISION" ]]; then
+            echo "remote tag resolves to $resolved_type $resolved_sha, expected commit $REVISION" >&2
+            exit 1
+          fi
+          gh release create "$TAG_NAME" "${assets[@]}" \
+            --verify-tag \
+            --generate-notes \
+            --title "Bahamut Launcher $TAG_NAME" \
+            "${release_args[@]}"

@@ -1,0 +1,222 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install clang-format
+        run: python -m pip install --disable-pip-version-check clang-format==22.1.8
+
+      - name: Check changed C++ files
+        shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_REF" || "$BASE_REF" =~ ^0+$ ]]; then
+            if git rev-parse --verify 'HEAD^' >/dev/null 2>&1; then
+              BASE_REF='HEAD^'
+            else
+              node scripts/check-cpp-format.mjs --all
+              exit
+            fi
+          fi
+          node scripts/check-cpp-format.mjs --base "$BASE_REF"
+
+      - name: Check workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+      - name: Check documentation links
+        run: node scripts/check-markdown-links.mjs
+
+  workspace:
+    name: Checks (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Install llvm-mingw
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset=llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+          # SHA-256 for the pinned mstorsjo/llvm-mingw release asset.
+          sha256=bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21
+          curl -sSfL -o "$RUNNER_TEMP/$asset" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/$asset"
+          echo "$sha256  $RUNNER_TEMP/$asset" | shasum -a 256 -c -
+          tar -xJf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP"
+          echo "LLVM_MINGW_ROOT=$RUNNER_TEMP/${asset%.tar.xz}" >> "$GITHUB_ENV"
+
+      - name: Configure x86 client module (cross)
+        run: |
+          cmake -S client -B out/client-mingw \
+            -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT"
+
+      - name: Build x86 client module (cross)
+        run: cmake --build out/client-mingw --target bahamut-loader bahamut screenshot discord-rpc
+
+      - name: Stage the Unix release tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A placeholder launcher exercises the manifest check without a release shell build.
+          printf '#!/bin/sh\nexit 0\n' > "$RUNNER_TEMP/bahamut-launcher"
+          chmod +x "$RUNNER_TEMP/bahamut-launcher"
+          ./scripts/stage-unix-release.sh \
+            --launcher "$RUNNER_TEMP/bahamut-launcher" \
+            --client-build out/client-mingw \
+            --destination "$RUNNER_TEMP/unix-release"
+
+  windows-build:
+    name: Checks (Windows)
+    # The native runtime targets the Visual Studio 2022 Win32 toolchain.
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Configure x86 client module
+        run: cmake -S client -B out/client-debug -G "Visual Studio 17 2022" -A Win32
+
+      - name: Build x86 client module
+        run: cmake --build out/client-debug --config Debug
+
+      - name: Test x86 client module
+        run: ctest --test-dir out/client-debug -C Debug --output-on-failure
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Browser tests
+        run: node --test src-tauri/ui/browser-test.mjs
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Game content publisher tests
+        run: python scripts/test-package-game-content.py
+
+      - name: Synthetic release archive check
+        run: ./scripts/windows_release_archive_manifest_and_cleanliness.ps1
+
+      - name: Local package update regression
+        run: ./scripts/test-windows-package.ps1
+
+  macos:
+    name: Checks (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Install llvm-mingw
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset=llvm-mingw-20260922-ucrt-macos-universal.tar.xz
+          # SHA-256 for the pinned mstorsjo/llvm-mingw release asset.
+          sha256=52e5f5a7b131021d0c39a37a38fa380a1da7885cd04bd61afd0cd4ecfb8bc1f3
+          curl -sSfL -o "$RUNNER_TEMP/$asset" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/$asset"
+          echo "$sha256  $RUNNER_TEMP/$asset" | shasum -a 256 -c -
+          tar -xJf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP"
+          echo "LLVM_MINGW_ROOT=$RUNNER_TEMP/${asset%.tar.xz}" >> "$GITHUB_ENV"
+
+      - name: Configure x86 client module (cross)
+        run: |
+          cmake -S client -B out/client-mingw \
+            -DCMAKE_TOOLCHAIN_FILE=client/cmake/llvm-mingw-i686.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT"
+
+      - name: Build x86 client module (cross)
+        run: cmake --build out/client-mingw --config Release --target bahamut-loader bahamut screenshot discord-rpc

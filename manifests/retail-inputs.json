@@ -1,0 +1,11 @@
+{
+    "repository": "BahamutXIV/bahamut-private-assets",
+    "commit": "e96ae0e09bcb2305a97018a09c374cff30da05fe",
+    "files": [
+        {
+            "path": "ffxiv-1.23b/ffxivgame.exe",
+            "size": 15996808,
+            "sha256": "9341f2b4567440b310a4d494f5cc5599ca334ba51c8042247317ff466492f2e9"
+        }
+    ]
+}

@@ -1,0 +1,373 @@
+{
+  "schemaVersion": 1,
+  "repository": "BahamutXIV/bahamut-private-assets",
+  "commit": "e96ae0e09bcb2305a97018a09c374cff30da05fe",
+  "targetClientVersion": "2012.09.19.0001",
+  "archiveName": "FFXIV_1.23b_Patches.zip",
+  "files": [
+    {
+      "path": "patches-1.23b/2d2a390f/patch/D2010.09.18.0000.patch",
+      "runtimePath": "2d2a390f/patch/D2010.09.18.0000.patch",
+      "size": 5571687,
+      "crc32": "47DDE5ED",
+      "sha256": "1a8731b4b93c2a653352964a929d1fbe41fb12a8cf1844574d9030e0c290c5ba"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.09.19.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.09.19.0000.patch",
+      "size": 444398866,
+      "crc32": "D55C7ACD",
+      "sha256": "508720532407b880d58fe45dd79afedc9c0532c331018881adab90bee986674d"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.09.23.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.09.23.0000.patch",
+      "size": 6907277,
+      "crc32": "CA135D55",
+      "sha256": "6fbdca3a7ea752919005a5f2ec3b28ddc25cf8680bcb28a3da44a193ff7addcd"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.09.28.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.09.28.0000.patch",
+      "size": 18803280,
+      "crc32": "B19B32FE",
+      "sha256": "ba71033e0b1c28533719edf1f9006d72a9f8b46b8f21de8df4740deee93c61b4"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.10.07.0001.patch",
+      "runtimePath": "48eca647/patch/D2010.10.07.0001.patch",
+      "size": 19226330,
+      "crc32": "D6118CEE",
+      "sha256": "99a496cae7e82e99d14d89df83cd6fc9a0cba6b144fea49f04a7533cb0a89dae"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.10.14.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.10.14.0000.patch",
+      "size": 19464329,
+      "crc32": "34BF6A99",
+      "sha256": "f8b21cec070fd1728900150dcfbf727eed60b544a8e2cd16f33401695a9fc671"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.10.22.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.10.22.0000.patch",
+      "size": 19778252,
+      "crc32": "2543DB5C",
+      "sha256": "a73be61fc80687ca503163ad27b01ca11c384074f42c6abcebe38a4419edf5a0"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.10.26.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.10.26.0000.patch",
+      "size": 19778391,
+      "crc32": "20F94876",
+      "sha256": "5e26db8d93b6799896a18a6730c47c251e760fa18dac402c0ff3ee6a81a1b88e"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.11.25.0002.patch",
+      "runtimePath": "48eca647/patch/D2010.11.25.0002.patch",
+      "size": 250718651,
+      "crc32": "5FBB5B24",
+      "sha256": "513eda8c5f99f795537ed4f090d72bc7da14a14f2c20ef4f443b8e3ada5a0584"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.11.30.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.11.30.0000.patch",
+      "size": 6921623,
+      "crc32": "A5479111",
+      "sha256": "5ae987f05b6202d54031d35d4055cedf0a784042e5cd57858de712c108869180"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.12.06.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.12.06.0000.patch",
+      "size": 7158904,
+      "crc32": "CAD6BC31",
+      "sha256": "5bba191c631dda6200a2f18055baa82206dfc9deee30649d46624671b5e55dc8"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.12.13.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.12.13.0000.patch",
+      "size": 263311481,
+      "crc32": "E51EFC06",
+      "sha256": "d076934bcb46311aff56ebc23c193f806607a7728cc952ae5dc7597d1a99aec9"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2010.12.21.0000.patch",
+      "runtimePath": "48eca647/patch/D2010.12.21.0000.patch",
+      "size": 7521358,
+      "crc32": "93EE1510",
+      "sha256": "626f88c72e288317fc3bf4206483e74e00454bd1a915818e6a6a30b2d1d5e909"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.01.18.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.01.18.0000.patch",
+      "size": 9954265,
+      "crc32": "059E8900",
+      "sha256": "2d3314fad42d9921cd473ada796dad85f095227828e59a159a2bef911c7115be"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.02.01.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.02.01.0000.patch",
+      "size": 11632816,
+      "crc32": "9EE60B39",
+      "sha256": "e4e4542f179e86205942df83f1e4da45785776567db8f8abd1b152aa8bcb60af"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.02.10.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.02.10.0000.patch",
+      "size": 11714096,
+      "crc32": "0ADE7243",
+      "sha256": "a4dfe1c1f83bd5b9af0acbbd341dcfa62d83b096d3ab31ae61b9f49122676894"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.03.01.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.03.01.0000.patch",
+      "size": 77464101,
+      "crc32": "7818B5BF",
+      "sha256": "b1dc431130664c1b0b6b5db8b6213369ab72601c9e057b1070fb3c3ccd7d9bde"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.03.24.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.03.24.0000.patch",
+      "size": 108923937,
+      "crc32": "F21852AD",
+      "sha256": "36f03722803da869f2a58f10117a5c3e9acd4dee150107c7ef05a121665c361e"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.03.30.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.03.30.0000.patch",
+      "size": 109010880,
+      "crc32": "84CB2682",
+      "sha256": "e38060ce945bcb17d31e4f9a8b93b2025a98d0594a1269df1195926c06a49e88"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.04.13.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.04.13.0000.patch",
+      "size": 341603850,
+      "crc32": "FF6C3DB0",
+      "sha256": "4c359e64d8c6f60a5c7797747d395fee1655c3716f4b337c79ec8773824b9d61"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.04.21.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.04.21.0000.patch",
+      "size": 343579198,
+      "crc32": "57F4041C",
+      "sha256": "ee202597f1d8c69b2c319d4361991eaab26cfe6d28e4be90f703bda51838e732"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.05.19.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.05.19.0000.patch",
+      "size": 344239925,
+      "crc32": "B16FF18C",
+      "sha256": "951d46ab04700d13181d9ac04b19add21cbdc806980dfe425d68763c21473d0f"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.06.10.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.06.10.0000.patch",
+      "size": 344334860,
+      "crc32": "B1CAA88B",
+      "sha256": "e5050f17659a7adef7bd312db32ce2b85a3bc79f83d7b5c9f90b7e92d64483ea"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.07.20.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.07.20.0000.patch",
+      "size": 584926805,
+      "crc32": "2EA149A9",
+      "sha256": "a53ed2dd3ecb66c832230f09ff4ae5f347e4c9d7b5dca894e21a79c41384e573"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.07.26.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.07.26.0000.patch",
+      "size": 7649141,
+      "crc32": "5670BA07",
+      "sha256": "6d7a9e8305ef29f1f8087fe8453e86c666bd63cb4b0a4272df600d695a012761"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.08.05.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.08.05.0000.patch",
+      "size": 152064532,
+      "crc32": "0D9E9FD8",
+      "sha256": "f88346b17f7d23e2269fd72333089fe5e3e6fe1ee7c89ffc0877182bbd289133"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.08.09.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.08.09.0000.patch",
+      "size": 8573687,
+      "crc32": "9B54551A",
+      "sha256": "20e25ccb33b42efd7ded78a5d9b972458372f6c830f576c5e98e13f71af13a2f"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.08.16.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.08.16.0000.patch",
+      "size": 6118907,
+      "crc32": "75231C57",
+      "sha256": "e8824c0dbaad347b50803e1773c28751d3ade9b51e8123fb2a288d3117031095"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.10.04.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.10.04.0000.patch",
+      "size": 677633296,
+      "crc32": "95C15318",
+      "sha256": "b052bb8b5642bc4ea12d42d7bb1f8ff4b1f595f23539039599067c56191393d8"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.10.12.0001.patch",
+      "runtimePath": "48eca647/patch/D2011.10.12.0001.patch",
+      "size": 28941655,
+      "crc32": "B37993E3",
+      "sha256": "aec7cf6e07190a7926abf3c0ce7fb582eae72b211288440f48b932c22eef6869"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.10.27.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.10.27.0000.patch",
+      "size": 29179764,
+      "crc32": "977480DC",
+      "sha256": "e6e11f485d88c9021f7f1887994dd6117eeb92931547eb53b3fe83f51bc89507"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.12.14.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.12.14.0000.patch",
+      "size": 374617428,
+      "crc32": "C6FE8FED",
+      "sha256": "cfbdeb206885d40bf42a97b4744e7d57e55b3c3074f840f0fdbfadbfa407cfe7"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2011.12.23.0000.patch",
+      "runtimePath": "48eca647/patch/D2011.12.23.0000.patch",
+      "size": 22363713,
+      "crc32": "93137C93",
+      "sha256": "2433a9ac5512b4ac03ee9a0c93891fcc3522f9ae5142968865f0c69ca61722e3"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.01.18.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.01.18.0000.patch",
+      "size": 48998794,
+      "crc32": "9E55EC7E",
+      "sha256": "3b08e3ea0e9733b8535e7ad24b84f94220b98f0d56f1e7571e639a0e128657a5"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.01.24.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.01.24.0000.patch",
+      "size": 49126606,
+      "crc32": "3008D942",
+      "sha256": "dd701f77bbb81ec4d5efa89eb6c9a0b3dff0cc920d230ecc8d6b265e530e8eee"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.01.31.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.01.31.0000.patch",
+      "size": 49536396,
+      "crc32": "60FDBD0B",
+      "sha256": "7091dd66186efe491ecd83b561e80724c29d02c2bced0b7e6a8e68e59a81c0c2"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.03.07.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.03.07.0000.patch",
+      "size": 320630782,
+      "crc32": "885AD768",
+      "sha256": "bc18f0b49e785b4d76db67db82bfb6630181a2522b67827b9da9d93d6eda19c9"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.03.09.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.03.09.0000.patch",
+      "size": 8312819,
+      "crc32": "C0040D8C",
+      "sha256": "d7665acb9496e1ec960fb2410b9f0b2c31baced8cc06fdfa4a5a95d24a9f4a98"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.03.22.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.03.22.0000.patch",
+      "size": 22027738,
+      "crc32": "EABC501B",
+      "sha256": "751eb9228d666765f29a778b5a039d8256a22a906a500e2fb5d1cf3b0238d99e"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.03.29.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.03.29.0000.patch",
+      "size": 8322920,
+      "crc32": "63811C35",
+      "sha256": "c469555c05770192ebe1aa0a8860f6c1026da75476e732d6e4593042148e495f"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.04.04.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.04.04.0000.patch",
+      "size": 8678570,
+      "crc32": "F6E43EEC",
+      "sha256": "f2db435ec822714dbab55ee4e48d6792a25a6ce815eb2e9b07f08e1541e280d1"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.04.23.0001.patch",
+      "runtimePath": "48eca647/patch/D2012.04.23.0001.patch",
+      "size": 289511791,
+      "crc32": "6C3C0201",
+      "sha256": "13e15d1162fed622e592dea92c52af466d38b1d61e9383a6bf421a27a390fc29"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.05.08.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.05.08.0000.patch",
+      "size": 27266546,
+      "crc32": "B6AABF18",
+      "sha256": "ea94ef4176a81e13aeecfb1173ea678a1974dfed613b1a8f2574cb5b84b0873e"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.05.15.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.05.15.0000.patch",
+      "size": 27416023,
+      "crc32": "2D428126",
+      "sha256": "bd8625d702b84b2e951a0f5ecf767582816db6973e05daa9d87e965a117f1413"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.05.22.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.05.22.0000.patch",
+      "size": 27742726,
+      "crc32": "9163549D",
+      "sha256": "fd17455b654a1a276038ce25245fdde5c53de43a3642c7bb5add021822bdeb28"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.06.06.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.06.06.0000.patch",
+      "size": 129984024,
+      "crc32": "21DF7238",
+      "sha256": "013fce591e4499eab538efb0b4ea519020ec931b3d69b1910494a417b4dbda50"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.06.19.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.06.19.0000.patch",
+      "size": 133434217,
+      "crc32": "8280988A",
+      "sha256": "79da69e53dceb940dc172b10e0a56850c270f6131d048a12efe92b38542437f5"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.06.26.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.06.26.0000.patch",
+      "size": 133581048,
+      "crc32": "4CF33FC8",
+      "sha256": "5ded399f1894e1957322539058a261c0182d2e9f470d0d071a9af186732799e2"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.07.21.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.07.21.0000.patch",
+      "size": 253224781,
+      "crc32": "A8A42A32",
+      "sha256": "d2e9e4c37ae4571e5e6f7d12b38b2b9c8e6811312e40390ce52d8f39e8271bf8"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.08.10.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.08.10.0000.patch",
+      "size": 42851112,
+      "crc32": "D8ED4CE3",
+      "sha256": "f9b9c8d8531d3ec4c30fecd53e76dac38b5de073d786b8c059a1243449fbe30b"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.09.06.0000.patch",
+      "runtimePath": "48eca647/patch/D2012.09.06.0000.patch",
+      "size": 20566711,
+      "crc32": "4235DF72",
+      "sha256": "34665eea908f208b3990279fa3299cbc6b2b17116077a71c50d3448269002f72"
+    },
+    {
+      "path": "patches-1.23b/48eca647/patch/D2012.09.19.0001.patch",
+      "runtimePath": "48eca647/patch/D2012.09.19.0001.patch",
+      "size": 20874726,
+      "crc32": "8A775526",
+      "sha256": "013ea89909f13a340d38793cabe937209946974d47820f3eac703b467e21eb82"
+    }
+  ]
+}

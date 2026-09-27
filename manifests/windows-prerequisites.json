@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "id": "vc-redist-x86",
+      "fileName": "vc_redist.x86.exe",
+      "sourceUrl": "https://pub-f164b0f74f9d45769188b8a2924542d0.r2.dev/vc_redist.x86.exe",
+      "objectKey": "windows/prerequisites/vc-redist-x86/sha256/e7267c1bdf9237c0b4a28cf027c382b97aa909934f84f1c92d3fb9f04173b33e.exe",
+      "length": 6876208,
+      "sha256": "e7267c1bdf9237c0b4a28cf027c382b97aa909934f84f1c92d3fb9f04173b33e",
+      "publisher": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signerThumbprint": "3F56A45111684D454E231CFDC4DA5C8D370F9816",
+      "version": "14.50.35719.0",
+      "minimumRuntimeVersion": "14.44.35207.0",
+      "architecture": "x86",
+      "installArgs": ["/install", "/passive", "/norestart"]
+    },
+    {
+      "id": "webview2-evergreen-bootstrapper",
+      "fileName": "MicrosoftEdgeWebView2Setup.exe",
+      "sourceUrl": "https://pub-f164b0f74f9d45769188b8a2924542d0.r2.dev/MicrosoftEdgeWebView2Setup.exe",
+      "objectKey": "windows/prerequisites/webview2-evergreen-bootstrapper/sha256/81c01751c8cc385a5991abb104205d42ac70094350ee8fb9e8ea580b51bb9554.exe",
+      "length": 1844944,
+      "sha256": "81c01751c8cc385a5991abb104205d42ac70094350ee8fb9e8ea580b51bb9554",
+      "publisher": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signerThumbprint": "4028CAD637509D4744B17EC5B42AED8D7A31E6AF",
+      "version": "1.3.271.7",
+      "minimumRuntimeVersion": "0.0.0.0",
+      "architecture": "bootstrapper",
+      "installArgs": ["/silent", "/install"]
+    }
+  ]
+}

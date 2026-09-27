@@ -1,0 +1,6 @@
+manifest_schema_version = 1
+id = "bahamut-dats-overlay"
+name = "Bahamut DAT Overlay"
+author = "BahamutXIV"
+version = "1.0.0"
+description = "Official DAT overlay package. It contains no DAT changes."

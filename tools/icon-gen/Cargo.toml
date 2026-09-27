@@ -1,0 +1,18 @@
+[package]
+name = "icon-gen"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Regenerates src-tauri/icons/icon.{png,icns,ico} from icon-source.png"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+icns = "0.3"
+ico = "0.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

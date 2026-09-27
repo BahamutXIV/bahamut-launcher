@@ -1,0 +1,17 @@
+manifest_schema_version = 1
+id = "packetlogger"
+kind = "addon"
+name = "packetlogger"
+author = "Aeshur, AuroraFlare"
+version = "1.0"
+description = "Records packets in CSV capture sessions."
+entry = "packetlogger.lua"
+api_version = "0.1"
+minimum_runtime_version = "0.1.0"
+supported_client_builds = ["2012.09.19.0001"]
+capabilities = ["packet.read", "packetlog.write", "packetlog.control", "chat.print"]
+commands = [
+    { name = "/packetlogger", usage = "/packetlogger", description = "Show capture status." },
+    { name = "/packetlogger start", usage = "/packetlogger start", description = "Start a capture session." },
+    { name = "/packetlogger stop", usage = "/packetlogger stop", description = "Stop recording." },
+]

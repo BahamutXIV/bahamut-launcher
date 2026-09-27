@@ -1,0 +1,19 @@
+manifest_schema_version = 1
+id = "fps"
+kind = "addon"
+name = "fps"
+author = "Aeshur"
+version = "1.0"
+description = "Displays the game's current frame rate."
+homepage = "https://github.com/BahamutXIV/bahamut-launcher"
+entry = "fps.lua"
+api_version = "0.1"
+minimum_runtime_version = "0.1.0"
+supported_client_builds = ["2012.09.19.0001"]
+capabilities = ["ui.draw", "chat.print"]
+commands = [
+    { name = "/fps", usage = "/fps", description = "Toggle the FPS overlay." },
+    { name = "/fps lock", usage = "/fps lock", description = "Toggle overlay dragging." },
+    { name = "/fps color", usage = "/fps color #RRGGBB", description = "Set text color." },
+    { name = "/fps size", usage = "/fps size 8-48", description = "Set text size." },
+]

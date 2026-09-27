@@ -1,0 +1,13 @@
+manifest_schema_version = 1
+id = "chatlogs"
+kind = "addon"
+name = "chatlogs"
+author = "Aeshur"
+version = "1.0"
+description = "Saves game chat to timestamped daily text files."
+entry = "chatlogs.lua"
+api_version = "0.1"
+minimum_runtime_version = "0.1.0"
+supported_client_builds = ["2012.09.19.0001"]
+capabilities = ["chat.read", "chatlogs.write"]
+commands = []
