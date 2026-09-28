@@ -1080,7 +1080,9 @@ fn shutdown_cancels_and_joins_a_real_paused_patcher_worker() {
     assert!(request.first_request);
     assert!(request.waiting);
     assert!(shared.is_cancel_requested());
-    assert!(!shared.is_paused());
     assert!(!request.join_worker());
+    // The worker clears its pause acknowledgment on its own thread, so the flag
+    // is settled only after the join.
+    assert!(!shared.is_paused());
     assert_eq!(shared.phase(), Phase::Cancelled);
 }
