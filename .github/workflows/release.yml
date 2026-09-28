@@ -5,11 +5,20 @@ name: Release
 # label on the merged pull request), rewrites the package versions to match,
 # commits that to main as "chore: release vX.Y.Z", pushes the annotated tag
 # atomically with the commit, and creates the GitHub Release. The tag push
-# starts release-binaries.yml. Preconditions (RELEASE_PAT, branch protection,
+# starts release-binaries.yml. A manual run from main cuts a release of the
+# current tip at a chosen level. Preconditions (RELEASE_PAT, branch protection,
 # labels) are in docs/releasing.md.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Bump level for a release of the current main tip"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
 
 # Serialize releases so two quick merges produce monotonic tags.
 concurrency:
@@ -30,8 +39,18 @@ jobs:
     # workflow. Skipping the bot's own commits breaks the loop without
     # [skip ci], which would also suppress the tag push that starts
     # release-binaries.yml.
-    if: ${{ github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com' }}
     steps:
+      - name: Require main for a manual release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" != "refs/heads/main" ]]; then
+            echo "::error::Run the Release workflow from main; it was started from $REF."
+            exit 1
+          fi
+
       - name: Require RELEASE_PAT
         env:
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
@@ -54,14 +73,28 @@ jobs:
       - name: Fetch all tags
         run: git fetch --tags --force --prune
 
-      - name: Determine bump level from the merged pull request's labels
+      - name: Determine the bump level
         id: level
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           MERGE_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_LEVEL: ${{ inputs.level }}
         run: |
           set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            case "$INPUT_LEVEL" in
+              patch | minor | major) ;;
+              *)
+                echo "::error::Unknown bump level: $INPUT_LEVEL"
+                exit 1
+                ;;
+            esac
+            echo "level=$INPUT_LEVEL" >> "$GITHUB_OUTPUT"
+            echo "Bump level (manual): $INPUT_LEVEL"
+            exit 0
+          fi
           # No associated pull request (a direct push) is the legitimate empty
           # case and bumps patch. An API error is warned so a missed label is
           # visible instead of silently downgraded.
@@ -82,12 +115,14 @@ jobs:
         id: ver
         env:
           LEVEL: ${{ steps.level.outputs.level }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           # A rerun after the atomic push succeeded must not cut a second
-          # release of the same commit: main's tip already carries its tag.
+          # release of the same commit: main's tip already carries its tag. A
+          # manual run releases the tip again on purpose, at the chosen level.
           released="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          if [[ -n "$released" ]]; then
+          if [[ "$EVENT_NAME" == push && -n "$released" ]]; then
             echo "::notice::main is already released as $released; nothing to do."
             {
               echo "new="
