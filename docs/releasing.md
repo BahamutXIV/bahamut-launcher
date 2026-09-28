@@ -48,7 +48,13 @@ together by the next run, which reads only its own pull request's label. The
 displaced run fails when its own label was not patch, so the missed bump is
 visible.
 
-Pushing a tag directly is the manual alternative to a labeled merge:
+Actions -> Release -> Run workflow, started from `main`, is the other way to
+choose the level. It releases the current `main` tip at the chosen level, even
+when that tip already carries a tag, so it promotes an already released commit
+to a new version with its package versions rewritten. It needs no new commit
+on `develop`.
+
+Pushing a tag directly is the last alternative to a labeled merge:
 
 ```text
 git tag -a v1.0.0 -m v1.0.0
