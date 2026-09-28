@@ -151,10 +151,12 @@ macOS backend ignores that preference and uses its default filter.
 
 ### Wine extension launch
 
-When `bahamut-loader.exe` and `bahamut.dll` sit beside the launcher binary and
-the launch carries extension artifacts, the Wine backends run the helper, under
-the managed engine on macOS and under system Wine on Linux, instead of the
-launch from the working copy above:
+When `bahamut-loader.exe` and `bahamut.dll` are present in the
+[install root](configuration.md#macos-app-layout) (beside the binary in a
+portable tree, under `Contents/Resources` in the macOS app) and the launch
+carries extension artifacts, the Wine backends run the helper, under the
+managed engine on macOS and under system Wine on Linux, instead of the launch
+from the working copy above:
 
 - The launcher checks the [client identity](extensions.md#client-compatibility)
   before planning the helper. A mismatch stops the launch.
@@ -171,8 +173,8 @@ launch from the working copy above:
   `helper.log` and treats the first `SUCCESS` or `ERROR` line as the readiness
   result, with a 90 second deadline. `wine.log` beside it keeps Wine's own
   output, and both sit in the launcher data directory's `logs/` folder
-  (`~/Library/Application Support/com.BahamutXIV.Launcher/logs/` on macOS,
-  `${XDG_DATA_HOME:-~/.local/share}/launcher/logs/` on Linux).
+  (`~/.bahamut-launcher/logs/` on macOS and Linux, or
+  `$BAHAMUT_LAUNCHER_HOME/logs/` when that variable holds an absolute path).
 - The launcher's game process is the `wine` process hosting the helper, which
   exits with the client.
 

@@ -9,7 +9,7 @@ pub mod overlay_packages;
 
 pub use addons::{
     ADDON_MANIFEST_FILE_NAME, AddonCommand, AddonDiscoveryError, AddonPackage, discover_addons,
-    select_addon_manifests,
+    discover_addons_layered, select_addon_manifests,
 };
 pub use helper::{
     CLIENT_MODULE_NAME, HelperErrorCode, HelperFailure, HelperPlanError, HelperSuccess,
@@ -33,5 +33,6 @@ pub use launch_plan::{
 pub use layout::ExtensionLayout;
 pub use overlay_packages::{
     OVERLAY_MANIFEST_FILE_NAME, OverlayConflict, OverlayDiscoveryError, OverlayPackage,
-    OverlaySelection, discover_overlay_packages, select_overlay_packages,
+    OverlaySelection, discover_overlay_packages, discover_overlay_packages_layered,
+    select_overlay_packages,
 };

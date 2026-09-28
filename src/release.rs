@@ -378,8 +378,10 @@ fn validate_artifact_location(metadata: &ReleaseMetadata, version: &Version) -> 
     let digest = metadata.artifact.sha256.as_str();
     let expected_format = match (metadata.product, metadata.target) {
         (Product::Game, Target::PlatformIndependent)
-        | (Product::Launcher, Target::WindowsX86_64) => ArtifactFormat::Zip,
-        (Product::Launcher, Target::LinuxX86_64 | Target::MacosUniversal) => ArtifactFormat::TarGz,
+        | (Product::Launcher, Target::WindowsX86_64 | Target::MacosUniversal) => {
+            ArtifactFormat::Zip
+        }
+        (Product::Launcher, Target::LinuxX86_64) => ArtifactFormat::TarGz,
         _ => return Err(invalid("Release product and target are invalid.")),
     };
     if metadata.artifact.format != expected_format {
@@ -477,11 +479,14 @@ fn validate_file_inventory(files: &[InventoryFile], allow_empty: bool) -> Result
 
 fn validate_launcher_file(file: &InventoryFile, target: Target) -> Result<()> {
     let path = file.path.as_str();
+    // The root copy is the Windows first-run seed; the macOS bundle copy is managed.
     if path == "scripts/default.txt" {
         return if target == Target::WindowsX86_64 && file.ownership == FileOwnership::Seed {
             Ok(())
         } else {
-            Err(invalid("scripts/default.txt is seed-only."))
+            Err(invalid(
+                "scripts/default.txt is permitted only as the Windows seed.",
+            ))
         };
     }
     let folded_path = path.to_ascii_lowercase();
@@ -497,7 +502,7 @@ fn validate_launcher_file(file: &InventoryFile, target: Target) -> Result<()> {
             return Ok(());
         }
         return Err(invalid(
-            "Official overlay files must be owned by the Windows launcher release.",
+            "Official overlay files at the package root must be owned by the Windows launcher release.",
         ));
     }
     if file.ownership != FileOwnership::Managed {
@@ -511,56 +516,97 @@ fn validate_launcher_file(file: &InventoryFile, target: Target) -> Result<()> {
     Ok(())
 }
 
+const PACKAGE_NOTICE_PATHS: &[&str] = &[
+    "LICENSE.md",
+    "README.md",
+    "licenses/MinHook-LICENSE.txt",
+    "licenses/Dear-ImGui-LICENSE.txt",
+    "licenses/Lua-COPYRIGHT.txt",
+    "licenses/Inter-OFL.txt",
+    "licenses/Cinzel-OFL.txt",
+    "licenses/JetBrainsMono-OFL.txt",
+    "licenses/Miniz-LICENSE.txt",
+];
+
+const CLIENT_EXTENSION_PATHS: &[&str] = &[
+    "bahamut-loader.exe",
+    "bahamut.dll",
+    "plugins/screenshot.dll",
+    "plugins/discord-rpc.dll",
+    "addons/chatlogs/addon.toml",
+    "addons/chatlogs/chatlogs.lua",
+    "addons/zonename/addon.toml",
+    "addons/zonename/zonename.lua",
+    "addons/packetlogger/addon.toml",
+    "addons/packetlogger/packetlogger.lua",
+    "addons/combatparser/addon.toml",
+    "addons/combatparser/combatparser.lua",
+    "addons/distance/addon.toml",
+    "addons/distance/distance.lua",
+    "addons/fps/addon.toml",
+    "addons/fps/fps.lua",
+    "addons/pos/addon.toml",
+    "addons/pos/pos.lua",
+    "addons/targethp/addon.toml",
+    "addons/targethp/targethp.lua",
+    "addons/wiki/addon.toml",
+    "addons/wiki/wiki.lua",
+];
+
+const MACOS_APP_CONTENTS: &str = "Bahamut Launcher.app/Contents/";
+
 fn allowed_launcher_managed_path(path: &str, target: Target) -> bool {
-    if target == Target::WindowsX86_64 && path.starts_with("plugins/dats/bahamut-dats-overlay/") {
+    match target {
+        Target::WindowsX86_64 => {
+            path.starts_with("plugins/dats/bahamut-dats-overlay/")
+                || PACKAGE_NOTICE_PATHS.contains(&path)
+                || CLIENT_EXTENSION_PATHS.contains(&path)
+                || matches!(
+                    path,
+                    "bahamut-launcher.exe"
+                        | "bahamut-update-helper.exe"
+                        | "prerequisites/vc_redist.x86.exe"
+                        | "prerequisites/MicrosoftEdgeWebView2Setup.exe"
+                )
+        }
+        Target::LinuxX86_64 => path == "bahamut-launcher" || PACKAGE_NOTICE_PATHS.contains(&path),
+        Target::MacosUniversal => allowed_macos_bundle_path(path),
+        Target::PlatformIndependent => false,
+    }
+}
+
+// The macOS artifact is one sealed app bundle holding no writable state; the
+// launcher keeps configuration, logs, and screenshots outside it.
+fn allowed_macos_bundle_path(path: &str) -> bool {
+    let Some(contents) = path.strip_prefix(MACOS_APP_CONTENTS) else {
+        return false;
+    };
+    if path
+        .split('/')
+        .any(|part| part.starts_with("._") || part == "__MACOSX")
+    {
+        return false;
+    }
+    if matches!(
+        contents,
+        "Info.plist"
+            | "MacOS/bahamut-launcher"
+            | "_CodeSignature/CodeResources"
+            | "CodeResources"
+            | "Resources/icon.icns"
+    ) {
         return true;
     }
-    let common = matches!(
-        path,
-        "LICENSE.md"
-            | "README.md"
-            | "licenses/MinHook-LICENSE.txt"
-            | "licenses/Dear-ImGui-LICENSE.txt"
-            | "licenses/Lua-COPYRIGHT.txt"
-            | "licenses/Inter-OFL.txt"
-            | "licenses/Cinzel-OFL.txt"
-            | "licenses/JetBrainsMono-OFL.txt"
-            | "licenses/Miniz-LICENSE.txt"
-    );
-    common
-        || match target {
-            Target::WindowsX86_64 => matches!(
-                path,
-                "bahamut-launcher.exe"
-                    | "bahamut-update-helper.exe"
-                    | "bahamut-loader.exe"
-                    | "bahamut.dll"
-                    | "plugins/screenshot.dll"
-                    | "plugins/discord-rpc.dll"
-                    | "prerequisites/vc_redist.x86.exe"
-                    | "prerequisites/MicrosoftEdgeWebView2Setup.exe"
-                    | "addons/chatlogs/addon.toml"
-                    | "addons/chatlogs/chatlogs.lua"
-                    | "addons/zonename/addon.toml"
-                    | "addons/zonename/zonename.lua"
-                    | "addons/packetlogger/addon.toml"
-                    | "addons/packetlogger/packetlogger.lua"
-                    | "addons/combatparser/addon.toml"
-                    | "addons/combatparser/combatparser.lua"
-                    | "addons/distance/addon.toml"
-                    | "addons/distance/distance.lua"
-                    | "addons/fps/addon.toml"
-                    | "addons/fps/fps.lua"
-                    | "addons/pos/addon.toml"
-                    | "addons/pos/pos.lua"
-                    | "addons/targethp/addon.toml"
-                    | "addons/targethp/targethp.lua"
-                    | "addons/wiki/addon.toml"
-                    | "addons/wiki/wiki.lua"
-            ),
-            Target::LinuxX86_64 | Target::MacosUniversal => path == "bahamut-launcher",
-            Target::PlatformIndependent => false,
-        }
+    let Some(resource) = contents.strip_prefix("Resources/") else {
+        return false;
+    };
+    resource.starts_with("plugins/dats/bahamut-dats-overlay/")
+        || PACKAGE_NOTICE_PATHS.contains(&resource)
+        || CLIENT_EXTENSION_PATHS.contains(&resource)
+        || matches!(
+            resource,
+            "licenses/MinGW-w64-runtime-COPYING.txt" | "scripts/default.txt"
+        )
 }
 
 fn parse_stable_version(value: &str) -> Result<Version> {
@@ -1237,7 +1283,7 @@ fn validate_archive_directory(
                 | "screenshots"
                 | "licenses"
         ),
-        Product::Launcher => directory == "licenses",
+        Product::Launcher => metadata.target == Target::LinuxX86_64 && directory == "licenses",
         Product::Game => false,
     };
     if allowed {
@@ -1339,74 +1385,247 @@ mod tests {
         target: Target,
         contents: &[u8],
     ) -> (ReleaseMetadata, PathBuf) {
-        let launcher_path = if target == Target::WindowsX86_64 {
-            "bahamut-launcher.exe"
-        } else {
-            "bahamut-launcher"
-        };
-        let mut files = vec![file(launcher_path, contents, FileOwnership::Managed)];
-        if target == Target::WindowsX86_64 {
-            files.push(file(
-                "scripts/default.txt",
-                b"/fillmode\n",
-                FileOwnership::Seed,
-            ));
-            files.push(file(
-                "plugins/dats/bahamut-dats-overlay/overlay.toml",
-                b"[overlay]\n",
-                FileOwnership::Managed,
-            ));
-        }
         let path = directory.join(format!(
             "artifact-{version}.{}",
-            match target {
-                Target::WindowsX86_64 => "zip",
-                _ => "tar.gz",
-            }
+            format_extension(launcher_format(target))
         ));
-        match target {
-            Target::WindowsX86_64 => write_zip(
-                &path,
-                &[
-                    (launcher_path, contents),
-                    ("scripts/default.txt", b"/fillmode\n"),
-                    (
+        let files = match target {
+            Target::WindowsX86_64 => {
+                let files = vec![
+                    file("bahamut-launcher.exe", contents, FileOwnership::Managed),
+                    file("scripts/default.txt", b"/fillmode\n", FileOwnership::Seed),
+                    file(
                         "plugins/dats/bahamut-dats-overlay/overlay.toml",
                         b"[overlay]\n",
+                        FileOwnership::Managed,
                     ),
-                ],
-            ),
-            _ => write_tar_gz(&path, &[("./bahamut-launcher", contents)]),
+                ];
+                write_zip(
+                    &path,
+                    &[
+                        ("bahamut-launcher.exe", contents),
+                        ("scripts/default.txt", b"/fillmode\n"),
+                        (
+                            "plugins/dats/bahamut-dats-overlay/overlay.toml",
+                            b"[overlay]\n",
+                        ),
+                    ],
+                )
+                .unwrap();
+                files
+            }
+            Target::LinuxX86_64 => {
+                write_tar_gz(&path, &[("./bahamut-launcher", contents)]).unwrap();
+                vec![file("bahamut-launcher", contents, FileOwnership::Managed)]
+            }
+            Target::MacosUniversal => {
+                let bundle = macos_bundle_files(contents);
+                write_zip_entries(&path, &ditto_entries(&bundle)).unwrap();
+                managed_inventory(&bundle)
+            }
+            Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
+        };
+        (launcher_metadata(target, version, files, &path), path)
+    }
+
+    fn launcher_format(target: Target) -> ArtifactFormat {
+        match target {
+            Target::WindowsX86_64 | Target::MacosUniversal => ArtifactFormat::Zip,
+            Target::LinuxX86_64 => ArtifactFormat::TarGz,
+            Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
         }
-        .unwrap();
-        let (length, digest) = hash_file(&path).unwrap();
-        (
-            ReleaseMetadata {
-                schema_version: 1,
-                product: Product::Launcher,
-                channel: Channel::Stable,
-                target,
-                version: version.into(),
-                artifact: ArtifactIdentity {
-                    object_key: format!(
-                        "launcher/{version}/{}/{digest}.{}",
-                        target_name(target),
-                        if target == Target::WindowsX86_64 {
-                            "zip"
-                        } else {
-                            "tar.gz"
-                        }
-                    ),
-                    format: if target == Target::WindowsX86_64 {
-                        ArtifactFormat::Zip
-                    } else {
-                        ArtifactFormat::TarGz
-                    },
-                    length,
-                    sha256: digest,
-                },
-                inventory: ReleaseInventory::Launcher { files },
+    }
+
+    fn format_extension(format: ArtifactFormat) -> &'static str {
+        match format {
+            ArtifactFormat::Zip => "zip",
+            ArtifactFormat::TarGz => "tar.gz",
+        }
+    }
+
+    fn launcher_metadata(
+        target: Target,
+        version: &str,
+        files: Vec<InventoryFile>,
+        artifact: &Path,
+    ) -> ReleaseMetadata {
+        let format = launcher_format(target);
+        let (length, digest) = hash_file(artifact).unwrap();
+        ReleaseMetadata {
+            schema_version: 1,
+            product: Product::Launcher,
+            channel: Channel::Stable,
+            target,
+            version: version.into(),
+            artifact: ArtifactIdentity {
+                object_key: format!(
+                    "launcher/{version}/{}/{digest}.{}",
+                    target_name(target),
+                    format_extension(format)
+                ),
+                format,
+                length,
+                sha256: digest,
             },
+            inventory: ReleaseInventory::Launcher { files },
+        }
+    }
+
+    const MACOS_APP: &str = "Bahamut Launcher.app";
+
+    // Contents/Resources mirrors `expected_files` in scripts/stage-unix-release.sh minus the
+    // launcher, plus a synthetic overlay DAT standing in for the package's dynamic entries.
+    const MACOS_BUNDLE_RESOURCES: &[&str] = &[
+        "bahamut-loader.exe",
+        "bahamut.dll",
+        "plugins/screenshot.dll",
+        "plugins/discord-rpc.dll",
+        "plugins/dats/bahamut-dats-overlay/overlay.toml",
+        "plugins/dats/bahamut-dats-overlay/data/1C/59/00/CB.DAT",
+        "addons/chatlogs/addon.toml",
+        "addons/chatlogs/chatlogs.lua",
+        "addons/zonename/addon.toml",
+        "addons/zonename/zonename.lua",
+        "addons/packetlogger/addon.toml",
+        "addons/packetlogger/packetlogger.lua",
+        "addons/combatparser/addon.toml",
+        "addons/combatparser/combatparser.lua",
+        "addons/distance/addon.toml",
+        "addons/distance/distance.lua",
+        "addons/targethp/addon.toml",
+        "addons/targethp/targethp.lua",
+        "addons/fps/addon.toml",
+        "addons/fps/fps.lua",
+        "addons/pos/addon.toml",
+        "addons/pos/pos.lua",
+        "addons/wiki/addon.toml",
+        "addons/wiki/wiki.lua",
+        "scripts/default.txt",
+        "LICENSE.md",
+        "README.md",
+        "licenses/MinHook-LICENSE.txt",
+        "licenses/Dear-ImGui-LICENSE.txt",
+        "licenses/Lua-COPYRIGHT.txt",
+        "licenses/Miniz-LICENSE.txt",
+        "licenses/Inter-OFL.txt",
+        "licenses/Cinzel-OFL.txt",
+        "licenses/JetBrainsMono-OFL.txt",
+        "licenses/MinGW-w64-runtime-COPYING.txt",
+    ];
+
+    // A stapled build: Contents/CodeResources is present.
+    fn macos_bundle_files(launcher: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let mut files = vec![
+            (
+                format!("{MACOS_APP}/Contents/Info.plist"),
+                b"<plist version=\"1.0\"/>".to_vec(),
+            ),
+            (
+                format!("{MACOS_APP}/Contents/MacOS/bahamut-launcher"),
+                launcher.to_vec(),
+            ),
+            (
+                format!("{MACOS_APP}/Contents/_CodeSignature/CodeResources"),
+                b"code resources".to_vec(),
+            ),
+            (
+                format!("{MACOS_APP}/Contents/CodeResources"),
+                b"notarization ticket".to_vec(),
+            ),
+            (
+                format!("{MACOS_APP}/Contents/Resources/icon.icns"),
+                b"icns".to_vec(),
+            ),
+        ];
+        files.extend(MACOS_BUNDLE_RESOURCES.iter().map(|resource| {
+            (
+                format!("{MACOS_APP}/Contents/Resources/{resource}"),
+                resource.as_bytes().to_vec(),
+            )
+        }));
+        files
+    }
+
+    fn managed_inventory(files: &[(String, Vec<u8>)]) -> Vec<InventoryFile> {
+        files
+            .iter()
+            .map(|(path, contents)| file(path, contents, FileOwnership::Managed))
+            .collect()
+    }
+
+    enum ZipEntry {
+        Directory(String),
+        File(String, Vec<u8>),
+        Symlink(String, String),
+    }
+
+    // Mirrors `ditto -c -k --norsrc --keepParent`: every ancestor directory
+    // precedes its contents as an explicit entry.
+    fn ditto_entries(files: &[(String, Vec<u8>)]) -> Vec<ZipEntry> {
+        let mut names = BTreeMap::new();
+        for (path, contents) in files {
+            for (index, _) in path.match_indices('/') {
+                names.entry(path[..=index].to_owned()).or_insert(None);
+            }
+            names.insert(path.clone(), Some(contents.clone()));
+        }
+        names
+            .into_iter()
+            .map(|(name, contents)| match contents {
+                Some(contents) => ZipEntry::File(name, contents),
+                None => ZipEntry::Directory(name),
+            })
+            .collect()
+    }
+
+    fn write_zip_entries(path: &Path, entries: &[ZipEntry]) -> io::Result<()> {
+        let output = File::create(path)?;
+        let mut archive = zip::ZipWriter::new(output);
+        for entry in entries {
+            match entry {
+                ZipEntry::Directory(name) => archive.add_directory(
+                    name.as_str(),
+                    SimpleFileOptions::default().unix_permissions(0o755),
+                )?,
+                ZipEntry::File(name, contents) => {
+                    let mode = if name.ends_with("/Contents/MacOS/bahamut-launcher") {
+                        0o755
+                    } else {
+                        0o644
+                    };
+                    archive.start_file(
+                        name.as_str(),
+                        SimpleFileOptions::default().unix_permissions(mode),
+                    )?;
+                    archive.write_all(contents)?;
+                }
+                ZipEntry::Symlink(name, target) => archive.add_symlink(
+                    name.as_str(),
+                    target.as_str(),
+                    SimpleFileOptions::default(),
+                )?,
+            }
+        }
+        archive.finish()?;
+        Ok(())
+    }
+
+    // Consumers validate the metadata before verifying the artifact against it.
+    fn verify_release(metadata: &ReleaseMetadata, artifact: &Path) -> Result<()> {
+        validate_metadata(metadata, None)?;
+        verify_artifact_file(metadata, artifact)
+    }
+
+    fn macos_zip_release(
+        directory: &Path,
+        name: &str,
+        files: Vec<InventoryFile>,
+        entries: &[ZipEntry],
+    ) -> (ReleaseMetadata, PathBuf) {
+        let path = directory.join(format!("{name}.zip"));
+        write_zip_entries(&path, entries).unwrap();
+        (
+            launcher_metadata(Target::MacosUniversal, "1.0.0", files, &path),
             path,
         )
     }
@@ -1857,41 +2076,14 @@ mod tests {
         target: Target,
         directory: &Path,
     ) -> (ReleaseMetadata, PathBuf) {
-        let format = match target {
-            Target::WindowsX86_64 => ArtifactFormat::Zip,
-            Target::LinuxX86_64 | Target::MacosUniversal => ArtifactFormat::TarGz,
-            Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
-        };
-        let extension = match format {
-            ArtifactFormat::Zip => "zip",
-            ArtifactFormat::TarGz => "tar.gz",
-        };
-        let path = directory.join(format!("inventory-only.{extension}"));
+        let format = launcher_format(target);
+        let path = directory.join(format!("inventory-only.{}", format_extension(format)));
         match format {
             ArtifactFormat::Zip => write_zip(&path, &[]).unwrap(),
             ArtifactFormat::TarGz => write_tar_gz(&path, &[]).unwrap(),
         }
-        let (length, digest) = hash_file(&path).unwrap();
         (
-            ReleaseMetadata {
-                schema_version: 1,
-                product: Product::Launcher,
-                channel: Channel::Stable,
-                target,
-                version: version.into(),
-                artifact: ArtifactIdentity {
-                    object_key: format!(
-                        "launcher/{version}/{}/{digest}.{extension}",
-                        target_name(target)
-                    ),
-                    format,
-                    length,
-                    sha256: digest,
-                },
-                inventory: ReleaseInventory::Launcher {
-                    files: files.to_vec(),
-                },
-            },
+            launcher_metadata(target, version, files.to_vec(), &path),
             path,
         )
     }
@@ -2018,6 +2210,432 @@ mod tests {
         };
         files[0].sha256 = sha256_hex(b"wrong content");
         verify_artifact_file(&changed, &artifact).unwrap_err();
+    }
+
+    #[test]
+    fn macos_launcher_release_is_a_zip_under_a_zip_object_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let (metadata, artifact) = launcher_release(
+            directory.path(),
+            "1.0.0",
+            Target::MacosUniversal,
+            b"macos launcher",
+        );
+        let digest = metadata.artifact.sha256.clone();
+        assert_eq!(metadata.artifact.format, ArtifactFormat::Zip);
+        assert_eq!(
+            metadata.artifact.object_key,
+            format!("launcher/1.0.0/macos-universal/{digest}.zip")
+        );
+        let (_, _, verified) = signed_release(&metadata, None);
+        assert_eq!(verified.metadata.target, Target::MacosUniversal);
+        verify_release(&metadata, &artifact).unwrap();
+
+        let tar_gz_key = format!("launcher/1.0.0/macos-universal/{digest}.tar.gz");
+        let mut tar_gz = metadata.clone();
+        tar_gz.artifact.format = ArtifactFormat::TarGz;
+        tar_gz.artifact.object_key = tar_gz_key.clone();
+        assert!(validate_metadata(&tar_gz, None).is_err());
+        let mut tar_gz_format = metadata.clone();
+        tar_gz_format.artifact.format = ArtifactFormat::TarGz;
+        assert!(validate_metadata(&tar_gz_format, None).is_err());
+        let mut tar_gz_extension = metadata.clone();
+        tar_gz_extension.artifact.object_key = tar_gz_key;
+        assert!(validate_metadata(&tar_gz_extension, None).is_err());
+    }
+
+    #[test]
+    fn ditto_shaped_macos_app_zip_verifies_with_nested_directory_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let (metadata, artifact) = launcher_release(
+            directory.path(),
+            "1.0.0",
+            Target::MacosUniversal,
+            b"macos launcher",
+        );
+        let archive = ZipArchive::new(File::open(&artifact).unwrap()).unwrap();
+        let names: Vec<&str> = archive.file_names().collect();
+        assert!(
+            names
+                .iter()
+                .all(|name| name.starts_with("Bahamut Launcher.app/"))
+        );
+        for directory_entry in [
+            "Bahamut Launcher.app/",
+            "Bahamut Launcher.app/Contents/",
+            "Bahamut Launcher.app/Contents/_CodeSignature/",
+            "Bahamut Launcher.app/Contents/Resources/addons/wiki/",
+            "Bahamut Launcher.app/Contents/Resources/plugins/dats/bahamut-dats-overlay/data/1C/59/00/",
+        ] {
+            assert!(names.contains(&directory_entry), "{directory_entry}");
+        }
+        verify_release(&metadata, &artifact).unwrap();
+
+        let unstapled: Vec<_> = macos_bundle_files(b"macos launcher")
+            .into_iter()
+            .filter(|(path, _)| path != "Bahamut Launcher.app/Contents/CodeResources")
+            .collect();
+        let (metadata, artifact) = macos_zip_release(
+            directory.path(),
+            "unstapled",
+            managed_inventory(&unstapled),
+            &ditto_entries(&unstapled),
+        );
+        validate_metadata(&metadata, None).unwrap();
+        verify_release(&metadata, &artifact).unwrap();
+    }
+
+    #[test]
+    fn macos_app_zip_rejects_apple_double_and_macosx_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = macos_bundle_files(b"macos launcher");
+        let inventory = managed_inventory(&bundle);
+        let (metadata, artifact) = macos_zip_release(
+            directory.path(),
+            "canonical",
+            inventory.clone(),
+            &ditto_entries(&bundle),
+        );
+        verify_release(&metadata, &artifact).unwrap();
+
+        let apple_double = b"\x00\x05\x16\x07".to_vec();
+        for (index, extra) in [
+            vec![ZipEntry::File(
+                "Bahamut Launcher.app/Contents/._Info.plist".into(),
+                apple_double.clone(),
+            )],
+            vec![ZipEntry::File(
+                "Bahamut Launcher.app/._Contents".into(),
+                apple_double.clone(),
+            )],
+            vec![
+                ZipEntry::Directory("__MACOSX/".into()),
+                ZipEntry::Directory("__MACOSX/Bahamut Launcher.app/".into()),
+                ZipEntry::File(
+                    "__MACOSX/Bahamut Launcher.app/._Contents".into(),
+                    apple_double.clone(),
+                ),
+            ],
+            vec![ZipEntry::Directory("__MACOSX/".into())],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut entries = ditto_entries(&bundle);
+            entries.extend(extra);
+            let (metadata, artifact) = macos_zip_release(
+                directory.path(),
+                &format!("apple-metadata-{index}"),
+                inventory.clone(),
+                &entries,
+            );
+            assert!(verify_release(&metadata, &artifact).is_err(), "{index}");
+        }
+
+        for path in [
+            "Bahamut Launcher.app/Contents/Resources/._icon.icns",
+            "Bahamut Launcher.app/Contents/Resources/plugins/dats/bahamut-dats-overlay/._overlay.toml",
+            "Bahamut Launcher.app/Contents/Resources/plugins/dats/bahamut-dats-overlay/__MACOSX/overlay.toml",
+            "__MACOSX/Bahamut Launcher.app/Contents/._Info.plist",
+        ] {
+            let mut files = inventory.clone();
+            files.push(file(path, &apple_double, FileOwnership::Managed));
+            let (metadata, _) = launcher_release_with_inventory(
+                &files,
+                "1.0.0",
+                Target::MacosUniversal,
+                directory.path(),
+            );
+            assert!(validate_metadata(&metadata, None).is_err(), "{path}");
+        }
+    }
+
+    #[test]
+    fn macos_app_zip_rejects_symlinks_inside_the_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let link_target = "../../../../outside.dll";
+        let mut bundle = macos_bundle_files(b"macos launcher");
+        // A ZIP symlink stores its target as entry bytes; matching them to the
+        // inventory leaves the entry type as the only difference.
+        bundle
+            .iter_mut()
+            .find(|(path, _)| path == "Bahamut Launcher.app/Contents/Resources/bahamut.dll")
+            .unwrap()
+            .1 = link_target.as_bytes().to_vec();
+        let inventory = managed_inventory(&bundle);
+        let (metadata, artifact) = macos_zip_release(
+            directory.path(),
+            "canonical",
+            inventory.clone(),
+            &ditto_entries(&bundle),
+        );
+        verify_release(&metadata, &artifact).unwrap();
+
+        for (index, (link, target)) in [
+            (
+                "Bahamut Launcher.app/Contents/Resources/bahamut.dll",
+                link_target,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/plugins/",
+                "../../../../outside",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut entries = ditto_entries(&bundle);
+            let replaced = entries
+                .iter_mut()
+                .find(|entry| {
+                    matches!(entry, ZipEntry::File(name, _) | ZipEntry::Directory(name) if name == link)
+                })
+                .unwrap();
+            *replaced = ZipEntry::Symlink(link.into(), target.into());
+            let (metadata, artifact) = macos_zip_release(
+                directory.path(),
+                &format!("symlink-{index}"),
+                inventory.clone(),
+                &entries,
+            );
+            assert!(verify_release(&metadata, &artifact).is_err(), "{link}");
+        }
+    }
+
+    #[test]
+    fn macos_inventory_rejects_writable_and_root_level_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = macos_bundle_files(b"macos launcher");
+        let inventory = managed_inventory(&bundle);
+        let (metadata, _) = launcher_release_with_inventory(
+            &inventory,
+            "1.0.0",
+            Target::MacosUniversal,
+            directory.path(),
+        );
+        validate_metadata(&metadata, None).unwrap();
+
+        for (path, ownership) in [
+            (
+                "Bahamut Launcher.app/Contents/MacOS/config/bahamut.ini",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/MacOS/bahamut-loader.exe",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/config/bahamut.ini",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/config/addons/fps.ini",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/logs/launcher/bahamut-launcher.log",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/screenshots/capture.png",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/cache/state.bin",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/backups/backup.zip",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/addons/custom/addon.toml",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/plugins/dats/user-package/overlay.toml",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/plugins/unreviewed.dll",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/bahamut-launcher",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/bahamut-update-helper.exe",
+                FileOwnership::Managed,
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/prerequisites/vc_redist.x86.exe",
+                FileOwnership::Managed,
+            ),
+            ("Bahamut Launcher.app/Info.plist", FileOwnership::Managed),
+            ("Other.app/Contents/Info.plist", FileOwnership::Managed),
+            ("bahamut-launcher", FileOwnership::Managed),
+            ("bahamut-launcher.exe", FileOwnership::Managed),
+            ("bahamut-update-helper.exe", FileOwnership::Managed),
+            ("bahamut-loader.exe", FileOwnership::Managed),
+            ("bahamut.dll", FileOwnership::Managed),
+            ("plugins/screenshot.dll", FileOwnership::Managed),
+            ("addons/fps/addon.toml", FileOwnership::Managed),
+            ("prerequisites/vc_redist.x86.exe", FileOwnership::Managed),
+            (
+                "prerequisites/MicrosoftEdgeWebView2Setup.exe",
+                FileOwnership::Managed,
+            ),
+            (
+                "plugins/dats/bahamut-dats-overlay/overlay.toml",
+                FileOwnership::Managed,
+            ),
+            ("LICENSE.md", FileOwnership::Managed),
+            ("README.md", FileOwnership::Managed),
+            ("licenses/MinHook-LICENSE.txt", FileOwnership::Managed),
+            ("config/bahamut.ini", FileOwnership::Managed),
+            ("scripts/default.txt", FileOwnership::Managed),
+            ("scripts/default.txt", FileOwnership::Seed),
+        ] {
+            let mut files = inventory.clone();
+            files.push(file(path, b"x", ownership));
+            let (metadata, _) = launcher_release_with_inventory(
+                &files,
+                "1.0.0",
+                Target::MacosUniversal,
+                directory.path(),
+            );
+            assert!(validate_metadata(&metadata, None).is_err(), "{path}");
+        }
+
+        let mut seeded = inventory.clone();
+        let default_script = seeded
+            .iter_mut()
+            .find(|file| {
+                file.path
+                    .ends_with("/Contents/Resources/scripts/default.txt")
+            })
+            .unwrap();
+        default_script.ownership = FileOwnership::Seed;
+        let (metadata, _) = launcher_release_with_inventory(
+            &seeded,
+            "1.0.0",
+            Target::MacosUniversal,
+            directory.path(),
+        );
+        assert!(validate_metadata(&metadata, None).is_err());
+
+        for (index, empty_directory) in [
+            "Bahamut Launcher.app/Contents/MacOS/config/",
+            "Bahamut Launcher.app/Contents/Resources/logs/",
+            "Bahamut Launcher.app/Contents/Resources/screenshots/",
+            "licenses/",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut entries = ditto_entries(&bundle);
+            entries.push(ZipEntry::Directory(empty_directory.into()));
+            let (metadata, artifact) = macos_zip_release(
+                directory.path(),
+                &format!("empty-directory-{index}"),
+                inventory.clone(),
+                &entries,
+            );
+            assert!(
+                verify_release(&metadata, &artifact).is_err(),
+                "{empty_directory}"
+            );
+        }
+    }
+
+    #[test]
+    fn macos_bundle_case_aliases_are_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let bundle = macos_bundle_files(b"macos launcher");
+        let inventory = managed_inventory(&bundle);
+        let (metadata, artifact) = macos_zip_release(
+            directory.path(),
+            "canonical",
+            inventory.clone(),
+            &ditto_entries(&bundle),
+        );
+        verify_release(&metadata, &artifact).unwrap();
+
+        for (canonical, alias) in [
+            (
+                "Bahamut Launcher.app/Contents/Info.plist",
+                "bahamut launcher.app/Contents/Info.plist",
+            ),
+            (
+                "Bahamut Launcher.app/Contents/MacOS/bahamut-launcher",
+                "Bahamut Launcher.app/Contents/macos/bahamut-launcher",
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/icon.icns",
+                "Bahamut Launcher.app/Contents/resources/icon.icns",
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/scripts/default.txt",
+                "Bahamut Launcher.app/Contents/Resources/Scripts/default.txt",
+            ),
+            (
+                "Bahamut Launcher.app/Contents/Resources/plugins/dats/bahamut-dats-overlay/overlay.toml",
+                "Bahamut Launcher.app/Contents/Resources/plugins/dats/Bahamut-Dats-Overlay/overlay.toml",
+            ),
+        ] {
+            let mut renamed = inventory.clone();
+            renamed
+                .iter_mut()
+                .find(|file| file.path == canonical)
+                .unwrap()
+                .path = alias.into();
+            let (metadata, _) = launcher_release_with_inventory(
+                &renamed,
+                "1.0.0",
+                Target::MacosUniversal,
+                directory.path(),
+            );
+            assert!(validate_metadata(&metadata, None).is_err(), "{alias}");
+
+            let mut beside = inventory.clone();
+            beside.push(file(alias, b"alias", FileOwnership::Managed));
+            let (metadata, _) = launcher_release_with_inventory(
+                &beside,
+                "1.0.0",
+                Target::MacosUniversal,
+                directory.path(),
+            );
+            assert!(validate_metadata(&metadata, None).is_err(), "{alias}");
+        }
+
+        for (index, (canonical, alias)) in [
+            (
+                "Bahamut Launcher.app/Contents/Resources/icon.icns",
+                "Bahamut Launcher.app/Contents/Resources/Icon.icns",
+            ),
+            ("Bahamut Launcher.app/", "bahamut launcher.app/"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut entries = ditto_entries(&bundle);
+            for entry in &mut entries {
+                let (ZipEntry::File(name, _)
+                | ZipEntry::Directory(name)
+                | ZipEntry::Symlink(name, _)) = entry;
+                if let Some(rest) = name.strip_prefix(canonical) {
+                    *name = format!("{alias}{rest}");
+                }
+            }
+            let (metadata, artifact) = macos_zip_release(
+                directory.path(),
+                &format!("zip-alias-{index}"),
+                inventory.clone(),
+                &entries,
+            );
+            assert!(verify_release(&metadata, &artifact).is_err(), "{alias}");
+        }
     }
 
     #[test]

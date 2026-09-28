@@ -598,13 +598,11 @@ mod tests {
     #[test]
     fn derives_prefix_from_nested_game_dir() {
         let game = PathBuf::from(
-            "/Users/me/Library/Application Support/com.BahamutXIV.Launcher/prefix/drive_c/Program Files (x86)/SquareEnix/FINAL FANTASY XIV",
+            "/Users/me/.bahamut-launcher/prefix/drive_c/Program Files (x86)/SquareEnix/FINAL FANTASY XIV",
         );
         assert_eq!(
             derive_prefix_from_game_location(&game),
-            Some(PathBuf::from(
-                "/Users/me/Library/Application Support/com.BahamutXIV.Launcher/prefix"
-            ))
+            Some(PathBuf::from("/Users/me/.bahamut-launcher/prefix"))
         );
     }
 

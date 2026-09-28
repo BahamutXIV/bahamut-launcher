@@ -70,19 +70,30 @@ fn continue_shutdown(app: tauri::AppHandle, state: &PatcherIpcState, exit_code: 
     true
 }
 
+/// Update recovery runs before anything else writes, so it creates the state root first.
 fn request_pending_update_recovery(force_rollback: bool) -> Result<bool, String> {
-    let root = dirs::current_exe_dir()
-        .map_err(|error| format!("Could not resolve the launcher directory: {error}"))?;
+    let roots = dirs::launcher_roots()
+        .map_err(|error| format!("Could not resolve the launcher directories: {error}"))?;
+    request_pending_update_recovery_for(&roots, force_rollback)
+}
+
+fn request_pending_update_recovery_for(
+    roots: &dirs::LauncherRoots,
+    force_rollback: bool,
+) -> Result<bool, String> {
+    let root = roots
+        .ensure_state()
+        .map_err(|error| format!("Could not prepare the launcher state directory: {error}"))?;
     launcher_updates::recover_failed_launcher_update(&root, force_rollback)
 }
 
 fn main() {
     if launcher_updates::has_recovered_update_argument() {
-        let root = match dirs::current_exe_dir() {
+        let root = match dirs::state_root() {
             Ok(root) => root,
             Err(error) => {
                 prerequisites::show_startup_error_dialog(&format!(
-                    "Could not resolve the launcher directory: {error}"
+                    "Could not resolve the launcher state directory: {error}"
                 ));
                 return;
             }
@@ -130,8 +141,16 @@ fn main() {
         "BahamutXIV Launcher v{}",
         bahamut_launcher::version::LAUNCHER_VERSION
     );
-    if let Ok(root) = dirs::current_exe_dir() {
-        tracing::info!("Root = {}", root.display());
+    match dirs::launcher_roots() {
+        Ok(roots) => {
+            tracing::info!("Install root = {}", roots.install.display());
+            tracing::info!("State root = {}", roots.state.display());
+        }
+        Err(error) => tracing::warn!(%error, "launcher roots are unavailable"),
+    }
+    // Created here so the Wine code never creates it with a wider mode.
+    if let Err(error) = dirs::ensure_data_dir() {
+        tracing::warn!(%error, "launcher data directory is unavailable");
     }
     if let Some(log_path) = launcher_log_path.as_deref() {
         tracing::info!("Launcher log = {}", log_path.display());
@@ -145,11 +164,11 @@ fn main() {
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|_| "<unavailable>".into()),
             selected_server = %config.selected_server,
-            "portable launcher configuration loaded"
+            "launcher configuration loaded"
         ),
         Err(err) => tracing::warn!(
             error = %err,
-            "launcher configuration failed; repair <exe-dir>/config/bahamut.ini"
+            "launcher configuration failed; repair <state-root>/config/bahamut.ini"
         ),
     }
 
@@ -162,11 +181,11 @@ fn main() {
         ),
     ] {
         match result {
-            Ok(()) => tracing::info!(file = name, "portable extension configuration loaded"),
+            Ok(()) => tracing::info!(file = name, "extension configuration loaded"),
             Err(error) => tracing::warn!(
                 file = name,
                 error = %error,
-                "extension configuration failed; repair the file under <exe-dir>/config"
+                "extension configuration failed; repair the file under <state-root>/config"
             ),
         }
     }
@@ -311,7 +330,7 @@ fn main() {
         }
     };
     if launcher_updates::has_update_transaction_argument() {
-        let confirmation = dirs::current_exe_dir()
+        let confirmation = dirs::state_root()
             .map_err(|error| error.to_string())
             .and_then(|root| launcher_updates::confirm_pending_launcher_update(&root));
         if let Err(error) = confirmation {

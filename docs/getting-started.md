@@ -4,9 +4,15 @@
 
 1. Download the archive for your system from the
    [releases page](https://github.com/BahamutXIV/bahamut-launcher/releases).
-   Extract the entire archive into a writable folder.
-2. Start `bahamut-launcher.exe` on Windows. On Linux or macOS, run
-   `./bahamut-launcher` from the extracted folder.
+   On Windows or Linux, extract the entire archive into a writable folder. On
+   macOS, unzip the archive (Safari may do this automatically) and optionally
+   move `Bahamut Launcher.app` to Applications.
+2. Start `bahamut-launcher.exe` on Windows, or run `./bahamut-launcher` from
+   the extracted folder on Linux. On macOS, open `Bahamut Launcher.app`; the
+   first launch may ask for access to the Documents folder, where the retail
+   config file and the patch download folder live, and, when a server
+   profile points at a machine on the local network, for local network
+   access.
 3. Choose Install to download the game into a new or empty folder. The default
    is `C:\Games\FINAL FANTASY XIV` on Windows or `~/Games/FINAL FANTASY XIV` on
    Linux and macOS. Use PATH to choose a different location before installing.
@@ -28,7 +34,7 @@ needs an Internet connection. If installation fails, use the
 |---|---|
 | Windows x86_64 | WebView2 Runtime and x86 Microsoft Visual C++ Runtime. The launcher installs missing runtimes when needed. |
 | Linux x86_64 | System Wine and the required desktop libraries. The tar.gz archive does not bundle system libraries. |
-| macOS, Apple Silicon or Intel | Universal executable, distributed as a tar.gz archive without an app bundle. Managed Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for the Wine engine. |
+| macOS, Apple Silicon or Intel | Universal app (`Bahamut Launcher.app`), distributed as a zip. Managed Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for the Wine engine. |
 
 Linux and macOS game launch and client extensions remain unverified against a
 live client. See
@@ -42,17 +48,28 @@ On Windows, missing prerequisites require an Internet connection and may show
 an elevation prompt. The WebView2 bootstrapper downloads its runtime from
 Microsoft. Restart Windows manually if an installer requests it.
 
-Keep all extracted launcher files together, including `bahamut-loader.exe`,
-`bahamut.dll`, and `plugins/`. On macOS, use `f1` through `f9` for Screenshot's
-`hotkey` in `config/plugins/screenshot/settings.ini` when the keyboard has no
-Print Screen key. Screenshot capture under Wine remains unverified.
+On Windows and Linux, keep all extracted launcher files together, including
+`bahamut-loader.exe`, `bahamut.dll`, and `plugins/`. Opening
+`Bahamut Launcher.app` on macOS keeps its files together automatically. On
+macOS, use `f1` through `f9` for Screenshot's `hotkey` in
+`~/.bahamut-launcher/config/plugins/screenshot/settings.ini` when the
+keyboard has no Print Screen key. Screenshot capture under Wine remains
+unverified.
 
 ## Portable archives
 
-Portable settings remain beside the launcher. Managed Wine data on Linux and
-macOS uses the system's user data directory. See
+On Windows and Linux, portable settings remain beside the launcher. The
+macOS app keeps nearly all its writable state instead in
+`~/.bahamut-launcher` (WebKit keeps the WebView's own storage under
+`~/Library/WebKit` instead): configuration, logs, backups, screenshots,
+scripts, custom addons, and custom DAT packages, plus the managed Wine engine
+and prefix. Linux runs system Wine and has no managed Wine engine; there,
+only the managed prefix, the DXVK cache under `runtime/`, and the
+`wine.log`/`helper.log` logs use that same folder rather than sitting beside
+the launcher. The `BAHAMUT_LAUNCHER_HOME` environment variable selects a
+different folder on Linux and macOS. See
 [Configuration](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/configuration.md)
-for game options, extensions, and backups.
+for exact paths, game options, extensions, and backups.
 
 Release archives include `LICENSE.md` and the bundled library and font notices
 under `licenses/`. SHA-256 checksum files are supplied beside the archives on
