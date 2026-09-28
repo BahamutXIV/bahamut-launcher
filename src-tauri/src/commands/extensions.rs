@@ -15,11 +15,9 @@ use crate::shell_config::{load_dats_config, load_extensions_config};
 #[tauri::command]
 pub(crate) fn get_extension_inventory() -> Result<ExtensionInventoryView, String> {
     let layout = extensions::extension_layout()?;
-    let packages = bahamut_launcher::extensions::discover_addons(&layout.addons)
-        .map_err(|error| error.to_string())?;
+    let packages = extensions::installed_addons(&layout)?;
     let config = load_extensions_config()?;
-    let dat_packages = bahamut_launcher::extensions::discover_overlay_packages(&layout.dats)
-        .map_err(|error| error.to_string())?;
+    let dat_packages = extensions::installed_overlay_packages(&layout)?;
     let dat_config = load_dats_config()?;
     Ok(extension_inventory_view_with_overlays(
         packages,
@@ -198,8 +196,7 @@ pub(crate) fn set_addon_enabled(
     enabled: bool,
 ) -> Result<ExtensionInventoryView, String> {
     let layout = extensions::extension_layout()?;
-    let packages = bahamut_launcher::extensions::discover_addons(&layout.addons)
-        .map_err(|error| error.to_string())?;
+    let packages = extensions::installed_addons(&layout)?;
     if !packages.iter().any(|package| package.id == id) {
         return Err(format!("addon {id:?} is not installed"));
     }
@@ -207,8 +204,7 @@ pub(crate) fn set_addon_enabled(
     config
         .set_addon_enabled(&id, enabled)
         .map_err(|error| error.to_string())?;
-    let dat_packages = bahamut_launcher::extensions::discover_overlay_packages(&layout.dats)
-        .map_err(|error| error.to_string())?;
+    let dat_packages = extensions::installed_overlay_packages(&layout)?;
     let dat_config = load_dats_config()?;
     config.save().map_err(|error| error.to_string())?;
     Ok(extension_inventory_view_with_overlays(
@@ -261,14 +257,12 @@ pub(crate) fn set_camera_zoom_selection(limit: Option<u8>) -> Result<Option<u8>,
 
 fn set_plugin_enabled(id: &str, enabled: bool) -> Result<ExtensionInventoryView, String> {
     let layout = extensions::extension_layout()?;
-    let packages = bahamut_launcher::extensions::discover_addons(&layout.addons)
-        .map_err(|error| error.to_string())?;
+    let packages = extensions::installed_addons(&layout)?;
     let mut config = load_extensions_config()?;
     config
         .set_plugin_enabled(id, enabled)
         .map_err(|error| error.to_string())?;
-    let dat_packages = bahamut_launcher::extensions::discover_overlay_packages(&layout.dats)
-        .map_err(|error| error.to_string())?;
+    let dat_packages = extensions::installed_overlay_packages(&layout)?;
     let dat_config = load_dats_config()?;
     config.save().map_err(|error| error.to_string())?;
     Ok(extension_inventory_view_with_overlays(
@@ -285,10 +279,8 @@ pub(crate) fn set_dat_package_enabled(
     enabled: bool,
 ) -> Result<ExtensionInventoryView, String> {
     let layout = extensions::extension_layout()?;
-    let packages = bahamut_launcher::extensions::discover_addons(&layout.addons)
-        .map_err(|error| error.to_string())?;
-    let dat_packages = bahamut_launcher::extensions::discover_overlay_packages(&layout.dats)
-        .map_err(|error| error.to_string())?;
+    let packages = extensions::installed_addons(&layout)?;
+    let dat_packages = extensions::installed_overlay_packages(&layout)?;
     if !dat_packages.iter().any(|package| package.id == id) {
         return Err(format!("DAT package {id:?} is not installed"));
     }
@@ -312,10 +304,8 @@ pub(crate) fn reorder_dat_package(
     position: usize,
 ) -> Result<ExtensionInventoryView, String> {
     let layout = extensions::extension_layout()?;
-    let packages = bahamut_launcher::extensions::discover_addons(&layout.addons)
-        .map_err(|error| error.to_string())?;
-    let dat_packages = bahamut_launcher::extensions::discover_overlay_packages(&layout.dats)
-        .map_err(|error| error.to_string())?;
+    let packages = extensions::installed_addons(&layout)?;
+    let dat_packages = extensions::installed_overlay_packages(&layout)?;
     if !dat_packages.iter().any(|package| package.id == id) {
         return Err(format!("DAT package {id:?} is not installed"));
     }
@@ -337,6 +327,7 @@ pub(crate) fn reorder_dat_package(
     ))
 }
 
+/// Map an Open Folder target to a writable directory; shipped install-root content is never opened.
 pub(crate) fn extension_folder_path(
     layout: &bahamut_launcher::extensions::ExtensionLayout,
     target: &str,
@@ -346,10 +337,10 @@ pub(crate) fn extension_folder_path(
         "plugins" => Ok(layout.plugins.clone()),
         "logs" => Ok(layout.logs.clone()),
         "screenshots" => Ok(layout.screenshots.clone()),
-        "backups" => Ok(layout
-            .root
-            .join(bahamut_launcher::config::dirs::PORTABLE_BACKUPS_DIR_NAME)),
-        "install" => Ok(layout.root.clone()),
+        "backups" => {
+            bahamut_launcher::config::dirs::backups_dir().map_err(|error| error.to_string())
+        }
+        "install" => Ok(layout.state_root.clone()),
         _ => Err(format!("unknown extension folder target: {target}")),
     }
 }

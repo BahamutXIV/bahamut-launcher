@@ -1,4 +1,4 @@
-//! Bounded portable backups for retail user data and writable extension state.
+//! Bounded backups for retail user data and the writable extension state under the launcher state root.
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -80,11 +80,7 @@ struct BackupLayout {
 
 impl BackupLayout {
     fn resolve(target: BackupTarget) -> Result<Self, BackupError> {
-        let launcher_root = dirs::current_exe_dir().map_err(|source| BackupError::Io {
-            operation: "resolving the launcher directory",
-            path: PathBuf::new(),
-            source,
-        })?;
+        let launcher_root = dirs::state_root()?;
         Ok(Self {
             backups_root: dirs::backups_dir()?,
             user_settings_root: if target == BackupTarget::UserSettings {
@@ -100,6 +96,17 @@ impl BackupLayout {
     fn live_root(&self, target: BackupTarget) -> &Path {
         match target {
             BackupTarget::UserSettings => &self.user_settings_root,
+            BackupTarget::Extensions => &self.launcher_root,
+        }
+    }
+
+    /// Restore work shares the live data's volume and never sits above the launcher state root.
+    fn transaction_parent(&self, target: BackupTarget) -> &Path {
+        match target {
+            BackupTarget::UserSettings => self
+                .user_settings_root
+                .parent()
+                .unwrap_or(&self.user_settings_root),
             BackupTarget::Extensions => &self.launcher_root,
         }
     }
@@ -286,7 +293,7 @@ fn restore_latest_backup_in(
         .ok_or_else(|| BackupError::NoBackup(target.label()))?;
     let live_root = layout.live_root(target);
     ensure_no_link_ancestors(live_root, live_root)?;
-    let transaction_parent = live_root.parent().unwrap_or(live_root);
+    let transaction_parent = layout.transaction_parent(target);
     fs::create_dir_all(transaction_parent).map_err(|error| {
         io_error(
             "creating the restore transaction parent",
@@ -1959,5 +1966,105 @@ mod tests {
             b"live"
         );
         assert!(!temp.path().join("outside.txt").exists());
+    }
+
+    fn tree(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in fs::read_dir(&directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path.clone());
+                }
+                paths.push(path.strip_prefix(root).unwrap().to_path_buf());
+            }
+        }
+        paths.sort();
+        paths
+    }
+
+    #[cfg(unix)]
+    fn set_read_only(path: &Path, read_only: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if read_only { 0o555 } else { 0o755 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn split_layout_backup_and_restore_write_only_under_the_state_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = dirs::write_test_bundle(temp.path());
+        let bundle = temp.path().join("Bahamut Launcher.app");
+        let home = temp.path().join("home");
+        let state = home.join(".bahamut-launcher");
+        let roots = dirs::resolve_roots(&exe, Some(state.clone())).unwrap();
+        assert_eq!(roots.state, state);
+        let layout = BackupLayout {
+            backups_root: roots.state.join(dirs::PORTABLE_BACKUPS_DIR_NAME),
+            user_settings_root: temp.path().join("documents/FINAL FANTASY XIV"),
+            launcher_config_path: roots.state.join("config/bahamut.ini"),
+            launcher_root: roots.state.clone(),
+        };
+        assert_eq!(
+            layout.transaction_parent(BackupTarget::Extensions),
+            roots.state
+        );
+        for (relative, contents) in [
+            ("addons/custom/addon.toml", "user addon\n"),
+            ("config/extensions.ini", "[plugins]\n\n[addons]\n"),
+            ("scripts/default.txt", "/addon load fps\n"),
+        ] {
+            let path = roots.state.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+        let shipped = roots.install.join("addons/fps/addon.toml");
+        fs::create_dir_all(shipped.parent().unwrap()).unwrap();
+        fs::write(&shipped, "shipped addon\n").unwrap();
+        let bundle_before = tree(&bundle);
+
+        // A restore transaction beside the state root fails against a read-only parent.
+        #[cfg(unix)]
+        set_read_only(&home, true);
+        let archive = create_backup_in(BackupTarget::Extensions, &layout, FIXTURE_LABEL);
+        fs::write(roots.state.join("addons/custom/addon.toml"), "changed\n").unwrap();
+        let restored = restore_latest_backup_in(BackupTarget::Extensions, &layout);
+        #[cfg(unix)]
+        set_read_only(&home, false);
+
+        let archive = archive.unwrap();
+        assert_eq!(restored.unwrap(), archive);
+        assert!(archive.starts_with(roots.state.join("backups")));
+        assert_eq!(
+            zip_names(&archive),
+            [
+                "addons/custom/addon.toml",
+                "config/extensions.ini",
+                "scripts/default.txt",
+            ]
+        );
+        assert_eq!(
+            fs::read_to_string(roots.state.join("addons/custom/addon.toml")).unwrap(),
+            "user addon\n"
+        );
+        assert_eq!(tree(&bundle), bundle_before);
+        assert_eq!(
+            tree(&home).first(),
+            Some(&PathBuf::from(".bahamut-launcher"))
+        );
+        assert!(
+            tree(&home)
+                .iter()
+                .all(|path| path.starts_with(".bahamut-launcher")),
+            "{:?}",
+            tree(&home)
+        );
+        assert!(
+            !tree(&roots.state)
+                .iter()
+                .any(|path| path.to_string_lossy().contains(".bahamut-restore-")),
+            "restore work must be removed after commit"
+        );
     }
 }

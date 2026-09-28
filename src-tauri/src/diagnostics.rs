@@ -15,24 +15,28 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
         bahamut_launcher::version::LAUNCHER_VERSION
     );
 
-    let launcher_root = match dirs::current_exe_dir() {
-        Ok(path) => path,
+    let roots = match dirs::launcher_roots() {
+        Ok(roots) => roots,
         Err(error) => {
             tracing::warn!(%error, "Install root = unavailable");
             return;
         }
     };
-    let layout = ExtensionLayout::under_launcher_dir(&launcher_root);
+    let layout = ExtensionLayout::new(&roots.install, &roots.state);
     let config_root = dirs::portable_config_dir().ok();
     let game_root = resolve_game_dir();
     let patch_root = resolve_patch_storage_dir().ok();
 
-    log_path_value("Install root", Some(&launcher_root));
+    log_path_value("Install root", Some(&roots.install));
+    log_path_value("State root", Some(&roots.state));
     log_path_value("Game root", game_root.as_deref());
     log_path_value("Patch root", patch_root.as_deref());
     log_path_value("Config root", config_root.as_deref());
     log_path_value("Logs root", Some(&layout.logs));
+    log_path_value("Shipped addons root", Some(&layout.shipped_addons));
     log_path_value("Addons root", Some(&layout.addons));
+    log_path_value("Shipped DAT packages root", Some(&layout.shipped_dats));
+    log_path_value("DAT packages root", Some(&layout.dats));
     log_path_value("Plugins root", Some(&layout.plugins));
     log_path_value("Screenshots root", Some(&layout.screenshots));
     log_path_value("Launcher log", log_path);
@@ -63,7 +67,8 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
         tracing::info!("GPU = {}", system.gpus.join(" | "));
     }
 
-    log_free_disk("install root", &launcher_root);
+    log_free_disk("install root", &roots.install);
+    log_free_disk("state root", &roots.state);
     if let Some(patch_root) = patch_root.as_deref() {
         log_free_disk("patch root", patch_root);
     }
@@ -73,8 +78,9 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
     } else {
         tracing::warn!("Launcher executable = unavailable");
     }
-    log_artifact("Client loader", &launcher_root.join("bahamut-loader.exe"));
-    log_artifact("Client module", &launcher_root.join("bahamut.dll"));
+    let (loader, module) = crate::extensions::packaged_client_paths_under(&roots.install);
+    log_artifact("Client loader", &loader);
+    log_artifact("Client module", &module);
     log_artifact("Screenshot plugin", &layout.screenshot_plugin_path);
     log_artifact("DiscordRPC plugin", &layout.discord_rpc_plugin_path);
 }

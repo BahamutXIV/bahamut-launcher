@@ -24,6 +24,11 @@ hosted workflows unless a section names a platform-specific check.
   its tests requires Wine.
 - Linux Tauri work requires the packages listed in
   [Tauri and WebView](#tauri-and-webview).
+- Packaging and checking the macOS app bundle
+  ([`package-macos-app.sh`](../scripts/package-macos-app.sh),
+  [`check-macos-app-zip.sh`](../scripts/check-macos-app-zip.sh)) requires
+  macOS itself, with Xcode's `codesign`, `plutil`, `xattr`, `ditto`, and
+  `lipo`.
 
 Use the tracked formatter configuration for each changed language. Keep
 comments and public documentation within the [comments and prose policy](ai_agents/comments-and-prose.md).
@@ -151,10 +156,11 @@ separate optional production download check.
 
 The Windows workflow also checks synthetic release archives and package updates.
 The fixture checks package contents, not game launch.
-The macOS CI job cross-compiles the loader,
-`bahamut.dll`, and both plugins with llvm-mingw but does not run the client
-tests. See [Release process](releasing.md) for the workflow's artifact
-requirements.
+The macOS CI job cross-compiles the loader, `bahamut.dll`, and both plugins
+with llvm-mingw, stages the app bundle from a placeholder universal
+executable, and runs `python3 scripts/test-macos-app-package.py`, but does
+not run the client tests. See [Release process](releasing.md) for the
+workflow's artifact requirements.
 
 ## Staged Windows package
 
@@ -220,6 +226,30 @@ carries the loader, `bahamut.dll`, and the plugins and addons maintained in this
 repository, so Play takes the extension launch. The bare Cargo shell has none
 of them.
 
+## Staged macOS app
+
+Build the universal launcher binary the way
+[`release-binaries.yml`](../.github/workflows/release-binaries.yml) does,
+then package and zip it the way the release does:
+
+```bash
+cargo build --release --locked --target aarch64-apple-darwin -p bahamut-launcher-shell
+cargo build --release --locked --target x86_64-apple-darwin -p bahamut-launcher-shell
+mkdir -p out/universal
+lipo -create \
+  target/aarch64-apple-darwin/release/bahamut-launcher-shell \
+  target/x86_64-apple-darwin/release/bahamut-launcher-shell \
+  -output out/universal/bahamut-launcher-shell
+./scripts/package-macos-app.sh --launcher out/universal/bahamut-launcher-shell \
+  --client-build out/client-mingw --destination out/macos-app
+ditto -c -k --norsrc --keepParent "out/macos-app/Bahamut Launcher.app" out/macos-app.zip
+./scripts/check-macos-app-zip.sh --zip out/macos-app.zip
+```
+
+Omitting `--sign` signs the app ad hoc, the same as a release build without
+the signing secrets. `./scripts/build-unix-package.sh` still publishes the
+bare portable tree, without an app bundle, for the dev loop.
+
 ## Additional launcher logs
 
 To enable debug detail in a staged Windows package, run from the repository root:
@@ -258,8 +288,8 @@ cargo run --release --manifest-path tools/icon-gen/Cargo.toml
 ```
 
 This regenerates PNG, the six-size Windows ICO, and the macOS ICNS with its
-transparent icon-grid padding. The bare macOS portable executable does not
-consume ICNS. That asset is available for app bundling.
+transparent icon-grid padding. The macOS app bundle consumes
+`src-tauri/icons/icon.icns` as `Contents/Resources/icon.icns`.
 
 ## What the checks cover
 

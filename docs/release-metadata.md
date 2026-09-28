@@ -36,8 +36,8 @@ The version 1 fields are:
 | `inventory` | The identity or file entries for the product below |
 
 Launcher artifact keys have the form
-`launcher/<version>/<target>/<sha256>.zip` on Windows and
-`launcher/<version>/<target>/<sha256>.tar.gz` on Linux and macOS. Game
+`launcher/<version>/<target>/<sha256>.zip` on Windows and macOS and
+`launcher/<version>/<target>/<sha256>.tar.gz` on Linux. Game
 artifact keys must match an archive object in the supplied delivery manifest. These keys
 identify release objects. They are not local installation paths.
 
@@ -56,6 +56,23 @@ be a seed. The exact official package manifest
 may also be a seed for compatibility with older launcher receipts.
 The verifier rejects unsafe paths, case aliases, file/directory collisions,
 and protected locations.
+
+The macOS artifact is a ZIP holding one top-level `Bahamut Launcher.app`
+directory. Every macOS inventory path starts with
+`Bahamut Launcher.app/Contents/`, and every entry is managed. The inventory
+lists `Info.plist`, `MacOS/bahamut-launcher`, `_CodeSignature/CodeResources`,
+`CodeResources` on a stapled build, and `Resources/icon.icns`. Under
+`Resources/` it lists the loader, the DLL, the two plugins, the shipped addons,
+the official overlay package, `scripts/default.txt`, `README.md`, and the
+license notices.
+No bundle path is writable state: a signed build must stay sealed, so
+configuration, logs, screenshots, backups, and the editable
+`scripts/default.txt` live outside the bundle in the state root
+(`$BAHAMUT_LAUNCHER_HOME`, or `~/.bahamut-launcher` by default; see
+[macOS app layout](configuration.md#macos-app-layout)). A signed inventory
+cannot own those paths. The ZIP may carry directory entries for ancestors of
+inventory files. The verifier rejects any other directory, AppleDouble `._`
+entries, `__MACOSX/` entries, symlinks, and every path outside the bundle.
 
 ## Offline publisher and verifier
 
@@ -98,13 +115,15 @@ cannot select an arbitrary local directory, move a file to another product's
 root, or gain replacement authority from archive membership alone.
 
 Managed entries can replace only their explicit owned paths. Seed entries can
-be installed when absent but are never replacement authority. The launcher
-package seeds `scripts/default.txt` on initial installation and preserves an
-existing copy. A signed launcher inventory can replace only the listed files
-in the official `plugins/dats/bahamut-dats-overlay` package. Custom overlay
-packages remain outside that authority. Configuration, authentication and
-profile state, logs, and screenshots also remain outside managed replacement
-authority.
+be installed when absent but are never replacement authority. The Windows
+launcher package seeds `scripts/default.txt` on initial installation and
+preserves an existing copy. The macOS bundle carries its copy as a managed,
+read-only file inside the sealed app. A signed launcher inventory can replace
+only the listed files in the official `plugins/dats/bahamut-dats-overlay`
+package, which sits under `Contents/Resources/` in the macOS bundle. Custom
+overlay packages remain outside that authority. Configuration, authentication
+and profile state, logs, and screenshots also remain outside managed
+replacement authority.
 
 ## Ordering and recovery
 

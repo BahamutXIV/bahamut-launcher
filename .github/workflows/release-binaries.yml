@@ -4,7 +4,9 @@ name: Release Binaries
 # tag release.yml pushes), verifies every archive against its SHA-256 sidecar,
 # and attaches the six files to that tag's GitHub Release. A manual run either
 # rebuilds and re-attaches an existing tag or builds the selected branch
-# without publishing. See docs/releasing.md.
+# without publishing. macOS ships a zipped universal app bundle: Developer ID
+# signed, notarized and stapled when the signing secrets are set, ad hoc signed
+# otherwise. See docs/releasing.md.
 on:
   push:
     tags:
@@ -212,9 +214,6 @@ jobs:
             target/aarch64-apple-darwin/release/bahamut-launcher-shell \
             target/x86_64-apple-darwin/release/bahamut-launcher-shell \
             -output "$LAUNCHER_BINARY"
-          # Apple Silicon refuses an unsigned executable, so sign the combined file ad hoc.
-          codesign --force --sign - "$LAUNCHER_BINARY"
-          codesign --verify --verbose=2 "$LAUNCHER_BINARY"
           archs="$(lipo -archs "$LAUNCHER_BINARY")"
           echo "universal archs: $archs"
           for arch in arm64 x86_64; do
@@ -251,17 +250,12 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $dist "$name.zip") -Destination dist
           Copy-Item -LiteralPath (Join-Path $dist "$name.zip.sha256") -Destination dist
 
-      - name: Package (Linux and macOS)
-        if: runner.os != 'Windows'
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         shell: bash
-        env:
-          # Keep AppleDouble sidecars out of the archive when bsdtar runs on macOS.
-          COPYFILE_DISABLE: "1"
         run: |
           set -euo pipefail
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            test "$(uname -m)" = x86_64
-          fi
+          test "$(uname -m)" = x86_64
           mkdir -p dist
           ./scripts/stage-unix-release.sh \
             --launcher "$LAUNCHER_BINARY" \
@@ -269,6 +263,161 @@ jobs:
             --destination staging
           tar -czf "dist/$ASSET_NAME.tar.gz" -C staging .
           ( cd dist && shasum -a 256 "$ASSET_NAME.tar.gz" > "$ASSET_NAME.tar.gz.sha256" )
+
+      # Signing follows the secrets, not the tag, so a branch dispatch can
+      # produce a signed dev build. Without both secrets the app is ad hoc signed.
+      - name: Detect macOS signing secrets
+        id: macsign
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          ASC_KEY: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${CERT_P12:-}" && -n "${ASC_KEY:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID signing: ENABLED"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS signing secrets are absent; packaging an ad hoc signed app that Gatekeeper blocks on first launch."
+          fi
+
+      - name: Import Developer ID certificate
+        id: importcert
+        if: runner.os == 'macOS' && steps.macsign.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PWD: ${{ secrets.MACOS_CERT_PWD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CERT_PWD:-}" ]]; then
+            echo "::error::MACOS_CERT_PWD is empty. security import cannot import a passwordless .p12; re-export the Developer ID certificate with an export password and set MACOS_CERT_PWD."
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          # The keychain lives only for this job, so its password is generated per run.
+          keychain_pwd="$(openssl rand -base64 24)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_pwd" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pwd" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PWD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_pwd" "$keychain" >/dev/null
+          # codesign searches the default keychain, so the search list alone is not enough.
+          security default-keychain -s "$keychain"
+          keychains=("$keychain")
+          while IFS= read -r entry; do
+            entry="$(printf '%s' "$entry" | sed -E 's/^[[:space:]]*"?//; s/"?[[:space:]]*$//')"
+            if [[ -n "$entry" && "$entry" != "$keychain" ]]; then
+              keychains+=("$entry")
+            fi
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+          # Select by SHA-1 so a name mismatch cannot hide the identity. No -v: it
+          # drops an identity whose chain the runner cannot complete.
+          identities="$(security find-identity -p codesigning "$keychain")"
+          echo "$identities"
+          identity="$(awk '/Developer ID Application/ { print $2; exit }' <<< "$identities")"
+          if [[ -z "$identity" ]]; then
+            echo "::error::No Developer ID Application signing identity after import; the .p12 must hold the certificate and its private key."
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "Signing identity (SHA-1): $identity"
+
+      - name: Package the macOS app
+        id: macapp
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          SIGN_ENABLED: ${{ steps.macsign.outputs.enabled }}
+          SIGN_IDENTITY: ${{ steps.importcert.outputs.identity }}
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/macos-app"
+          app="$staging/Bahamut Launcher.app"
+          package_args=(
+            --launcher "$LAUNCHER_BINARY"
+            --client-build out/client-mingw
+            --destination "$staging"
+          )
+          if [[ "${SIGN_ENABLED:-false}" == true ]]; then
+            if [[ -z "${SIGN_IDENTITY:-}" ]]; then
+              echo "::error::Developer ID signing is enabled but no signing identity was imported."
+              exit 1
+            fi
+            package_args+=(--sign "$SIGN_IDENTITY")
+          fi
+          ./scripts/package-macos-app.sh "${package_args[@]}"
+          mkdir -p dist
+          # --norsrc keeps AppleDouble (._) entries out of the archive.
+          ditto -c -k --norsrc --keepParent "$app" "dist/$ASSET_NAME.zip"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize and staple
+        if: runner.os == 'macOS' && steps.macsign.outputs.enabled == 'true'
+        shell: bash
+        env:
+          APP: ${{ steps.macapp.outputs.app }}
+          ASC_KEY: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/asc_key.p8"
+          echo "$ASC_KEY" | base64 --decode > "$key"
+          auth=(--key "$key" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
+          rc=0
+          out="$(xcrun notarytool submit "dist/$ASSET_NAME.zip" "${auth[@]}" --wait 2>&1)" || rc=$?
+          echo "$out"
+          if [[ "$rc" != 0 ]] || ! grep -qi 'status: Accepted' <<< "$out"; then
+            submission="$(awk -F': *' '/^[[:space:]]*id:/ { print $2; exit }' <<< "$out")"
+            if [[ -n "$submission" ]]; then
+              xcrun notarytool log "$submission" "${auth[@]}" || true
+            fi
+            echo "::error::Notarization of $ASSET_NAME.zip was not Accepted; see the log above."
+            rm -f "$key"
+            exit 1
+          fi
+          # The ticket is stapled into the bundle, so the submitted zip is rebuilt.
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          rm -f "dist/$ASSET_NAME.zip"
+          ditto -c -k --norsrc --keepParent "$APP" "dist/$ASSET_NAME.zip"
+          spctl -a -vvv -t exec "$APP"
+          rm -f "$key"
+
+      - name: Check the macOS zip
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          SIGN_ENABLED: ${{ steps.macsign.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          # The checker extracts a copy, so the gate covers the published bytes.
+          check_args=(--zip "dist/$ASSET_NAME.zip")
+          if [[ "${SIGN_ENABLED:-false}" == true ]]; then
+            check_args+=(--signed)
+          fi
+          ./scripts/check-macos-app-zip.sh "${check_args[@]}"
+
+      - name: Checksum the macOS artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ( cd dist && shasum -a 256 "$ASSET_NAME.zip" > "$ASSET_NAME.zip.sha256" )
+
+      - name: Clean up the signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/asc_key.p8"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -317,8 +466,8 @@ jobs:
             "$prefix-windows-x86_64.zip.sha256"
             "$prefix-linux-x86_64.tar.gz"
             "$prefix-linux-x86_64.tar.gz.sha256"
-            "$prefix-macos-universal.tar.gz"
-            "$prefix-macos-universal.tar.gz.sha256"
+            "$prefix-macos-universal.zip"
+            "$prefix-macos-universal.zip.sha256"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if ! diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}" | sort); then
@@ -329,7 +478,7 @@ jobs:
           for archive in \
             "$prefix-windows-x86_64.zip" \
             "$prefix-linux-x86_64.tar.gz" \
-            "$prefix-macos-universal.tar.gz"; do
+            "$prefix-macos-universal.zip"; do
             checksum="$(sha256sum "release-assets/$archive" | cut -d' ' -f1)"
             expected_line="$checksum  $archive"
             actual_line="$(<"release-assets/$archive.sha256")"
@@ -404,6 +553,54 @@ jobs:
           # --clobber replaces same-named assets so reruns are idempotent.
           gh release upload "$TAG" release-assets/* --clobber
           echo "Attached $(find release-assets -maxdepth 1 -type f | wc -l) files to release $TAG"
+
+      # Re-detected here because matrix job outputs are not reliable per leg.
+      - name: Detect macOS signing secrets
+        id: releasesign
+        shell: bash
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          ASC_KEY: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${CERT_P12:-}" && -n "${ASC_KEY:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync the ad hoc macOS note in the release body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SIGN_ENABLED: ${{ steps.releasesign.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          marker='<!-- bahamut-launcher-macos-ad-hoc-note -->'
+          separator=$'\n\n---\n\n'"$marker"
+          # Skip rather than clobber the generated notes when the body cannot be read.
+          if ! body="$(gh release view "$TAG" --json body --jq .body 2>/dev/null)" || [[ -z "$body" ]]; then
+            echo "::warning::Could not read a non-empty release body for $TAG; leaving the ad hoc macOS note as it is."
+            exit 0
+          fi
+          if [[ "${SIGN_ENABLED:-false}" == true ]]; then
+            # A signed rebuild of a tag first published ad hoc withdraws the note.
+            if [[ "$body" == *"$separator"* ]]; then
+              gh release edit "$TAG" --notes "${body%%"$separator"*}"
+              echo "Removed the ad hoc macOS note from $TAG."
+            elif [[ "$body" == *"$marker"* ]]; then
+              echo "::warning::The ad hoc macOS note marker on $TAG is not in its expected position; edit the release body by hand."
+            else
+              echo "No ad hoc macOS note on $TAG."
+            fi
+          elif [[ "$body" == *"$marker"* ]]; then
+            echo "The ad hoc macOS note is already on $TAG."
+          else
+            note="$separator"$'\n\n**macOS:** Bahamut Launcher.app in this release is ad hoc signed, not notarized, so macOS blocks its first launch. On macOS 15 and later the Control-click Open bypass no longer works: after the first blocked launch, open System Settings > Privacy & Security, click Open Anyway, and launch the app again.'
+            gh release edit "$TAG" --notes "${body}${note}"
+            echo "Appended the ad hoc macOS note to $TAG."
+          fi
 
       - name: Announce the release on Discord
         # A tag push announces once; a manual rebuild must not re-announce an old tag.

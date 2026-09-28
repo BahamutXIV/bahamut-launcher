@@ -131,7 +131,9 @@ done
 [[ -x "$launcher_binary" ]] || fail "missing launcher build output: $launcher_binary"
 
 if [[ $run_tests -eq 1 ]]; then
-    managed_runtime="$HOME/Library/Application Support/com.BahamutXIV.Launcher/runtime"
+    launcher_home="${BAHAMUT_LAUNCHER_HOME:-}"
+    [[ "$launcher_home" == /* ]] || launcher_home="$HOME/.bahamut-launcher"
+    managed_runtime="$launcher_home/runtime"
     if [[ -z "$wine_binary" && -x "$managed_runtime/wswine.bundle/bin/wine" ]]; then
         wine_binary="$managed_runtime/wswine.bundle/bin/wine"
         export BAHAMUT_WINE_DYLD_FALLBACK="$managed_runtime/Frameworks:$managed_runtime/Frameworks/GStreamer.framework/Versions/Current/lib:$managed_runtime/wswine.bundle/lib:/usr/local/lib:/usr/lib"

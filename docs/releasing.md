@@ -77,6 +77,12 @@ package versions in lockstep, but that package version is metadata, not the
 runtime identity. The [signed release metadata](release-metadata.md) version
 is a separate value, ordered independently per product and target.
 
+The macOS app's `CFBundleShortVersionString` and `CFBundleVersion` come from
+`src-tauri/tauri.conf.json`, which this bump commit rewrites only on a push to
+`main`. Any manually pushed tag or a branch dispatch build therefore shows the
+version of the last bump commit in Finder, while the launcher's own version
+display still comes from the values above.
+
 ## One-time setup
 
 1. `RELEASE_PAT` repository secret: a fine-grained personal access token
@@ -132,8 +138,8 @@ bahamut-launcher-vX.Y.Z-windows-x86_64.zip
 bahamut-launcher-vX.Y.Z-windows-x86_64.zip.sha256
 bahamut-launcher-vX.Y.Z-linux-x86_64.tar.gz
 bahamut-launcher-vX.Y.Z-linux-x86_64.tar.gz.sha256
-bahamut-launcher-vX.Y.Z-macos-universal.tar.gz
-bahamut-launcher-vX.Y.Z-macos-universal.tar.gz.sha256
+bahamut-launcher-vX.Y.Z-macos-universal.zip
+bahamut-launcher-vX.Y.Z-macos-universal.zip.sha256
 ```
 
 GitHub Release publication does not authorize an in-app stable update. The
@@ -157,6 +163,8 @@ created or updated.
 Enter an existing `vMAJOR.MINOR.PATCH[-PRERELEASE]` tag to rebuild and
 re-attach that release's assets. Re-attaching replaces same-named files, the
 same as a tag push rerun, but does not send a Discord announcement.
+Rebuilding an existing tag requires a tag whose tree contains
+`scripts/package-macos-app.sh`; older tags fail in the macOS build leg.
 
 ## Archive contents
 
@@ -164,18 +172,30 @@ same as a tag push rerun, but does not send a Discord announcement.
 |---|---|
 | Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the empty official DAT overlay, and the update helper |
 | Linux x86_64 tar.gz | Portable launcher executable plus the Windows ZIP's payload without the update helper, with the Win32 loader, native runtime, and plugins built by llvm-mingw and the MinGW-w64 runtime notice added. System Wine and Linux Tauri libraries are required. |
-| macOS universal tar.gz | Portable universal executable (Apple Silicon and Intel in one file, signed ad hoc) plus the same payload as the Linux archive, without an app bundle. Managed Sikarugir Wine is downloaded on first game launch. Apple Silicon needs Rosetta 2 to run the Wine engine. |
+| macOS universal ZIP | One item, `Bahamut Launcher.app`, a universal app (Apple Silicon and Intel). The launcher sits at `Contents/MacOS/bahamut-launcher`; the Windows ZIP's payload minus the update helper sits under `Contents/Resources` with the MinGW-w64 runtime notice added, alongside `icon.icns`. `Info.plist` sits at `Contents/Info.plist`. Managed Sikarugir Wine is downloaded on first game launch. Apple Silicon needs Rosetta 2 to run the Wine engine. |
 
 Every archive carries `README.md`, `LICENSE.md`, and the MinHook, Dear ImGui,
-Lua, Miniz, and bundled font notices under `licenses/`. Linux and macOS
+Lua, Miniz, and bundled font notices under `licenses/` (under
+`Contents/Resources/licenses/` inside the macOS app). Linux and macOS
 archives add the MinGW-w64 runtime notice. The archive README is sourced from
 `docs/getting-started.md`. The workflow publishes a SHA-256 sidecar alongside
 each archive. [Platform support](extensions.md#platform-support)
 defines which platforms load the client module and records its status.
 The Windows launcher downloads pinned prerequisite installers when their
 runtimes are missing. It is distributed as a portable archive without a
-platform installer. Releases do not include Developer ID code signing or
-macOS notarization.
+platform installer.
+
+When the repository secrets `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PWD`,
+`ASC_API_KEY_P8_BASE64`, `ASC_KEY_ID`, and `ASC_ISSUER_ID` are set, the macOS
+app is Developer ID signed with the hardened runtime and the entitlements in
+[`packaging/macos/entitlements.plist`](../packaging/macos/entitlements.plist),
+notarized, and stapled. Signing follows the secrets, not the tag, so a manual
+Release Binaries run with an empty tag also produces a signed dev build.
+Without both `MACOS_CERT_P12_BASE64` and `ASC_API_KEY_P8_BASE64` the app is ad
+hoc signed instead, and the publish job appends a note to the release body. On
+macOS 15 and later, the user allows an ad hoc signed app once under
+System Settings > Privacy & Security > Open Anyway after the first blocked
+launch; Control-click Open no longer bypasses Gatekeeper.
 
 ## Portable updates
 
@@ -202,15 +222,23 @@ The official DAT overlay is part of the signed launcher inventory. Launcher
 updates replace its managed files and preserve custom overlay packages.
 
 Launcher updates and the signed managed inventory cover the Windows package
-only. Files in a Linux or macOS archive change only when a newer archive is
-extracted.
+only. Files in the Linux archive, and inside the macOS app bundle, change
+only when a newer archive is extracted; the app never writes inside itself,
+keeping its own writable state in `~/.bahamut-launcher` instead. See
+[Getting started](getting-started.md#portable-archives) for where each
+platform keeps that state.
 
 The Windows package is staged through the archive manifest check, which also
 rejects unexpected package files. Linux and macOS packages are staged by
 [`stage-unix-release.sh`](../scripts/stage-unix-release.sh), which applies the
 Windows exact file and directory manifest without `bahamut-update-helper.exe`,
 with the launcher named `bahamut-launcher`, plus
-`licenses/MinGW-w64-runtime-COPYING.txt`, and rejects symbolic links. The
+`licenses/MinGW-w64-runtime-COPYING.txt`, and rejects symbolic links. For
+macOS, [`package-macos-app.sh`](../scripts/package-macos-app.sh) wraps that
+staged tree into `Bahamut Launcher.app`: the launcher becomes
+`Contents/MacOS/bahamut-launcher`, every other staged file keeps its relative
+path under `Contents/Resources`, and the empty writable skeleton directories
+are dropped, since the app keeps its writable state outside the bundle. The
 Windows launcher downloads both Microsoft prerequisite installers from pinned
 R2 URLs and checks exact length and SHA-256 before running them. The
 synthetic fixture can inspect package contents without a full build. It does

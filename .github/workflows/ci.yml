@@ -245,3 +245,23 @@ jobs:
 
       - name: Build x86 client module (cross)
         run: cmake --build out/client-mingw --config Release --target bahamut-loader bahamut screenshot discord-rpc
+
+      - name: Stage the macOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A universal placeholder launcher exercises the bundle without a release
+          # shell build. clang compiles once per -arch, so the source must be a file.
+          printf 'int main(void) { return 0; }\n' > "$RUNNER_TEMP/placeholder.c"
+          cc -arch arm64 -arch x86_64 "$RUNNER_TEMP/placeholder.c" -o "$RUNNER_TEMP/bahamut-launcher"
+          ./scripts/package-macos-app.sh \
+            --launcher "$RUNNER_TEMP/bahamut-launcher" \
+            --client-build out/client-mingw \
+            --destination "$RUNNER_TEMP/macos-app"
+          # The same zip round trip the macOS release leg publishes through.
+          zip="$RUNNER_TEMP/bahamut-launcher-macos.zip"
+          ditto -c -k --norsrc --keepParent "$RUNNER_TEMP/macos-app/Bahamut Launcher.app" "$zip"
+          ./scripts/check-macos-app-zip.sh --zip "$zip"
+
+      - name: Test macOS app packaging
+        run: python3 scripts/test-macos-app-package.py
