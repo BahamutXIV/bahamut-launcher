@@ -11,10 +11,12 @@ Build, test, and package instructions are in [Development](development.md).
 ## Launcher logs
 
 The launcher writes its native structured transcript to
-`<launcher-dir>/logs/launcher/bahamut-launcher.log`. Use the Help button in the
-launcher to view the newest 256 KiB, copy the displayed snapshot, and see the
-canonical path. The support view contains launcher events only. Wine output
-and game chat logs remain separate sources. See the
+`<state-root>/logs/launcher/bahamut-launcher.log` (see
+[macOS app layout](configuration.md#macos-app-layout) for the state root on
+each platform). Use the Help button in the launcher to view the newest 256
+KiB, copy the displayed snapshot, and see the canonical path. The support view
+contains launcher events only. Wine output and game chat logs remain separate
+sources. See the
 [portable launcher tree](configuration.md#portable-launcher-tree) for the chat
 log location.
 
@@ -60,7 +62,7 @@ native Windows to suppress an assertion is not a diagnosis.
 
 ## Configuration
 
-- Live files are under `<exe-dir>/config/`. Tracked files under `configs/` are
+- Live files are under `<state-root>/config/`. Tracked files under `configs/` are
   annotated starter copies only.
 - The launcher creates missing `bahamut.ini`, `extensions.ini`, `dats.ini`, and
   `plugins/screenshot/settings.ini` files from current defaults. Once present,
@@ -70,7 +72,7 @@ native Windows to suppress an assertion is not a diagnosis.
   Screenshot options live in `plugins/screenshot/settings.ini`. Plugin and
   addon selection and order live in `extensions.ini`.
 - An enabled Screenshot or DiscordRPC row requires its matching DLL under
-  `<exe-dir>/plugins/`. A
+  `<install-root>/plugins/`. A
   missing DLL, wrong architecture, incompatible private ABI, or identity
   mismatch stops launch before the client resumes and is reported as a native
   plugin bootstrap failure. Restore the DLL from the matching launcher package.
@@ -89,7 +91,7 @@ native Windows to suppress an assertion is not a diagnosis.
 - Extensions backup requires at least one installed addon, DAT package,
   extension setting, or `scripts/default.txt`. Native plugin DLLs and generated
   launcher state are intentionally excluded.
-- Restore uses the newest matching ZIP under `<launcher-dir>/backups/`.
+- Restore uses the newest matching ZIP under `<state-root>/backups/`.
   `No backup exists yet` means that category has not completed a successful backup.
   `.partial` files are never selected.
 - An unsafe-entry or invalid-configuration error occurs before live data is
@@ -251,16 +253,18 @@ Status and limits for players are in
 transaction is in the
 [Handshake](handshake.md#wine-extension-launch). This
 path writes two logs under the launcher data directory's `logs/` folder
-(`~/Library/Application Support/com.BahamutXIV.Launcher/logs/` on macOS,
-`${XDG_DATA_HOME:-~/.local/share}/launcher/logs/` on Linux): `helper.log`
-holds the loader's `SUCCESS`, `ERROR`, and `EXIT` lines, and `wine.log` holds
-Wine's own output.
+(`~/.bahamut-launcher/logs/` on macOS and Linux, or
+`$BAHAMUT_LAUNCHER_HOME/logs/` when that variable holds an absolute path):
+`helper.log` holds the loader's `SUCCESS`, `ERROR`, and `EXIT` lines, and
+`wine.log` holds Wine's own output.
 
 - If addons, plugins, and DAT packages are all absent in game, check the
   launcher log for `client extensions are unavailable; launching without
   extensions`. Its reason names the missing `bahamut-loader.exe` or
-  `bahamut.dll`. Restore both beside the launcher executable from the matching
-  archive. The Extensions page does not show this fallback.
+  `bahamut.dll`, both read from the install root. Repair by reinstalling from
+  the matching archive; on macOS, replace `Bahamut Launcher.app` itself rather
+  than copying files into it, since editing the bundle invalidates its code
+  signature. The Extensions page does not show this fallback.
 - The fallback covers only those two files. An enabled Screenshot or
   DiscordRPC plugin whose DLL is missing from `plugins/` fails the launch
   instead, as described under [Configuration](#configuration).

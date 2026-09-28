@@ -1,4 +1,4 @@
-//! File-based launcher news feed at `<exe-dir>/config/news.toml`.
+//! File-based launcher news feed at `<state-root>/config/news.toml`.
 //! Missing files bootstrap the embedded default; an existing file is authoritative and is not fetched over HTTP.
 
 use std::fs;
@@ -31,8 +31,8 @@ struct NewsFile {
 /// Loader errors keep I/O and TOML failures distinct.
 #[derive(Debug, thiserror::Error)]
 pub enum NewsError {
-    #[error("could not resolve the running executable's directory: {0}")]
-    NoExeDir(io::Error),
+    #[error("could not resolve the launcher state directory: {0}")]
+    NoStateDir(io::Error),
     #[error("news file io error: {0}")]
     Io(#[from] io::Error),
     #[error("news file is malformed: {0}")]
@@ -45,9 +45,9 @@ impl From<toml::de::Error> for NewsError {
     }
 }
 
-/// Resolve the portable `<exe-dir>/config/news.toml` path.
+/// Resolve the `<state-root>/config/news.toml` path.
 pub fn news_path() -> Result<PathBuf, NewsError> {
-    let dir = crate::config::dirs::current_exe_config_dir().map_err(NewsError::NoExeDir)?;
+    let dir = crate::config::dirs::state_config_dir().map_err(NewsError::NoStateDir)?;
     Ok(dir.join(NEWS_FILE))
 }
 
@@ -92,10 +92,10 @@ pub fn bootstrap_default_if_missing_in(dir: &Path) -> io::Result<bool> {
     crate::config::dirs::bootstrap_file_if_missing(dir, NEWS_FILE, DEFAULT_NEWS)
 }
 
-/// Bootstrap `news.toml` under the portable config directory.
+/// Bootstrap `news.toml` under the state root's config directory.
 pub fn bootstrap_default_if_missing() -> io::Result<bool> {
     let path = news_path().map_err(|e| match e {
-        NewsError::NoExeDir(io_err) => io_err,
+        NewsError::NoStateDir(io_err) => io_err,
         other => io::Error::other(other.to_string()),
     })?;
     let dir = path

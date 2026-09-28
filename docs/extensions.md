@@ -35,7 +35,7 @@ platform:
 | Platform | Client module at launch |
 |---|---|
 | Windows | Implemented. The loader starts the client and loads `bahamut.dll` as described in the [Handshake](handshake.md#windows-launch). |
-| macOS | Implemented, unverified against a live client. When `bahamut-loader.exe` and `bahamut.dll` are beside the launcher executable, the loader runs under the managed Sikarugir Wine engine. |
+| macOS | Implemented, unverified against a live client. When `bahamut-loader.exe` and `bahamut.dll` are in the launcher [install root](configuration.md#macos-app-layout) (`Contents/Resources` in the app, beside the executable in a portable tree), the loader runs under the managed Sikarugir Wine engine. |
 | Linux | Implemented, unverified against a live client. When `bahamut-loader.exe` and `bahamut.dll` are beside the launcher executable, the loader runs under system Wine. |
 
 The [Handshake](handshake.md#wine-extension-launch) defines the Wine launch
@@ -54,12 +54,17 @@ These limits apply on macOS and Linux:
 - Enabled DAT packages, including custom packages, apply to every macOS or
   Linux launch that loads the module.
 - Launcher updates and the signed managed inventory cover the Windows package
-  only. Files beside the macOS or Linux executable change only when a newer
-  archive is extracted.
+  only. The shipped files inside the macOS app bundle, and the files beside
+  the Linux executable, change only when a newer archive is extracted. A
+  custom addon or DAT package on macOS goes under `~/.bahamut-launcher`
+  instead of beside the executable, and one whose id matches a shipped
+  package is skipped.
 
 ## Package layout
 
-Each addon occupies one direct child of `<launcher-dir>/addons/`:
+Each addon occupies one direct child of the state root's `addons/` folder
+(`<launcher-dir>/addons/` in the portable layout; see
+[macOS app layout](configuration.md#macos-app-layout)):
 
 ```text
 addons/
@@ -70,8 +75,9 @@ addons/
 
 The launcher reads but does not execute manifests while building the Extensions
 page. Malformed manifests and manifests whose entry file is missing are omitted.
-Duplicate installed addon ids reject discovery rather than selecting one
-package implicitly.
+Duplicate ids inside one addons root reject discovery rather than selecting
+one package implicitly. In the macOS app, a player addon that reuses a
+shipped id is skipped with a warning instead, and the shipped addon is used.
 
 The manifest schema is:
 

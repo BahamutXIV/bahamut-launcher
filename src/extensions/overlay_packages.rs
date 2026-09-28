@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use super::layout::same_directory;
 use crate::config::extension_config::{ExtensionPreference, OFFICIAL_DAT_OVERLAY_PACKAGE_ID};
 
 pub const OVERLAY_MANIFEST_FILE_NAME: &str = "overlay.toml";
@@ -96,6 +97,46 @@ enum OverlayPathError {
 pub fn discover_overlay_packages(
     root: &Path,
 ) -> Result<Vec<OverlayPackage>, OverlayDiscoveryError> {
+    discover_root(root, OfficialPackage::Accepted)
+}
+
+/// Discover shipped DAT packages and then the player's packages.
+///
+/// The official package loads only from the shipped root, and a player package that reuses a
+/// shipped id is skipped with a warning. Equal roots are discovered once.
+pub fn discover_overlay_packages_layered(
+    shipped: &Path,
+    user: &Path,
+) -> Result<Vec<OverlayPackage>, OverlayDiscoveryError> {
+    if same_directory(shipped, user) {
+        return discover_overlay_packages(shipped);
+    }
+    let mut packages = discover_overlay_packages(shipped)?;
+    for package in discover_root(user, OfficialPackage::Ignored)? {
+        if let Some(shipped_package) = packages.iter().find(|shipped| shipped.id == package.id) {
+            tracing::warn!(
+                id = %package.id,
+                shipped = %shipped_package.root_path.display(),
+                skipped = %package.root_path.display(),
+                "user DAT package reuses a shipped package id; the shipped package is used"
+            );
+            continue;
+        }
+        packages.push(package);
+    }
+    Ok(packages)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfficialPackage {
+    Accepted,
+    Ignored,
+}
+
+fn discover_root(
+    root: &Path,
+    official_package: OfficialPackage,
+) -> Result<Vec<OverlayPackage>, OverlayDiscoveryError> {
     if matches!(
         fs::symlink_metadata(root),
         Err(ref error) if error.kind() == io::ErrorKind::NotFound
@@ -113,6 +154,13 @@ pub fn discover_overlay_packages(
             .file_name()
             .to_string_lossy()
             .eq_ignore_ascii_case(OFFICIAL_DAT_OVERLAY_PACKAGE_ID);
+        if official && official_package == OfficialPackage::Ignored {
+            tracing::warn!(
+                path = %entry.path().display(),
+                "the official DAT package loads only from the shipped root; ignoring this copy"
+            );
+            continue;
+        }
         let package = match discover_overlay_package(&root, entry) {
             Ok(Some(package)) => package,
             Ok(None) => continue,
@@ -583,6 +631,114 @@ mod tests {
         let packages = discover_overlay_packages(root.path()).unwrap();
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].id, "custom");
+    }
+
+    #[test]
+    fn layered_discovery_returns_shipped_and_user_packages() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        write_package(shipped.path(), "world", "world", &[("data/a.DAT", "a")]);
+        write_package(user.path(), "custom", "custom", &[("data/b.DAT", "b")]);
+        let packages = discover_overlay_packages_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(
+            packages
+                .iter()
+                .map(|package| (package.id.as_str(), package.root_path.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "world",
+                    fs::canonicalize(shipped.path().join("world")).unwrap()
+                ),
+                (
+                    "custom",
+                    fs::canonicalize(user.path().join("custom")).unwrap()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn layered_discovery_keeps_the_shipped_package_for_a_reused_id() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        write_package(
+            shipped.path(),
+            "world",
+            "world",
+            &[("data/a.DAT", "shipped")],
+        );
+        write_package(user.path(), "world", "world", &[("data/a.DAT", "user")]);
+        let packages = discover_overlay_packages_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(packages.len(), 1);
+        assert_eq!(
+            packages[0].root_path,
+            fs::canonicalize(shipped.path().join("world")).unwrap()
+        );
+    }
+
+    #[test]
+    fn layered_discovery_rejects_invalid_packages_inside_the_user_root() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        write_package(shipped.path(), "world", "world", &[]);
+        write_package(user.path(), "custom", "other", &[]);
+        assert!(matches!(
+            discover_overlay_packages_layered(shipped.path(), user.path()),
+            Err(OverlayDiscoveryError::InvalidManifest { package, .. })
+                if package.ends_with("custom")
+        ));
+    }
+
+    #[test]
+    fn official_overlay_loads_only_from_the_shipped_root() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        write_package(
+            user.path(),
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            &[("data/a.DAT", "user")],
+        );
+        write_package(user.path(), "custom", "custom", &[]);
+        let packages = discover_overlay_packages_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(
+            packages
+                .iter()
+                .map(|package| package.id.as_str())
+                .collect::<Vec<_>>(),
+            ["custom"]
+        );
+
+        write_package(
+            shipped.path(),
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            &[],
+        );
+        let packages = discover_overlay_packages_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(packages[0].id, OFFICIAL_DAT_OVERLAY_PACKAGE_ID);
+        assert_eq!(
+            packages[0].root_path,
+            fs::canonicalize(shipped.path().join(OFFICIAL_DAT_OVERLAY_PACKAGE_ID)).unwrap()
+        );
+        assert!(packages[0].payload_files.is_empty());
+        assert_eq!(packages.len(), 2);
+    }
+
+    #[test]
+    fn layered_discovery_of_one_root_matches_single_root_discovery() {
+        let root = tempfile::tempdir().unwrap();
+        write_package(
+            root.path(),
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
+            &[],
+        );
+        write_package(root.path(), "custom", "custom", &[("data/a.DAT", "a")]);
+        let layered = discover_overlay_packages_layered(root.path(), root.path()).unwrap();
+        assert_eq!(layered, discover_overlay_packages(root.path()).unwrap());
+        assert_eq!(layered[0].id, OFFICIAL_DAT_OVERLAY_PACKAGE_ID);
     }
 
     #[test]

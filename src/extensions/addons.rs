@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use super::layout::same_directory;
 use crate::config::extension_config::AddonPreference;
 
 pub const ADDON_MANIFEST_FILE_NAME: &str = "addon.toml";
@@ -127,6 +128,36 @@ pub fn discover_addons(root: &Path) -> Result<Vec<AddonPackage>, AddonDiscoveryE
                 second: package.manifest_path,
             });
         }
+    }
+    Ok(packages.into_values().collect())
+}
+
+/// Discover shipped addons and then the player's addons.
+///
+/// A player package that reuses a shipped id is skipped with a warning; duplicates inside one
+/// root are still rejected. Equal roots are discovered once.
+pub fn discover_addons_layered(
+    shipped: &Path,
+    user: &Path,
+) -> Result<Vec<AddonPackage>, AddonDiscoveryError> {
+    if same_directory(shipped, user) {
+        return discover_addons(shipped);
+    }
+    let mut packages = discover_addons(shipped)?
+        .into_iter()
+        .map(|package| (package.id.clone(), package))
+        .collect::<BTreeMap<_, _>>();
+    for package in discover_addons(user)? {
+        if let Some(shipped_package) = packages.get(&package.id) {
+            tracing::warn!(
+                id = %package.id,
+                shipped = %shipped_package.manifest_path.display(),
+                skipped = %package.manifest_path.display(),
+                "user addon reuses a shipped addon id; the shipped package is used"
+            );
+            continue;
+        }
+        packages.insert(package.id.clone(), package);
     }
     Ok(packages.into_values().collect())
 }
@@ -373,6 +404,65 @@ mod tests {
         write_addon_at(root.path(), "second", "fps", &["2012.09.19.0001"]);
         assert!(matches!(
             discover_addons(root.path()),
+            Err(AddonDiscoveryError::DuplicateId { id, .. }) if id == "fps"
+        ));
+    }
+
+    #[test]
+    fn layered_discovery_returns_shipped_and_user_packages() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let fps = write_addon(shipped.path(), "fps", &["2012.09.19.0001"]);
+        let custom = write_addon(user.path(), "custom", &["2012.09.19.0001"]);
+        let found = discover_addons_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|package| (package.id.as_str(), package.manifest_path.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("custom", std::fs::canonicalize(custom).unwrap()),
+                ("fps", std::fs::canonicalize(fps).unwrap()),
+            ]
+        );
+    }
+
+    #[test]
+    fn layered_discovery_keeps_the_shipped_package_for_a_reused_id() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let fps = write_addon(shipped.path(), "fps", &["2012.09.19.0001"]);
+        write_addon(user.path(), "fps", &["2012.09.19.0001"]);
+        let found = discover_addons_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].manifest_path, std::fs::canonicalize(fps).unwrap());
+    }
+
+    #[test]
+    fn layered_discovery_rejects_duplicates_inside_the_user_root() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        write_addon(shipped.path(), "fps", &["2012.09.19.0001"]);
+        write_addon_at(user.path(), "first", "custom", &["2012.09.19.0001"]);
+        write_addon_at(user.path(), "second", "custom", &["2012.09.19.0001"]);
+        assert!(matches!(
+            discover_addons_layered(shipped.path(), user.path()),
+            Err(AddonDiscoveryError::DuplicateId { id, .. }) if id == "custom"
+        ));
+    }
+
+    #[test]
+    fn layered_discovery_of_one_root_matches_single_root_discovery() {
+        let root = tempfile::tempdir().unwrap();
+        write_addon(root.path(), "fps", &["2012.09.19.0001"]);
+        write_addon(root.path(), "wiki", &["2012.09.19.0001"]);
+        assert_eq!(
+            discover_addons_layered(root.path(), root.path()).unwrap(),
+            discover_addons(root.path()).unwrap()
+        );
+        write_addon_at(root.path(), "copy", "fps", &["2012.09.19.0001"]);
+        assert!(matches!(
+            discover_addons_layered(root.path(), root.path()),
             Err(AddonDiscoveryError::DuplicateId { id, .. }) if id == "fps"
         ));
     }
