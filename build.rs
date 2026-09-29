@@ -1,5 +1,5 @@
-// Release jobs select the exact tag; local builds derive an identity from Git.
-// Cargo package versions are metadata, not the runtime identity.
+// Release jobs select the exact tag; local builds carry the latest tag, a hyphen,
+// and the short commit hash. Cargo package versions are metadata, not the runtime identity.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,18 +11,25 @@ fn main() {
     let describe = std::env::var("BAHAMUT_RELEASE_TAG")
         .ok()
         .filter(|tag| !tag.is_empty())
-        .unwrap_or_else(|| {
-            Command::new("git")
-                .args(["describe", "--tags", "--always", "--dirty"])
-                .output()
-                .ok()
-                .filter(|out| out.status.success())
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "unknown".to_owned())
-        });
+        .unwrap_or_else(local_identity);
     println!("cargo:rustc-env=BAHAMUT_GIT_DESCRIBE={describe}");
+}
+
+/// `<latest tag>-<short hash>`, the bare hash without a reachable tag, or "unknown" outside Git.
+/// A `-dirty` suffix marks uncommitted changes to tracked files.
+fn local_identity() -> String {
+    let Some(hash) = git_stdout(&["rev-parse", "--short=7", "HEAD"]) else {
+        return "unknown".to_owned();
+    };
+    let mut identity = match git_stdout(&["describe", "--tags", "--abbrev=0"]) {
+        Some(tag) => format!("{tag}-{hash}"),
+        None => hash,
+    };
+    if git_stdout(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty())
+    {
+        identity.push_str("-dirty");
+    }
+    identity
 }
 
 fn watch_release_inputs() {
@@ -53,10 +60,15 @@ fn watch_release_inputs() {
 }
 
 fn git_path(args: &[&str]) -> Option<PathBuf> {
+    git_stdout(args).map(|path| Path::new(&path).to_path_buf())
+}
+
+/// Trimmed stdout of a successful git command; `None` on failure or empty output.
+fn git_stdout(args: &[&str]) -> Option<String> {
     let output = Command::new("git").args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }
-    let path = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    (!path.is_empty()).then(|| Path::new(&path).to_path_buf())
+    let text = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    (!text.is_empty()).then_some(text)
 }

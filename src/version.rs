@@ -14,7 +14,7 @@ pub const FFXIV_BOOT_VERSION: &str = "2010.09.18.0000";
 /// Final-build value for `<game>/game.ver`: final 1.23b build `2012.09.19.0001`.
 pub const FFXIV_GAME_VERSION: &str = "2012.09.19.0001";
 
-/// The selected release tag, local `git describe` identity, or "unknown" outside Git.
+/// The release tag, the local `<tag>-<hash>` identity, or "unknown" outside Git.
 pub const LAUNCHER_VERSION: &str = env!("BAHAMUT_GIT_DESCRIBE");
 
 #[cfg(test)]

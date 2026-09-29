@@ -927,7 +927,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (discordPath?.getAttribute('fill') !== 'currentColor' || discordPath.getAttribute('stroke') !== 'none') throw new Error('Discord mark is not fill-only');
     const outlinedSocialPaths = [...document.querySelectorAll('[data-link="github"] path, [data-link="youtube"] path')];
     if (outlinedSocialPaths.some(path => path.hasAttribute('fill') || path.hasAttribute('stroke'))) throw new Error('Discord fill-only correction changed an outlined social glyph');
-    if (document.querySelector('.home-meta') || document.querySelector('.home-left').querySelectorAll('#launcher-version').length !== 1 || document.querySelector('#launcher-version').textContent !== 'vbrowser-test') throw new Error('Home footer is not version-only');
+    if (document.querySelector('.home-meta') || document.querySelector('.home-left').querySelectorAll('#launcher-version').length !== 1 || document.querySelector('#launcher-version').textContent !== 'browser-test') throw new Error('Home footer is not version-only');
     const fit = state.calls.find(call => call.command === 'fit_window_to_work_area');
     if (!fit || fit.args.availableWidth !== 1280 || fit.args.availableHeight !== 800) throw new Error('work-area sizing was not requested at boot');
     state.calls.length = 0;
@@ -1392,7 +1392,7 @@ test('home_auth_and_terminal_install_states', async t => {
   await evaluate(devtools, `new Promise(resolve => {
     const check = () => location.search === '?fit-fail'
       && window.__launcherBrowserState?.calls.some(call => call.command === 'fit_window_to_work_area')
-      && document.querySelector('#launcher-version')?.textContent === 'vbrowser-test'
+      && document.querySelector('#launcher-version')?.textContent === 'browser-test'
       ? resolve(true)
       : setTimeout(check, 10);
     check();
@@ -1400,7 +1400,7 @@ test('home_auth_and_terminal_install_states', async t => {
   await assertUi(`
     const state = window.__launcherBrowserState;
     if (!state.calls.some(call => call.command === 'fit_window_to_work_area')) throw new Error('resize failure fixture did not run');
-    if (!state.calls.some(call => call.command === 'get_server_settings') || document.querySelector('#launcher-version').textContent !== 'vbrowser-test') throw new Error('resize failure aborted normal boot');
+    if (!state.calls.some(call => call.command === 'get_server_settings') || document.querySelector('#launcher-version').textContent !== 'browser-test') throw new Error('resize failure aborted normal boot');
     if (document.querySelector('#shell-status,.status-line')) throw new Error('shell toast survived the no-overlay policy');
     if (document.body.dataset.theme !== 'light' || document.querySelector('[data-utility="theme"]').getAttribute('aria-label') !== 'Use night theme') throw new Error('saved theme did not synchronize the theme toggle');
   `);

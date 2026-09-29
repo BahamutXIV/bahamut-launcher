@@ -74,7 +74,7 @@ pub(crate) fn home_state_diagnostics(
     }
 }
 
-/// Build-time `git describe` identity shown in the About panel.
+/// Build-time version identity shown in the Home footer.
 #[tauri::command]
 pub(crate) fn launcher_version() -> &'static str {
     bahamut_launcher::version::LAUNCHER_VERSION

@@ -1252,7 +1252,7 @@ async function boot() {
     settingsState.serverSettings = serverSettings;
     home.server = serverSettings.selected_server;
     home.news = news;
-    document.querySelector('#launcher-version').textContent = `v${version}`;
+    document.querySelector('#launcher-version').textContent = version;
     renderNews();
     await restoreSession();
     await refreshHomeStatus();

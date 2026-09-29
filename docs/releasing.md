@@ -76,8 +76,10 @@ version above the highest tag is rewritten back down by the next release.
 
 ## Version identity
 
-The runtime version the launcher reports comes from `BAHAMUT_RELEASE_TAG` on a
-tag build and from `git describe` on an ordinary branch build; see
+The runtime version the launcher reports is `BAHAMUT_RELEASE_TAG` on a tag
+build, such as `v1.0.0`. An ordinary branch build reports the latest reachable
+tag, a hyphen, and the short commit hash, such as `v1.0.0-222f317`, with a
+`-dirty` suffix when tracked files have uncommitted changes; see
 [`build.rs`](../build.rs). The release bump commit keeps the Cargo and Tauri
 package versions in lockstep, but that package version is metadata, not the
 runtime identity. The [signed release metadata](release-metadata.md) version
