@@ -181,7 +181,7 @@ fn main() {
     };
     tracing::info!("------------------------------------------------------------");
     tracing::info!(
-        "BahamutXIV Launcher v{}",
+        "BahamutXIV Launcher {}",
         bahamut_launcher::version::LAUNCHER_VERSION
     );
     match dirs::launcher_roots() {
