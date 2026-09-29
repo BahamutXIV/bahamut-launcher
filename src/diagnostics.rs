@@ -26,6 +26,23 @@ pub fn system_diagnostics() -> SystemDiagnostics {
     }
 }
 
+/// Binary units labelled KB, MB, and GB, as the launcher UI labels them.
+pub fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.2} GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.2} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.2} KB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
+}
+
 pub fn free_disk_bytes(path: &Path) -> Option<u64> {
     platform_free_disk_bytes(path)
 }
@@ -229,6 +246,14 @@ mod tests {
         let total = u64::try_from(i128::from(info.f_blocks) * unit).unwrap();
         assert!(free > 0);
         assert!(free <= total, "{free} free exceeds {total} total");
+    }
+
+    #[test]
+    fn byte_format_is_stable_for_support_logs() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1536), "1.50 KB");
+        assert_eq!(format_bytes(3 * 1024 * 1024), "3.00 MB");
+        assert_eq!(format_bytes(2 * 1024 * 1024 * 1024), "2.00 GB");
     }
 
     #[test]

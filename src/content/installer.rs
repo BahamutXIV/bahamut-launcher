@@ -15,6 +15,7 @@ use super::http::{ObjectSpec, download_object};
 use super::manifest::{
     ArchiveLayout, BaseArchive, BasePackage, InstallFile, validate_hash, validate_relative_path,
 };
+use super::require_space;
 use super::version_files::write_version_files;
 use super::worker::{InstallShared, Phase, download_checkpoint};
 use crate::diagnostics::free_disk_bytes;
@@ -588,15 +589,6 @@ fn same_volume(left: &Path, right: &Path) -> bool {
     {
         left.components().next() == right.components().next()
     }
-}
-
-fn require_space(available: Option<u64>, required: u64, volume: &str) -> Result<(), String> {
-    if let Some(available) = available.filter(|available| *available < required) {
-        return Err(format!(
-            "Insufficient free space on the {volume}: need {required} bytes, {available} bytes available."
-        ));
-    }
-    Ok(())
 }
 
 fn stage_path_for(destination: &Path) -> Result<PathBuf, String> {
