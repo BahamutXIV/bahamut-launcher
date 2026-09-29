@@ -16,6 +16,7 @@ use super::http::{ObjectSpec, download_object};
 use super::manifest::{
     ArchiveLayout, BasePackage, InstallFile, validate_hash, validate_relative_path,
 };
+use super::require_space;
 use crate::diagnostics::free_disk_bytes;
 use crate::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
 
@@ -919,15 +920,6 @@ fn preflight_space(quote: &RepairQuote, cache: &Path, game: &Path) -> Result<(),
             quote.replacement_bytes,
             "game installation",
         )?;
-    }
-    Ok(())
-}
-
-fn require_space(available: Option<u64>, required: u64, volume: &str) -> Result<(), String> {
-    if available.is_some_and(|available| available < required) {
-        return Err(format!(
-            "Insufficient free space on the {volume}: need {required} bytes."
-        ));
     }
     Ok(())
 }

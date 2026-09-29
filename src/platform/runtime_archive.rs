@@ -44,6 +44,16 @@ pub(super) const LINUX_DXVK_3_0: RuntimeArchivePin = RuntimeArchivePin {
     sha256: "7dd3243fe1b260a0e9b0b9e49d672ae32e3398bee18c97e7e8569d0ef0eca92d",
 };
 
+// GitHub Releases API `digest` and `size` for asset #575262539:
+// https://api.github.com/repos/Kron4ek/Wine-Builds/releases/assets/575262539
+#[cfg(any(target_os = "linux", test))]
+pub(super) const LINUX_WINE_11_18_WOW64: RuntimeArchivePin = RuntimeArchivePin {
+    name: "Wine 11.18 (WoW64)",
+    url: "https://github.com/Kron4ek/Wine-Builds/releases/download/11.18/wine-11.18-amd64-wow64.tar.xz",
+    size: 99_305_644,
+    sha256: "f899879b8c37e0b20adca19d147cf77436f3f1a37bf16d08d27fa7137a52b9ba",
+};
+
 /// Stream an archive to a new staging file, rejecting excess bytes and any
 /// size or SHA-256 mismatch before callers can extract or install it.
 pub(super) fn download_verified(pin: RuntimeArchivePin, destination: &Path) -> Result<(), String> {
@@ -154,6 +164,7 @@ mod tests {
             MACOS_WRAPPER_1_0_11,
             MACOS_ENGINE_WS12_23_7_1_4,
             LINUX_DXVK_3_0,
+            LINUX_WINE_11_18_WOW64,
         ] {
             assert_eq!(pin.sha256.len(), 64, "{}", pin.name);
             assert!(pin.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));

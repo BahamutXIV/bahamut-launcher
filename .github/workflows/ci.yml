@@ -45,6 +45,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install desktop-file-utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y desktop-file-utils
+
       - name: Install clang-format
         run: python -m pip install --disable-pip-version-check clang-format==22.1.8
 
@@ -83,6 +88,20 @@ jobs:
 
       - name: Test Unix package publication
         run: python scripts/test-unix-package.py
+
+      - name: Shellcheck the Linux packaging scripts
+        run: |
+          shellcheck \
+            packaging/linux/install.sh \
+            packaging/linux/install-dependencies.sh \
+            scripts/package-linux-tarball.sh \
+            scripts/stage-unix-release.sh
+
+      - name: Validate the desktop entry
+        run: desktop-file-validate packaging/linux/bahamut-launcher.desktop
+
+      - name: Test Linux package
+        run: python scripts/test-linux-package.py
 
   workspace:
     name: Checks (Linux)
@@ -151,6 +170,26 @@ jobs:
             --launcher "$RUNNER_TEMP/bahamut-launcher" \
             --client-build out/client-mingw \
             --destination "$RUNNER_TEMP/unix-release"
+
+      - name: Package the Linux archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/package-linux-tarball.sh \
+            --launcher "$RUNNER_TEMP/bahamut-launcher" \
+            --client-build out/client-mingw \
+            --label bahamut-launcher-ci-linux-x86_64 \
+            --output "$RUNNER_TEMP/linux-dist"
+          check="$RUNNER_TEMP/linux-package-check"
+          mkdir -p "$check/extract"
+          tar -xzf "$RUNNER_TEMP/linux-dist/bahamut-launcher-ci-linux-x86_64.tar.gz" -C "$check/extract"
+          cd "$check/extract/bahamut-launcher"
+          ./install.sh --prefix "$check/prefix" --skip-checks
+          test -x "$check/prefix/lib/bahamut-launcher/bahamut-launcher"
+          make DESTDIR="$check/destdir" PREFIX=/usr install
+          test -L "$check/destdir/usr/bin/bahamut-launcher"
+          "$check/prefix/lib/bahamut-launcher/install.sh" --uninstall --prefix "$check/prefix"
+          test ! -e "$check/prefix/lib/bahamut-launcher"
 
   windows-build:
     name: Checks (Windows)

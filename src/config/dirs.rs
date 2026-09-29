@@ -1,4 +1,5 @@
-//! Launcher roots: shipped payload is read from the install root, and everything the launcher writes lives under the state root.
+//! Launcher roots: shipped payload is read from the install root, and everything the launcher
+//! writes lives under the state root. A macOS app bundle or a packaged Linux tree splits them.
 
 use std::ffi::OsStr;
 use std::io;
@@ -17,6 +18,9 @@ pub const PORTABLE_DATA_DIR_NAME: &str = "data";
 pub const PORTABLE_BACKUPS_DIR_NAME: &str = "backups";
 
 pub const RETAIL_CONFIG_SYS_FILE: &str = "config.sys";
+
+/// File beside the launcher executable that marks a packaged tree whose state lives in [`data_dir`].
+pub const PACKAGE_MARKER_FILE: &str = ".bahamut-launcher-package";
 
 /// Absolute path that replaces `~/.bahamut-launcher` as the data directory off Windows.
 #[cfg(not(target_os = "windows"))]
@@ -61,7 +65,8 @@ pub enum ConfigDirError {
     },
 }
 
-/// The two launcher roots. They are the same directory except in a macOS app bundle.
+/// The two launcher roots. They are the same directory except in a macOS app bundle or a packaged
+/// Linux tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LauncherRoots {
     /// Read-only payload: the loader, the client module, native plugins, and shipped packages.
@@ -102,42 +107,51 @@ pub fn current_exe_dir() -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::other("current_exe has no parent directory"))
 }
 
-/// Resolve the running executable. macOS follows symlinks so a linked launch still finds its
-/// bundle; other platforms keep the reported path because Windows canonicalization adds a
+/// Resolve the running executable. macOS and Linux follow symlinks so a linked launch still finds
+/// its bundle or package marker; Windows keeps the reported path because canonicalization adds a
 /// verbatim prefix.
 fn launcher_executable() -> io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
         return Ok(std::fs::canonicalize(&exe).unwrap_or(exe));
     }
     Ok(exe)
 }
 
-/// Resolve both launcher roots for the running executable; only a macOS app bundle splits them.
+/// Resolve both launcher roots for the running executable. Windows keeps both in the executable's
+/// directory because its self-update relies on the install and state roots being the same.
 pub fn launcher_roots() -> Result<LauncherRoots, ConfigDirError> {
     let exe = launcher_executable()?;
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", target_os = "linux")) {
         resolve_roots(&exe, data_dir().ok())
     } else {
         portable_roots(&exe)
     }
 }
 
-/// Resolve the launcher roots for `exe` without touching the filesystem beyond bundle detection.
+/// Resolve the launcher roots for `exe` without touching the filesystem beyond bundle and
+/// package-marker detection.
 ///
 /// A bundled executable reads its payload from `Contents/Resources` and writes to
-/// `per_user_data`; any other executable uses its own directory for both roots.
+/// `per_user_data`. Otherwise an executable beside [`PACKAGE_MARKER_FILE`] reads its payload from
+/// its own directory and writes to `per_user_data`. Any other executable uses its own directory
+/// for both roots.
 pub fn resolve_roots(
     exe: &Path,
     per_user_data: Option<PathBuf>,
 ) -> Result<LauncherRoots, ConfigDirError> {
-    match bundle_contents_dir(exe) {
-        Some(contents) => Ok(LauncherRoots {
+    if let Some(contents) = bundle_contents_dir(exe) {
+        return Ok(LauncherRoots {
             install: contents.join(BUNDLE_RESOURCES_DIR_NAME),
             state: per_user_data.ok_or(ConfigDirError::NotAvailable)?,
-        }),
-        None => portable_roots(exe),
+        });
     }
+    if package_marker_present(exe) {
+        let mut roots = portable_roots(exe)?;
+        roots.state = per_user_data.ok_or(ConfigDirError::NotAvailable)?;
+        return Ok(roots);
+    }
+    portable_roots(exe)
 }
 
 fn portable_roots(exe: &Path) -> Result<LauncherRoots, ConfigDirError> {
@@ -162,6 +176,12 @@ pub(crate) fn bundle_contents_dir(exe: &Path) -> Option<PathBuf> {
         && bundle.extension() == Some(OsStr::new(BUNDLE_EXTENSION))
         && contents.join(BUNDLE_INFO_PLIST_FILE_NAME).is_file();
     bundled.then(|| contents.to_path_buf())
+}
+
+/// Return whether [`PACKAGE_MARKER_FILE`] is a regular file beside `exe`.
+pub(crate) fn package_marker_present(exe: &Path) -> bool {
+    exe.parent()
+        .is_some_and(|dir| dir.join(PACKAGE_MARKER_FILE).is_file())
 }
 
 /// Resolve the read-only root holding the loader, client module, native plugins, and shipped packages.
@@ -248,8 +268,8 @@ fn retail_config_sys_path_under(documents: &Path) -> PathBuf {
         .join(RETAIL_CONFIG_SYS_FILE)
 }
 
-/// Resolve launcher data for the managed Wine prefix and runtime; a macOS app bundle also keeps
-/// its state root here.
+/// Resolve launcher data for the managed Wine prefix and runtime; a macOS app bundle or a packaged
+/// Linux tree also keeps its state root here.
 ///
 /// | Platform | Location |
 /// |----------|----------|
@@ -525,6 +545,86 @@ mod tests {
             resolve_roots(&exe, None),
             Err(ConfigDirError::NotAvailable)
         ));
+    }
+
+    fn write_test_package(dir: &Path) -> PathBuf {
+        let exe = dir.join("bahamut-launcher");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(dir.join(PACKAGE_MARKER_FILE), b"").unwrap();
+        exe
+    }
+
+    #[test]
+    fn resolve_roots_splits_a_marked_package_tree() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = write_test_package(temp.path());
+        let state = temp.path().join("home/.bahamut-launcher");
+        assert!(package_marker_present(&exe));
+        assert_eq!(
+            resolve_roots(&exe, Some(state.clone())).unwrap(),
+            LauncherRoots {
+                install: temp.path().to_path_buf(),
+                state,
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_roots_keeps_an_unmarked_tree_portable() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("bahamut-launcher");
+        std::fs::write(&exe, b"").unwrap();
+        assert!(!package_marker_present(&exe));
+        assert_eq!(
+            resolve_roots(&exe, Some(temp.path().join("home/.bahamut-launcher"))).unwrap(),
+            LauncherRoots {
+                install: temp.path().to_path_buf(),
+                state: temp.path().to_path_buf(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_roots_requires_a_per_user_directory_for_a_marked_tree() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = write_test_package(temp.path());
+        assert!(matches!(
+            resolve_roots(&exe, None),
+            Err(ConfigDirError::NotAvailable)
+        ));
+    }
+
+    #[test]
+    fn package_marker_must_be_a_regular_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("bahamut-launcher");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::create_dir(temp.path().join(PACKAGE_MARKER_FILE)).unwrap();
+        assert!(!package_marker_present(&exe));
+        assert_eq!(
+            resolve_roots(&exe, Some(temp.path().join("home/.bahamut-launcher"))).unwrap(),
+            LauncherRoots {
+                install: temp.path().to_path_buf(),
+                state: temp.path().to_path_buf(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_roots_prefers_a_bundle_over_a_package_marker() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = write_test_bundle(temp.path());
+        let executable_dir = exe.parent().unwrap();
+        std::fs::write(executable_dir.join(PACKAGE_MARKER_FILE), b"").unwrap();
+        assert!(package_marker_present(&exe));
+        let state = temp.path().join("home/.bahamut-launcher");
+        assert_eq!(
+            resolve_roots(&exe, Some(state.clone())).unwrap(),
+            LauncherRoots {
+                install: temp.path().join("Bahamut Launcher.app/Contents/Resources"),
+                state,
+            }
+        );
     }
 
     #[cfg(unix)]

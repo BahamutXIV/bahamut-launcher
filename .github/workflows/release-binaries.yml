@@ -96,7 +96,8 @@ jobs:
             target: windows-x86_64
             launcher: target/release/bahamut-launcher-shell.exe
           - display_name: Linux
-            os: ubuntu-latest
+            # Built on 22.04 so the binary needs at most glibc 2.35.
+            os: ubuntu-22.04
             target: linux-x86_64
             launcher: target/release/bahamut-launcher-shell
           # One executable for Apple Silicon and Intel, built on the arm64 runner.
@@ -146,7 +147,7 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-${{ matrix.os }}
 
       - name: Configure x86 client module
         if: runner.os == 'Windows'
@@ -257,12 +258,21 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = x86_64
           mkdir -p dist
-          ./scripts/stage-unix-release.sh \
+          ./scripts/package-linux-tarball.sh \
             --launcher "$LAUNCHER_BINARY" \
             --client-build out/client-mingw \
-            --destination staging
-          tar -czf "dist/$ASSET_NAME.tar.gz" -C staging .
-          ( cd dist && shasum -a 256 "$ASSET_NAME.tar.gz" > "$ASSET_NAME.tar.gz.sha256" )
+            --label "$ASSET_NAME" \
+            --output dist
+          check="$RUNNER_TEMP/linux-check"
+          rm -rf "$check"
+          mkdir -p "$check"
+          tar -xzf "dist/$ASSET_NAME.tar.gz" -C "$check"
+          printed="$("$check/bahamut-launcher/bahamut-launcher" --version)"
+          echo "launcher --version: $printed"
+          if [[ -n "${BAHAMUT_RELEASE_TAG:-}" && "$printed" != "$BAHAMUT_RELEASE_TAG" ]]; then
+            echo "launcher reports $printed but the release tag is $BAHAMUT_RELEASE_TAG" >&2
+            exit 1
+          fi
 
       # Signing follows the secrets, not the tag, so a branch dispatch can
       # produce a signed dev build. Without both secrets the app is ad hoc signed.

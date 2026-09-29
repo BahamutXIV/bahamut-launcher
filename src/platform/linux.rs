@@ -1,5 +1,6 @@
-//! Linux Wine backend: patch `ffxivgame.exe` on a working copy and launch it with system Wine, or,
-//! when the packaged extension artifacts are present, run the x86 loader under system Wine.
+//! Linux Wine backend: patch `ffxivgame.exe` on a working copy and launch it under the selected
+//! Wine (`BAHAMUT_WINE`, else the managed engine on x86_64, else system Wine), or, when the
+//! packaged extension artifacts are present, run the x86 loader under that Wine.
 
 use std::path::{Path, PathBuf};
 
@@ -25,7 +26,7 @@ pub fn detect_game_install() -> Option<PathBuf> {
     None
 }
 
-/// Launch the client under system Wine and return its process id.
+/// Launch the client under the selected Wine and return its process id.
 pub fn launch_game(
     game_dir: &Path,
     lobby_host: &str,

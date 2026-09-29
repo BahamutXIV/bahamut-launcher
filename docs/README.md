@@ -9,11 +9,12 @@ behavior.
 ## Guides
 
 - [Getting started](getting-started.md) - platform requirements, archive use,
-  first launch, and client requirements.
-- [Troubleshooting](troubleshooting.md) - build, logs, configuration, install,
-  authentication, and recovery diagnosis.
-- [Configuration](configuration.md) - portable files, game settings, backups,
-  extensions, scripts, and DAT overlays.
+  Linux install, first launch, and client requirements.
+- [Troubleshooting](troubleshooting.md) - build, logs, Linux startup,
+  configuration, install, authentication, and recovery diagnosis.
+- [Configuration](configuration.md) - portable files, the macOS app and Linux
+  package layouts, game settings, backups, extensions, scripts, and DAT
+  overlays.
 - [DAT overlays](dat-overlays.md) - package layout, selection, and a complete
   replacement example.
 
@@ -36,11 +37,15 @@ used by the launcher and its boundaries. Players can usually skip them.
 ## Development and release
 
 - [Development](development.md) - prerequisites, workspace checks, browser
-  checks, native tests, and platform limits.
+  checks, native tests, Linux archive packaging, and platform limits.
 - [Release process](releasing.md) - merge-to-main version bump and tag
   automation, archive contents, and platform limits.
 - [Win32 client module](../client/README.md) - MSVC and llvm-mingw build and
   test commands and their coverage limits.
+- [Gentoo package template](../packaging/gentoo/README.md) - local overlay
+  ebuild for the Linux release archive.
+- [Linux archive README](../packaging/linux/README.md) - the `README.md` that
+  ships inside the Linux release archive.
 
 ## Public documentation policy
 
