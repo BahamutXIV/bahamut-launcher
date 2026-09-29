@@ -64,6 +64,10 @@ for an intentional whole-tree audit. Format an owned file with
 checks workflow syntax. The hosted workflow runs these checks and adds the
 platform checks below.
 
+On Linux, `cargo test --lib pinned_engine -- --ignored` downloads the pinned
+[Wine engine](configuration.md#linux-wine-engine) and checks that it verifies
+and unpacks. It runs on any Linux CPU architecture and does not start Wine.
+
 ## Rust and NASM
 
 The checkout pins Rust 1.95.0 and includes `rustfmt` and `clippy` in
@@ -221,8 +225,9 @@ The default Debug build cross-compiles the client module into
 Release uses `out/client-mingw` and publishes
 `out/release/<version>/bahamut-launcher`. Publishing keeps an existing
 `scripts/default.txt` and never deletes files. `--test` first runs the client
-module tests under Wine (the launcher's managed macOS engine when installed,
-otherwise `wine` on `PATH`, with the prefix under `out/wine-test-prefix`).
+module tests under Wine (the launcher's managed macOS or Linux engine when
+installed, otherwise `wine` on `PATH`, with the prefix under
+`out/wine-test-prefix`).
 `--skip-build` republishes existing build outputs. The script's header lists
 the toolchain lookup order and the remaining options.
 `scripts/build-and-run-unix.sh` takes the same options, then starts the

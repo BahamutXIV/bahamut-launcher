@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Check, and on request install, the host libraries and Wine the packaged
-# launcher needs.
+# Check, and on request install, the host libraries the packaged launcher
+# needs, plus Wine where the launcher does not download its own.
 set -euo pipefail
 
 name="install-dependencies.sh"
@@ -15,6 +15,13 @@ usage: install-dependencies.sh [--check | --install] [--launcher PATH] [--yes]
   --launcher PATH  the launcher to inspect; default: bahamut-launcher beside
                    this script
   --yes            with --install, do not ask for confirmation
+
+On x86_64 the launcher downloads its own Wine on the first Play, so
+system Wine is optional there: the check reports it as the fallback and only
+needs tar and xz to unpack the download. With BAHAMUT_WINE set, or on another
+architecture, the Wine that will run must have 32-bit support and be version
+7 or newer. Vulkan, the engine's display and font libraries, and audio are
+reported but never change the exit code.
 
 Exit codes: 0 all satisfied, 1 something is missing, 2 usage error,
 3 cannot check on this host, 4 a glibc-based distribution is required,
@@ -141,7 +148,7 @@ probe_libraries() {
         b700) built="aarch64" ;;
         *) built="ELF machine 0x${machine:2:2}${machine:0:2}" ;;
     esac
-    host="$(uname -m 2>/dev/null || echo unknown)"
+    host="$host_arch"
     if [ "$built" != "$host" ]; then
         lib_state="arch"
         lib_note="the launcher is built for $built; this host is $host"
@@ -198,6 +205,19 @@ truth_test() {
 
 wine_state=""
 wine_note=""
+fallback_note=""
+host_arch=""
+tool_missing=()
+vulkan_state=""
+
+# Test-only: BAHAMUT_DEPENDENCY_ROOT prefixes the paths the distribution,
+# read-only-root, library, and Vulkan probes read. Unset, they read the host.
+dep_root="${BAHAMUT_DEPENDENCY_ROOT:-}"
+
+# managed_wine: the launcher downloads its own Wine on this host.
+managed_wine() {
+    [ "$host_arch" = "x86_64" ] && [ -z "${BAHAMUT_WINE+set}" ]
+}
 
 wine_version() {
     local runner=()
@@ -207,8 +227,28 @@ wine_version() {
     ${runner[@]+"${runner[@]}"} "$1" --version 2>/dev/null < /dev/null | head -n 1 || true
 }
 
+probe_managed() {
+    local wine_cmd wine_path version tool
+    wine_state="managed"
+    fallback_note=""
+    tool_missing=()
+    for tool in tar xz; do
+        command -v "$tool" >/dev/null 2>&1 || tool_missing+=("$tool")
+    done
+    wine_cmd="$(command -v wine 2>/dev/null || true)"
+    [ -n "$wine_cmd" ] || return 0
+    wine_path="$(readlink -f -- "$wine_cmd" 2>/dev/null || true)"
+    [ -n "$wine_path" ] && [ -f "$wine_path" ] || return 0
+    version="$(wine_version "$wine_path")"
+    fallback_note="system Wine $wine_path (${version:-unknown version}) is the fallback"
+}
+
 probe_wine() {
     local wine_cmd wine_path wine_root candidate version
+    if managed_wine; then
+        probe_managed
+        return
+    fi
     # BAHAMUT_WINE is used as given, like the launcher does.
     if [ -n "${BAHAMUT_WINE+set}" ]; then
         wine_cmd="$BAHAMUT_WINE"
@@ -255,19 +295,113 @@ probe_wine() {
     wine_note="$wine_path lacks 32-bit support (no i386-windows/ntdll.dll under $wine_root)"
 }
 
+ldconfig_listing=""
+
+load_ldconfig() {
+    local cmd
+    ldconfig_listing=""
+    [ -z "$dep_root" ] || return 0
+    for cmd in ldconfig /sbin/ldconfig /usr/sbin/ldconfig; do
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        ldconfig_listing="$("$cmd" -p 2>/dev/null || true)"
+        break
+    done
+}
+
+# lib_installed SONAME: an x86-64 ldconfig entry, else the library directories.
+lib_installed() {
+    local soname="$1" line dir
+    while IFS= read -r line; do
+        case "$line" in
+            *"$soname ("*"x86-64"*) return 0 ;;
+        esac
+    done <<< "$ldconfig_listing"
+    for dir in "$dep_root"/usr/lib "$dep_root"/usr/lib64 "$dep_root"/lib "$dep_root"/lib64 \
+        "$dep_root"/usr/local/lib "$dep_root"/usr/lib/*-linux-gnu "$dep_root"/lib/*-linux-gnu; do
+        [ -e "$dir/$soname" ] && return 0
+    done
+    return 1
+}
+
+# Host libraries named by the engine's winex11.so, win32u.so, winepulse.so, and
+# winealsa.so; missing ones are reported, never fatal.
+engine_libs=(libX11.so.6 libXext.so.6 libXcomposite.so.1 libXcursor.so.1 libXfixes.so.3
+    libXi.so.6 libXinerama.so.1 libXrandr.so.2 libXrender.so.1 libXxf86vm.so.1 libGL.so.1
+    libfreetype.so.6 libfontconfig.so.1)
+engine_missing=()
+audio_lib=""
+
+probe_engine_libs() {
+    local soname
+    engine_missing=()
+    audio_lib=""
+    managed_wine || return 0
+    for soname in "${engine_libs[@]}"; do
+        lib_installed "$soname" || engine_missing+=("$soname")
+    done
+    for soname in libpulse.so.0 libasound.so.2; do
+        if lib_installed "$soname"; then
+            audio_lib="$soname"
+            break
+        fi
+    done
+}
+
+# probe_vulkan: the loader and at least one driver manifest, as the launcher's
+# own DXVK check looks for them.
+probe_vulkan() {
+    local file loader=0 icd=0
+    ! lib_installed libvulkan.so.1 || loader=1
+    for file in "$dep_root"/usr/share/vulkan/icd.d/*.json "$dep_root"/etc/vulkan/icd.d/*.json; do
+        if [ -f "$file" ]; then
+            icd=1
+            break
+        fi
+    done
+    if [ "$loader" -eq 1 ] && [ "$icd" -eq 1 ]; then
+        vulkan_state="ok"
+    else
+        vulkan_state="missing"
+    fi
+}
+
 distro="unknown"
+distro_id=""
+distro_major=""
+read_only_root=0
 
 detect_distro() {
-    local id="" like="" key value word words=()
-    [ -r /etc/os-release ] || return 0
+    local id="" like="" version="" key value word words=()
+    distro="unknown"
+    distro_id=""
+    distro_major=""
+    read_only_root=0
+    if [ -e "$dep_root/run/ostree-booted" ]; then
+        read_only_root=1
+    fi
+    [ -r "$dep_root/etc/os-release" ] || return 0
     while IFS='=' read -r key value; do
         value="${value#[\"\']}"
         value="${value%[\"\']}"
         case "$key" in
             ID) id="$value" ;;
             ID_LIKE) like="$value" ;;
+            VERSION_ID) version="$value" ;;
         esac
-    done < /etc/os-release
+    done < "$dep_root/etc/os-release"
+    case "$id" in
+        steamos | bazzite) read_only_root=1 ;;
+    esac
+    # Only ID selects the RHEL family: derivatives such as Nobara list rhel in
+    # ID_LIKE but package WebKitGTK 4.1 through Fedora.
+    case "$id" in
+        rhel | centos | rocky | almalinux | ol)
+            distro="rhel"
+            distro_id="$id"
+            distro_major="${version%%.*}"
+            return 0
+            ;;
+    esac
     read -r -a words <<< "$id $like"
     for word in ${words[@]+"${words[@]}"}; do
         case "$word" in
@@ -277,22 +411,54 @@ detect_distro() {
     done
 }
 
-install_command() {
+# no_package_command: the report cannot name a package command for this host.
+no_package_command() {
+    [ "$distro" = "unknown" ] || [ "$distro" = "rhel" ] || [ "$read_only_root" -eq 1 ]
+}
+
+# The library package, plus the tools the Wine download is unpacked with when
+# they are missing.
+pkg_list=()
+
+set_packages() {
+    local tool
     case "$distro" in
-        gentoo) echo "sudo emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3 virtual/wine" ;;
-        debian | ubuntu) echo "sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install libwebkit2gtk-4.1-0 wine wine32:i386" ;;
-        fedora) echo "sudo dnf install webkit2gtk4.1 wine" ;;
-        arch) echo "sudo pacman -S webkit2gtk-4.1 wine" ;;
-        opensuse) echo "sudo zypper install libwebkit2gtk-4_1-0 wine" ;;
+        gentoo) pkg_list=(net-libs/webkit-gtk:4.1 'x11-libs/gtk+:3') ;;
+        debian | ubuntu) pkg_list=(libwebkit2gtk-4.1-0) ;;
+        fedora) pkg_list=(webkit2gtk4.1) ;;
+        arch) pkg_list=(webkit2gtk-4.1) ;;
+        opensuse) pkg_list=(libwebkit2gtk-4_1-0) ;;
+        *) pkg_list=() ;;
+    esac
+    for tool in ${tool_missing[@]+"${tool_missing[@]}"}; do
+        case "$distro:$tool" in
+            gentoo:xz) pkg_list+=(app-arch/xz-utils) ;;
+            gentoo:tar) pkg_list+=(app-arch/tar) ;;
+            debian:xz | ubuntu:xz) pkg_list+=(xz-utils) ;;
+            *) pkg_list+=("$tool") ;;
+        esac
+    done
+}
+
+install_command() {
+    set_packages
+    case "$distro" in
+        gentoo) echo "sudo emerge --ask --noreplace ${pkg_list[*]}" ;;
+        debian | ubuntu) echo "sudo apt update && sudo apt install ${pkg_list[*]}" ;;
+        fedora) echo "sudo dnf install ${pkg_list[*]}" ;;
+        arch) echo "sudo pacman -S ${pkg_list[*]}" ;;
+        opensuse) echo "sudo zypper install ${pkg_list[*]}" ;;
     esac
 }
 
 print_distro_notes() {
     case "$distro" in
         gentoo)
-            echo "  Wine needs 32-bit support: enable the abi_x86_32 or wow64 USE flag on"
-            echo "  app-emulation/wine-vanilla or app-emulation/wine-staging (for example in"
-            echo "  /etc/portage/package.use), then check the active Wine with 'eselect wine list'."
+            if [ "$wine_state" = "no32" ]; then
+                echo "  Wine needs 32-bit support: enable the abi_x86_32 or wow64 USE flag on"
+                echo "  app-emulation/wine-vanilla or app-emulation/wine-staging (for example in"
+                echo "  /etc/portage/package.use), then check the active Wine with 'eselect wine list'."
+            fi
             ;;
     esac
 }
@@ -300,6 +466,35 @@ print_distro_notes() {
 print_wine_upgrade() {
     echo "  Debian and Ubuntu: install Wine 7 or newer from the WineHQ packages,"
     echo "  https://gitlab.winehq.org/wine/wine/-/wikis/Debian-Ubuntu"
+}
+
+# EPEL carries WebKitGTK 4.1 from release 10; older releases do not package it.
+print_rhel_note() {
+    case "$distro_major" in
+        '' | *[!0-9]*) distro_major=0 ;;
+    esac
+    if [ "$distro_major" -ge 10 ]; then
+        set_packages
+        echo "WebKitGTK 4.1 is in EPEL on this release: enable EPEL (AlmaLinux, Rocky Linux, and CentOS Stream: sudo dnf install epel-release), then run: sudo dnf install webkit2gtk4.1${tool_missing[*]+ ${tool_missing[*]}}"
+    else
+        echo "this release does not package WebKitGTK 4.1; the launcher is not supported on it"
+    fi
+}
+
+print_vulkan_packages() {
+    case "$distro" in
+        gentoo) echo "  packages: media-libs/vulkan-loader media-libs/mesa" ;;
+        debian | ubuntu) echo "  packages: libvulkan1 mesa-vulkan-drivers" ;;
+        fedora) echo "  packages: vulkan-loader mesa-vulkan-drivers" ;;
+        arch) echo "  packages: vulkan-icd-loader and vulkan-radeon, vulkan-intel, or nvidia-utils" ;;
+        opensuse) echo "  packages: libvulkan1 and libvulkan_radeon or libvulkan_intel" ;;
+        *) echo "  Install your distribution's Vulkan loader and a Vulkan driver for your GPU." ;;
+    esac
+}
+
+print_wine_install() {
+    echo "  Install Wine 7 or newer with 32-bit support from your distribution, or set"
+    echo "  BAHAMUT_WINE to one; this is not fixed by the library package."
 }
 
 print_file_search() {
@@ -332,17 +527,21 @@ run_checks() {
     missing_libs=()
     loader_errors=()
     too_old=()
+    host_arch="$(uname -m 2>/dev/null || echo unknown)"
     probe_libraries
     if [ "$lib_state" = "ok" ]; then
         truth_test
     fi
     probe_wine
+    load_ldconfig
+    probe_vulkan
+    probe_engine_libs
     detect_distro
 }
 
 # installable: a distribution package can fix something the report found.
 installable() {
-    [ "$lib_state" = "missing" ] || [ "$wine_state" = "missing" ] || [ "$wine_state" = "no32" ]
+    [ "$lib_state" = "missing" ] || [ "${#tool_missing[@]}" -gt 0 ]
 }
 
 # Prints the report and sets result to the exit code.
@@ -380,22 +579,61 @@ report() {
         echo "  note: $lib_note"
     fi
     case "$wine_state" in
+        managed)
+            echo "wine: the launcher downloads its own Wine on the first Play"
+            [ -z "$fallback_note" ] || echo "wine: $fallback_note"
+            if [ "${#tool_missing[@]}" -gt 0 ]; then
+                echo "unpack tools: missing ${tool_missing[*]} (needed to unpack the Wine download)"
+            else
+                echo "unpack tools: tar and xz found"
+            fi
+            ;;
         ok) echo "wine: $wine_note (32-bit support present)" ;;
-        missing) echo "wine: missing: $wine_note" ;;
-        no32) echo "wine: Wine lacks 32-bit support: $wine_note" ;;
+        missing)
+            echo "wine: missing: $wine_note"
+            print_wine_install
+            ;;
+        no32)
+            echo "wine: Wine lacks 32-bit support: $wine_note"
+            print_wine_install
+            ;;
         old)
             echo "wine: $wine_note"
             print_wine_upgrade
             ;;
     esac
-    echo "distribution: $distro"
+    if [ "$vulkan_state" = "ok" ]; then
+        echo "vulkan: loader and driver found"
+    else
+        echo "vulkan: not found; the game uses the slower OpenGL renderer until a Vulkan driver is installed"
+        print_vulkan_packages
+    fi
+    if [ "$wine_state" = "managed" ]; then
+        if [ "${#engine_missing[@]}" -gt 0 ]; then
+            echo "engine libraries: missing ${engine_missing[*]}"
+            print_file_search
+        else
+            echo "engine libraries: all found"
+        fi
+        if [ -n "$audio_lib" ]; then
+            echo "audio: $audio_lib found"
+        else
+            echo "audio: not found; the game has no sound until libpulse.so.0 or libasound.so.2 is installed"
+        fi
+    fi
+    if [ "$distro" = "rhel" ]; then
+        echo "distribution: ${distro_id:-$distro} (RHEL family)"
+    else
+        echo "distribution: $distro"
+    fi
 
     case "$lib_state" in
         musl) result=4 ;;
         cannot | arch) result=3 ;;
         too_old) result=5 ;;
         *)
-            if [ "$lib_state" = "missing" ] || [ "$wine_state" != "ok" ]; then
+            if [ "$lib_state" = "missing" ] || [ "${#tool_missing[@]}" -gt 0 ] ||
+                { [ "$wine_state" != "ok" ] && [ "$wine_state" != "managed" ]; }; then
                 result=1
             else
                 result=0
@@ -404,7 +642,11 @@ report() {
     esac
 
     if { [ "$result" -eq 1 ] || [ "$result" -eq 3 ]; } && [ "$lib_state" != "arch" ] && installable; then
-        if [ "$distro" = "unknown" ]; then
+        if [ "$read_only_root" -eq 1 ]; then
+            echo "this system has a read-only root; install the missing packages with the system's own tooling (for example rpm-ostree or a distrobox container)"
+        elif [ "$distro" = "rhel" ]; then
+            print_rhel_note
+        elif [ "$distro" = "unknown" ]; then
             echo "to install: no package command is known for this distribution"
             print_file_search
         else
@@ -450,31 +692,31 @@ as_root() {
 # Each step returns on failure: set -e does not apply inside an if condition.
 run_install() {
     local yes_flag=()
+    set_packages
     case "$distro" in
         gentoo)
             if [ "$assume_yes" -eq 1 ]; then
-                as_root emerge --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3 virtual/wine || return 1
+                as_root emerge --noreplace "${pkg_list[@]}" || return 1
             else
-                as_root emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3 virtual/wine || return 1
+                as_root emerge --ask --noreplace "${pkg_list[@]}" || return 1
             fi
             ;;
         debian | ubuntu)
             [ "$assume_yes" -eq 0 ] || yes_flag=(-y)
-            as_root dpkg --add-architecture i386 || return 1
             as_root apt update || return 1
-            as_root apt install ${yes_flag[@]+"${yes_flag[@]}"} libwebkit2gtk-4.1-0 wine wine32:i386 || return 1
+            as_root apt install ${yes_flag[@]+"${yes_flag[@]}"} "${pkg_list[@]}" || return 1
             ;;
         fedora)
             [ "$assume_yes" -eq 0 ] || yes_flag=(-y)
-            as_root dnf install ${yes_flag[@]+"${yes_flag[@]}"} webkit2gtk4.1 wine || return 1
+            as_root dnf install ${yes_flag[@]+"${yes_flag[@]}"} "${pkg_list[@]}" || return 1
             ;;
         arch)
             [ "$assume_yes" -eq 0 ] || yes_flag=(--noconfirm)
-            as_root pacman -S ${yes_flag[@]+"${yes_flag[@]}"} webkit2gtk-4.1 wine || return 1
+            as_root pacman -S ${yes_flag[@]+"${yes_flag[@]}"} "${pkg_list[@]}" || return 1
             ;;
         opensuse)
             [ "$assume_yes" -eq 0 ] || yes_flag=(-y)
-            as_root zypper install ${yes_flag[@]+"${yes_flag[@]}"} libwebkit2gtk-4_1-0 wine || return 1
+            as_root zypper install ${yes_flag[@]+"${yes_flag[@]}"} "${pkg_list[@]}" || return 1
             ;;
     esac
 }
@@ -508,8 +750,8 @@ if ! installable; then
     exit 1
 fi
 
-if [ "$distro" = "unknown" ]; then
-    echo "$name: install the missing packages with your distribution's package manager" >&2
+if no_package_command; then
+    echo "$name: no package command is available for this system; see the report above" >&2
     exit 1
 fi
 

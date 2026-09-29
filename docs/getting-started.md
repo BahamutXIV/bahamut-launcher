@@ -39,9 +39,10 @@ cd bahamut-launcher
 ./install-dependencies.sh --check
 ```
 
-`./install-dependencies.sh --check` reports missing desktop libraries, a
-glibc that is too old, and a Wine that is missing, older than 7, or without
-32-bit support.
+`./install-dependencies.sh --check` reports missing desktop libraries and a
+glibc that is too old. It also reports which Wine the launcher uses, the
+engine's display, font, and audio libraries, and whether a Vulkan loader and
+driver are present.
 `./install-dependencies.sh --install` prints the package command for the
 detected distribution, asks for confirmation, and runs it with `sudo` or
 `doas`. Both commands are optional.
@@ -79,17 +80,15 @@ needs the steps in
 
 ### Gentoo and Hyprland
 
-On Gentoo, install the runtime libraries and Wine:
+On Gentoo, install the runtime libraries:
 
 ```bash
-sudo emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3 virtual/wine
+sudo emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3
 ```
 
-Wine needs 32-bit support. Build `app-emulation/wine-vanilla` or
-`app-emulation/wine-staging` with the `abi_x86_32` USE flag, or use a `wow64`
-build. List the installed Wine slots with `eselect wine list` and select one
-with `eselect wine set <n>`. Then run `./install.sh` from the extracted
-folder. The
+To use your own Wine instead of the launcher's, set `BAHAMUT_WINE`; it needs
+Wine 7 or newer with 32-bit support. Then run `./install.sh` from the
+extracted folder. The
 [Gentoo package template](https://github.com/BahamutXIV/bahamut-launcher/blob/main/packaging/gentoo/README.md)
 installs the same archive through a local overlay instead.
 
@@ -117,7 +116,7 @@ X11 class is `Bahamut-launcher`. The pattern matches both.
 | System | Requirements |
 |---|---|
 | Windows x86_64 | WebView2 Runtime and x86 Microsoft Visual C++ Runtime. The launcher installs missing runtimes when needed. |
-| Linux x86_64 | WebKitGTK 4.1, GTK 3, system Wine 7 or newer with 32-bit support, and glibc 2.35 or newer. The tar.gz archive does not bundle system libraries. |
+| Linux x86_64 | WebKitGTK 4.1, GTK 3, and glibc 2.35 or newer. The first game launch downloads a Wine engine; see [Linux Wine engine](configuration.md#linux-wine-engine). The tar.gz archive does not bundle system libraries. |
 | macOS, Apple Silicon or Intel | Universal app (`Bahamut Launcher.app`), distributed as a zip. Managed Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for the Wine engine. |
 
 Linux and macOS game launch and client extensions remain unverified against a
@@ -147,7 +146,7 @@ the macOS app keep their writable state in `~/.bahamut-launcher` instead:
 configuration, logs, backups, screenshots, scripts, custom addons, custom DAT
 packages, and the managed Wine prefix. The macOS app also keeps its managed
 Wine engine there, and WebKit keeps its WebView storage under
-`~/Library/WebKit`. Linux runs system Wine and keeps a DXVK cache under
+`~/Library/WebKit`. Linux keeps its Wine engine and a DXVK cache under
 `runtime/` in the same folder. The `BAHAMUT_LAUNCHER_HOME` environment
 variable, when it holds an absolute path, selects a different folder on Linux
 and macOS. The Linux package

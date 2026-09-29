@@ -44,10 +44,10 @@ On Windows the launcher uses no Bahamut-specific AppData roots, and WebView2
 creates `data/EBWebView/` under the launcher's writable `data/` root. On macOS
 and Linux the managed Wine prefix, `wine.log`, and `helper.log` live in the
 launcher data directory: `$BAHAMUT_LAUNCHER_HOME` when that variable holds an
-absolute path, otherwise `~/.bahamut-launcher/`. Linux runs system Wine and
-has no managed Wine engine; its DXVK cache lives under `runtime/` in that same
-directory. macOS additionally keeps the managed Wine engine there. Verified
-downloads and partial transfers use the configured download cache folder.
+absolute path, otherwise `~/.bahamut-launcher/`. On Linux, `runtime/` in that
+same directory holds the managed Wine engine and the verified DXVK cache; on
+macOS it holds the managed Wine engine. Verified downloads and partial
+transfers use the configured download cache folder.
 
 Only the sections shown below are valid in `bahamut.ini`. Screenshot, plugin,
 addon, and DAT settings belong in their dedicated files.
@@ -96,7 +96,7 @@ first, so the `bahamut-launcher` command that
 [`install.sh`](../packaging/linux/install.sh) links into `<prefix>/bin` finds
 the payload in `<prefix>/lib/bahamut-launcher`.
 
-The state tree matches the macOS app's, without the managed Wine engine:
+The state tree matches the macOS app's:
 
 ```text
 ~/.bahamut-launcher/
@@ -108,7 +108,7 @@ The state tree matches the macOS app's, without the managed Wine engine:
   screenshots/
   scripts/default.txt                   <- copied from the shipped seed when missing
   prefix/                               <- managed Wine prefix
-  runtime/                              <- verified DXVK cache
+  runtime/                              <- managed Wine engine and DXVK cache
 ```
 
 A player package that reuses a shipped addon or DAT package ID is skipped with
@@ -127,6 +127,48 @@ Keep the marker in a copy that `install.sh` installed. `install.sh` replaces
 that whole directory on the next install and deletes it on `--uninstall`. It
 refuses to do either when the marker is missing, the directory holds entries
 the package does not ship, or a shipped file is changed.
+
+### Linux Wine engine
+
+On Linux x86_64 the first game launch downloads a pinned Wine into
+`runtime/wine-<version>-<sha256>/` in the launcher data directory: upstream
+Wine 11.18, WoW64 build, as built by the
+[Kron4ek/Wine-Builds](https://github.com/Kron4ek/Wine-Builds) project. The
+download is 99,305,644 bytes and unpacks to 836,996,788 bytes. The size and
+SHA-256 are pinned in
+[`runtime_archive.rs`](../src/platform/runtime_archive.rs), and the archive
+must match both before it is unpacked. The build is WoW64: it ships the 32-bit
+Windows libraries the client needs and no 32-bit host libraries. Unpacking it
+needs `tar` and `xz`; the launcher checks for both before it downloads and
+names a missing one.
+
+The engine loads these host libraries:
+
+| Group | Libraries |
+|---|---|
+| Display and fonts | `libX11.so.6`, `libXext.so.6`, `libXcomposite.so.1`, `libXcursor.so.1`, `libXfixes.so.3`, `libXi.so.6`, `libXinerama.so.1`, `libXrandr.so.2`, `libXrender.so.1`, `libXxf86vm.so.1`, `libGL.so.1`, `libEGL.so.1`, `libxkbregistry.so.0`, `libfreetype.so.6`, `libfontconfig.so.1` |
+| Wayland | `libwayland-client.so.0`, `libwayland-egl.so.1`, `libxkbcommon.so.0`, `libxkbregistry.so.0` |
+| Audio | `libpulse.so.0` or `libasound.so.2` |
+| Vulkan | `libvulkan.so.1` |
+| Game controllers | `libudev.so.1`, `libSDL2-2.0.so.0` |
+
+`install-dependencies.sh --check` reports missing display, font, and audio
+libraries without changing its exit status.
+
+The launcher chooses a Wine in this order:
+
+1. The file named by the `BAHAMUT_WINE` environment variable, used as given.
+2. The managed engine, on an x86_64 host.
+3. `wine` on `PATH`, when the engine cannot be installed or the host is not
+   x86_64. The launcher log names the reason.
+
+Installing a newer engine removes superseded `wine-*` directories that carry
+the launcher's `.bahamut-sha256` marker. A `wine-*` directory without the
+marker is kept, except the engine's own path, which an install replaces.
+`runtime/.wine-engine.lock` serializes installs, and an install removes
+`.wine-stage-*` directories that an interrupted install left behind. To
+download the engine again, delete `runtime/wine-*`; see
+[Wine engine download](troubleshooting.md#wine-engine-download).
 
 ## `bahamut.ini`
 

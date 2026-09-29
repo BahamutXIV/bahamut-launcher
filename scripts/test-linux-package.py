@@ -875,10 +875,9 @@ class DependencyClassificationTests(unittest.TestCase):
             shim = self.tools / tool
             shim.write_text("#!/bin/sh\nexit 100\n", encoding="utf-8")
             shim.chmod(0o755)
-        self.env["BAHAMUT_WINE"] = str(self.root / "no-such-wine")
-        result = self.check("\tlibc.so.6 => /lib/libc.so.6\n", 0, "--install", "--yes")
+        result = self.check("\tlibwebkit2gtk-4.1.so.0 => not found\n", 0, "--install", "--yes")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        if "distribution: unknown" not in result.stdout:
+        if "to install: sudo" in result.stdout:
             self.assertIn("the package command failed", result.stderr)
 
     def test_wine_without_32_bit_support_exits_1(self):
@@ -886,6 +885,362 @@ class DependencyClassificationTests(unittest.TestCase):
         result = self.check("\tlibc.so.6 => /lib/libc.so.6\n")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Wine lacks 32-bit support", result.stdout)
+
+
+    # Managed-engine, tool, Vulkan, and distribution cases. BAHAMUT_DEPENDENCY_ROOT
+    # is a test-only prefix for the paths those probes read.
+    LIBS_OK = "\tlibc.so.6 => /lib/libc.so.6\n"
+    LIBS_MISSING = "\tlibwebkit2gtk-4.1.so.0 => not found\n"
+
+    def simulate_host(self, arch="x86_64", exclude=(), missing_tools=()):
+        """Make the launcher and `uname -m` report ARCH, with a PATH that has no Wine unless a test adds one."""
+        data = bytearray(self.elf.read_bytes())
+        data[18:20] = b"\x3e\x00" if arch == "x86_64" else b"\xb7\x00"
+        self.elf.write_bytes(bytes(data))
+        uname = self.tools / "uname"
+        uname.write_text(
+            f'#!/bin/sh\nif [ "$1" = "-m" ]; then echo {arch}; exit 0; fi\nexec {shutil.which("uname")} "$@"\n',
+            encoding="utf-8",
+        )
+        uname.chmod(0o755)
+        filtered = path_without(self.root / "filtered", "wine", "tar", "xz", *exclude)
+        for tool in ("tar", "xz"):
+            if tool not in missing_tools:
+                (self.tools / tool).write_text(PLACEHOLDER, encoding="utf-8")
+                (self.tools / tool).chmod(0o755)
+        self.env["PATH"] = f"{self.tools}{os.pathsep}{filtered}"
+        self.env.pop("BAHAMUT_WINE", None)
+
+    ENGINE_LIBS = [
+        "libX11.so.6", "libXext.so.6", "libXcomposite.so.1", "libXcursor.so.1", "libXfixes.so.3",
+        "libXi.so.6", "libXinerama.so.1", "libXrandr.so.2", "libXrender.so.1", "libXxf86vm.so.1",
+        "libGL.so.1", "libfreetype.so.6", "libfontconfig.so.1",
+    ]
+
+    def dependency_root(self, os_release=None, vulkan=False, ostree=False, libs=()):
+        root = self.root / "hostroot"
+        (root / "etc").mkdir(parents=True, exist_ok=True)
+        if os_release is not None:
+            (root / "etc" / "os-release").write_text(os_release, encoding="utf-8")
+        if vulkan:
+            (root / "usr/lib64").mkdir(parents=True, exist_ok=True)
+            (root / "usr/lib64/libvulkan.so.1").write_bytes(b"synthetic")
+            (root / "usr/share/vulkan/icd.d").mkdir(parents=True, exist_ok=True)
+            (root / "usr/share/vulkan/icd.d/radeon_icd.json").write_text("{}", encoding="utf-8")
+        if libs:
+            (root / "usr/lib64").mkdir(parents=True, exist_ok=True)
+        for soname in libs:
+            (root / "usr/lib64" / soname).write_bytes(b"synthetic")
+        if ostree:
+            (root / "run").mkdir(parents=True, exist_ok=True)
+            (root / "run/ostree-booted").write_text("", encoding="utf-8")
+        self.env["BAHAMUT_DEPENDENCY_ROOT"] = str(root)
+
+    def stub_system_wine(self, version="wine-9.0"):
+        wine = self.tools / "wine"
+        wine.write_text(f"#!/bin/sh\necho '{version}'\n", encoding="utf-8")
+        wine.chmod(0o755)
+        return wine
+
+    def test_x86_64_without_system_wine_exits_0(self):
+        self.simulate_host()
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("wine: the launcher downloads its own Wine on the first Play\n", result.stdout)
+        self.assertNotIn("is the fallback", result.stdout)
+        self.assertNotIn("wine: missing", result.stdout)
+        self.assertIn("unpack tools: tar and xz found", result.stdout)
+
+    def test_system_wine_is_reported_as_the_fallback(self):
+        self.simulate_host()
+        wine = self.stub_system_wine()
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"wine: system Wine {wine} (wine-9.0) is the fallback\n", result.stdout)
+
+    def test_unusable_system_wine_does_not_change_the_exit_code(self):
+        # No i386-windows tree next to it, and a version older than 7.
+        self.simulate_host()
+        self.stub_system_wine("wine-6.0.3")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("lacks 32-bit support", result.stdout)
+        self.assertNotIn("older than 7", result.stdout)
+
+    def test_bahamut_wine_keeps_the_32_bit_check_on_x86_64(self):
+        self.simulate_host()
+        wine = self.root / "wine"
+        shutil.rmtree(wine / "lib")
+        self.env["BAHAMUT_WINE"] = str(wine / "bin" / "wine")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("wine: Wine lacks 32-bit support", result.stdout)
+        self.assertNotIn("downloads its own Wine", result.stdout)
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_bahamut_wine_keeps_the_version_check_on_x86_64(self):
+        self.simulate_host()
+        root = self.root / "jammy"
+        wine = root / "usr/bin/wine"
+        wine.parent.mkdir(parents=True)
+        wine.write_text("#!/bin/sh\necho 'wine-6.0.3'\n", encoding="utf-8")
+        wine.chmod(0o755)
+        (root / "usr/lib/i386-linux-gnu/wine").mkdir(parents=True)
+        (root / "usr/lib/i386-linux-gnu/wine/ntdll.dll.so").write_bytes(b"synthetic")
+        self.env["BAHAMUT_WINE"] = str(wine)
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("is older than 7", result.stdout)
+
+    def test_bahamut_wine_set_and_empty_is_used_as_given(self):
+        self.simulate_host()
+        self.env["BAHAMUT_WINE"] = ""
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("BAHAMUT_WINE is set but  is not a file", result.stdout)
+
+    def test_other_architecture_probes_system_wine(self):
+        self.simulate_host("aarch64")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("wine: missing: wine was not found on PATH", result.stdout)
+        self.assertNotIn("downloads its own Wine", result.stdout)
+        self.assertNotIn("unpack tools", result.stdout)
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_missing_xz_is_exit_1_and_installable(self):
+        self.simulate_host(missing_tools=("xz",))
+        self.dependency_root('ID=ubuntu\nID_LIKE=debian\n')
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("unpack tools: missing xz", result.stdout)
+        self.assertNotIn("missing tar", result.stdout)
+        self.assertIn("to install: sudo apt update && sudo apt install libwebkit2gtk-4.1-0 xz-utils\n", result.stdout)
+
+    def test_missing_tar_and_xz_are_named_in_the_package_command(self):
+        self.simulate_host(missing_tools=("tar", "xz"))
+        self.dependency_root('ID=gentoo\n')
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("unpack tools: missing tar xz", result.stdout)
+        self.assertIn(
+            "to install: sudo emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3 "
+            "app-arch/tar app-arch/xz-utils\n",
+            result.stdout,
+        )
+
+    def test_unpack_tools_are_not_required_with_bahamut_wine(self):
+        self.simulate_host(missing_tools=("tar", "xz"))
+        self.env["BAHAMUT_WINE"] = str(self.root / "wine" / "bin" / "wine")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unpack tools", result.stdout)
+
+    def test_package_commands_do_not_install_wine(self):
+        cases = {
+            "gentoo": "sudo emerge --ask --noreplace net-libs/webkit-gtk:4.1 x11-libs/gtk+:3",
+            "debian": "sudo apt update && sudo apt install libwebkit2gtk-4.1-0",
+            "fedora": "sudo dnf install webkit2gtk4.1",
+            "arch": "sudo pacman -S webkit2gtk-4.1",
+            "opensuse-leap": "sudo zypper install libwebkit2gtk-4_1-0",
+        }
+        self.simulate_host()
+        for distro, command in cases.items():
+            with self.subTest(distro=distro):
+                self.dependency_root(f"ID={distro}\n")
+                result = self.check(self.LIBS_MISSING)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(f"to install: {command}\n", result.stdout)
+                self.assertNotIn("wine32", result.stdout.split("to install:")[1])
+                self.assertNotIn("i386", result.stdout)
+                self.assertNotRegex(result.stdout.split("to install:")[1], r"\bwine\b|virtual/wine")
+
+    def test_vulkan_found_with_loader_and_driver(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\n", vulkan=True)
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("vulkan: loader and driver found\n", result.stdout)
+        self.assertNotIn("vulkan: not found", result.stdout)
+
+    def test_vulkan_missing_is_informational(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\nID_LIKE=debian\n")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "vulkan: not found; the game uses the slower OpenGL renderer until a Vulkan driver is installed\n",
+            result.stdout,
+        )
+        self.assertIn("libvulkan1 mesa-vulkan-drivers", result.stdout)
+
+    def test_vulkan_loader_without_driver_is_reported_missing(self):
+        self.simulate_host()
+        self.dependency_root("ID=arch\n", vulkan=True)
+        (self.root / "hostroot/usr/share/vulkan/icd.d/radeon_icd.json").unlink()
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("vulkan: not found", result.stdout)
+
+    def test_rhel_family_is_reported_unsupported(self):
+        self.simulate_host()
+        self.dependency_root('ID="rocky"\nID_LIKE="rhel centos fedora"\nVERSION_ID="9.5"\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("distribution: rocky (RHEL family)\n", result.stdout)
+        self.assertIn(
+            "this release does not package WebKitGTK 4.1; the launcher is not supported on it\n",
+            result.stdout,
+        )
+        self.assertNotIn("to install:", result.stdout)
+        self.assertNotIn("sudo dnf", result.stdout)
+
+    def test_rhel_family_install_runs_no_package_manager(self):
+        for tool in PACKAGE_TOOLS:
+            shim = self.tools / tool
+            shim.write_text("#!/bin/sh\necho ran >&2\nexit 100\n", encoding="utf-8")
+            shim.chmod(0o755)
+        self.simulate_host()
+        self.dependency_root('ID="almalinux"\nID_LIKE="rhel centos fedora"\n')
+        result = self.check(self.LIBS_MISSING, 0, "--install", "--yes")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("ran", result.stderr)
+        self.assertNotIn("+ ", result.stdout)
+
+    def test_read_only_root_keeps_the_family_and_prints_no_command(self):
+        self.simulate_host()
+        self.dependency_root('ID=bazzite\nID_LIKE="fedora"\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("distribution: fedora\n", result.stdout)
+        self.assertIn(
+            "this system has a read-only root; install the missing packages with the system's own "
+            "tooling (for example rpm-ostree or a distrobox container)\n",
+            result.stdout,
+        )
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_ostree_booted_marks_a_read_only_root(self):
+        self.simulate_host()
+        self.dependency_root("ID=fedora\n", ostree=True)
+        result = self.check(self.LIBS_MISSING)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("distribution: fedora\n", result.stdout)
+        self.assertIn("this system has a read-only root", result.stdout)
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_steamos_is_a_read_only_root(self):
+        self.simulate_host()
+        self.dependency_root("ID=steamos\nID_LIKE=arch\n")
+        result = self.check(self.LIBS_MISSING)
+        self.assertIn("distribution: arch\n", result.stdout)
+        self.assertIn("this system has a read-only root", result.stdout)
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_nobara_resolves_to_fedora_with_its_dnf_command(self):
+        self.simulate_host()
+        self.dependency_root('ID=nobara\nID_LIKE="rhel centos fedora"\nVERSION_ID=42\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("distribution: fedora\n", result.stdout)
+        self.assertIn("to install: sudo dnf install webkit2gtk4.1\n", result.stdout)
+        self.assertNotIn("RHEL family", result.stdout)
+
+    def test_oracle_linux_is_the_rhel_family(self):
+        self.simulate_host()
+        self.dependency_root('ID="ol"\nID_LIKE="fedora"\nVERSION_ID="9.4"\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertIn("distribution: ol (RHEL family)\n", result.stdout)
+        self.assertIn("this release does not package WebKitGTK 4.1", result.stdout)
+        self.assertNotIn("to install:", result.stdout)
+
+    def test_rhel_without_a_version_is_unsupported(self):
+        self.simulate_host()
+        self.dependency_root('ID="centos"\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertIn("this release does not package WebKitGTK 4.1; the launcher is not supported on it\n", result.stdout)
+
+    def test_rhel_10_points_at_epel(self):
+        self.simulate_host(missing_tools=("xz",))
+        self.dependency_root('ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="10.2"\n')
+        result = self.check(self.LIBS_MISSING)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("distribution: almalinux (RHEL family)\n", result.stdout)
+        self.assertIn(
+            "WebKitGTK 4.1 is in EPEL on this release: enable EPEL (AlmaLinux, Rocky Linux, and CentOS Stream: "
+            "sudo dnf install epel-release), then run: sudo dnf install webkit2gtk4.1 xz\n",
+            result.stdout,
+        )
+        self.assertNotIn("to install:", result.stdout)
+        self.assertNotIn("not supported", result.stdout)
+
+    def test_rhel_10_install_runs_no_package_manager(self):
+        for tool in PACKAGE_TOOLS:
+            shim = self.tools / tool
+            shim.write_text("#!/bin/sh\necho ran >&2\nexit 100\n", encoding="utf-8")
+            shim.chmod(0o755)
+        self.simulate_host()
+        self.dependency_root('ID="rocky"\nVERSION_ID="10.0"\n')
+        result = self.check(self.LIBS_MISSING, 0, "--install", "--yes")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("ran", result.stderr)
+        self.assertNotIn("+ ", result.stdout)
+
+    def test_engine_libraries_all_found(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\n", vulkan=True, libs=self.ENGINE_LIBS + ["libpulse.so.0"])
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("engine libraries: all found\n", result.stdout)
+        self.assertIn("audio: libpulse.so.0 found\n", result.stdout)
+
+    def test_alsa_is_the_audio_fallback(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\n", libs=self.ENGINE_LIBS + ["libasound.so.2"])
+        result = self.check(self.LIBS_OK)
+        self.assertIn("audio: libasound.so.2 found\n", result.stdout)
+
+    def test_one_missing_engine_library_is_named_and_not_fatal(self):
+        self.simulate_host()
+        libs = [name for name in self.ENGINE_LIBS if name != "libXxf86vm.so.1"]
+        self.dependency_root("ID=ubuntu\n", vulkan=True, libs=libs + ["libpulse.so.0"])
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("engine libraries: missing libXxf86vm.so.1\n", result.stdout)
+        self.assertNotIn("libXext.so.6", result.stdout)
+        self.assertIn("apt-file search", result.stdout)
+
+    def test_missing_audio_is_reported_and_not_fatal(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\n", vulkan=True, libs=self.ENGINE_LIBS)
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "audio: not found; the game has no sound until libpulse.so.0 or libasound.so.2 is installed\n",
+            result.stdout,
+        )
+
+    def test_engine_and_audio_lines_are_absent_with_bahamut_wine(self):
+        self.simulate_host()
+        self.dependency_root("ID=ubuntu\n")
+        self.env["BAHAMUT_WINE"] = str(self.root / "wine" / "bin" / "wine")
+        result = self.check(self.LIBS_OK)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("engine libraries", result.stdout)
+        self.assertNotIn("audio:", result.stdout)
+
+    def test_engine_and_audio_lines_are_absent_off_x86_64(self):
+        self.simulate_host("aarch64")
+        self.dependency_root("ID=ubuntu\n")
+        self.env["BAHAMUT_WINE"] = str(self.root / "wine" / "bin" / "wine")
+        result = self.check(self.LIBS_OK)
+        self.assertNotIn("engine libraries", result.stdout)
+        self.assertNotIn("audio:", result.stdout)
+
+    def test_usage_describes_the_managed_wine(self):
+        result = run("bash", LINUX / "install-dependencies.sh", "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("downloads its own Wine on the first Play", result.stdout)
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "the Linux archive needs GNU tar and a Linux host")

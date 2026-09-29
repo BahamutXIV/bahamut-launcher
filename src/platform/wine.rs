@@ -8,7 +8,8 @@ pub use system::*;
 #[cfg(target_os = "macos")]
 pub use bundled::*;
 
-/// Linux launch backend: run the client under a system-installed Wine.
+/// Linux launch backend: run the client under `BAHAMUT_WINE`, else the managed Wine engine on
+/// x86_64 hosts, else the system Wine on PATH.
 #[cfg(target_os = "linux")]
 mod system {
     use std::path::{Path, PathBuf};
@@ -16,6 +17,7 @@ mod system {
 
     use crate::config::dirs;
     use crate::extensions::HelperInvocation;
+    use crate::platform::wine_engine;
     use crate::platform::{LaunchError, LaunchedGame};
 
     const WINE_OVERRIDE_ENV: &str = "BAHAMUT_WINE";
@@ -165,7 +167,7 @@ mod system {
             Ok(game)
         }
 
-        /// Run the x86 extension helper under system Wine; returns once `helper.log` reports readiness.
+        /// Run the x86 extension helper under the selected Wine; returns once `helper.log` reports readiness.
         pub fn launch_extension_helper(
             &self,
             invocation: &HelperInvocation,
@@ -262,12 +264,46 @@ mod system {
         Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
-    fn which_wine() -> Result<PathBuf, LaunchError> {
-        if let Some(p) = std::env::var_os(WINE_OVERRIDE_ENV) {
-            let path = PathBuf::from(&p);
+    /// Why a Wine binary was selected.
+    #[derive(Debug, PartialEq, Eq)]
+    enum WineSource {
+        Override,
+        ManagedEngine,
+        SystemFallback { reason: String },
+    }
+
+    /// Outcome of offering the managed engine on this host.
+    #[derive(Debug, PartialEq, Eq)]
+    enum ManagedEngine {
+        Unsupported,
+        Installed(PathBuf),
+        Failed(String),
+    }
+
+    /// The pinned engine is an x86_64 build; other hosts never download it.
+    fn managed_engine(
+        host_is_x86_64: bool,
+        install: impl FnOnce() -> Result<PathBuf, String>,
+    ) -> ManagedEngine {
+        if !host_is_x86_64 {
+            return ManagedEngine::Unsupported;
+        }
+        match install() {
+            Ok(engine_dir) => ManagedEngine::Installed(wine_engine::wine_binary(&engine_dir)),
+            Err(error) => ManagedEngine::Failed(error),
+        }
+    }
+
+    /// Selection order: override, managed engine, system Wine. The later inputs are only
+    /// evaluated when needed, so an override never triggers an engine download.
+    fn select_wine(
+        override_path: Option<PathBuf>,
+        managed: impl FnOnce() -> ManagedEngine,
+        system: impl FnOnce() -> Option<PathBuf>,
+    ) -> Result<(PathBuf, WineSource), LaunchError> {
+        if let Some(path) = override_path {
             if path.is_file() {
-                log_wine(&path);
-                return Ok(path);
+                return Ok((path, WineSource::Override));
             }
             return Err(LaunchError::WineNotFound(format!(
                 "{WINE_OVERRIDE_ENV} is set but {} is not a file",
@@ -275,43 +311,201 @@ mod system {
             )));
         }
 
-        let out = Command::new("sh")
-            .arg("-c")
-            .arg("command -v wine")
-            .output()
-            .map_err(|source| LaunchError::Io {
-                context: "locating wine via `command -v`",
-                source,
-            })?;
-        if !out.status.success() {
-            return Err(LaunchError::WineNotFound(
-                "no `wine` binary on PATH - install Wine (7+) with your package \
-             manager, or set BAHAMUT_WINE to a wine binary"
-                    .to_string(),
-            ));
+        let reason = match managed() {
+            ManagedEngine::Installed(path) => return Ok((path, WineSource::ManagedEngine)),
+            ManagedEngine::Failed(error) => {
+                format!("the managed Wine engine could not be installed: {error}")
+            }
+            ManagedEngine::Unsupported => {
+                "the managed Wine engine is only available on x86_64 hosts".to_string()
+            }
+        };
+
+        match system() {
+            Some(path) => Ok((path, WineSource::SystemFallback { reason })),
+            None => Err(LaunchError::WineNotFound(format!(
+                "{reason}, and no `wine` binary is on PATH; install Wine 7 or newer with \
+                 32-bit support, or set {WINE_OVERRIDE_ENV} to a wine binary"
+            ))),
         }
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if text.is_empty() {
-            return Err(LaunchError::WineNotFound(
-                "`command -v wine` returned no path".to_string(),
-            ));
-        }
-        let path = PathBuf::from(text);
-        log_wine(&path);
+    }
+
+    fn which_wine() -> Result<PathBuf, LaunchError> {
+        let (path, source) = select_wine(
+            std::env::var_os(WINE_OVERRIDE_ENV).map(PathBuf::from),
+            || managed_engine(cfg!(target_arch = "x86_64"), install_managed_engine),
+            system_wine_on_path,
+        )?;
+        let why = match &source {
+            WineSource::Override => WINE_OVERRIDE_ENV,
+            WineSource::ManagedEngine => "managed engine",
+            WineSource::SystemFallback { reason } => {
+                tracing::warn!("{reason}; falling back to system Wine {}", path.display());
+                "system fallback"
+            }
+        };
+        tracing::info!(
+            wine = %path.display(),
+            version = wine_version(&path).as_deref().unwrap_or("unknown"),
+            source = why,
+            "using Wine"
+        );
         Ok(path)
     }
 
-    fn log_wine(wine_bin: &Path) {
-        tracing::info!(
-            wine = %wine_bin.display(),
-            version = wine_version(wine_bin).as_deref().unwrap_or("unknown"),
-            "using Wine"
-        );
+    fn install_managed_engine() -> Result<PathBuf, String> {
+        let cache_root = data_subdir("runtime").map_err(|e| e.to_string())?;
+        wine_engine::ensure_engine(&cache_root)
+    }
+
+    fn system_wine_on_path() -> Option<PathBuf> {
+        let out = match Command::new("sh").arg("-c").arg("command -v wine").output() {
+            Ok(out) => out,
+            Err(e) => {
+                tracing::warn!("locating wine via `command -v`: {e}");
+                return None;
+            }
+        };
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!text.is_empty()).then(|| PathBuf::from(text))
     }
 
     #[cfg(test)]
     mod tests {
-        use super::monotonic_ms_since_boot;
+        use super::*;
+
+        fn unreachable_managed() -> ManagedEngine {
+            panic!("the managed engine must not be consulted")
+        }
+
+        fn unreachable_system() -> Option<PathBuf> {
+            panic!("system Wine must not be probed")
+        }
+
+        fn not_found_message(result: Result<(PathBuf, WineSource), LaunchError>) -> String {
+            match result {
+                Err(LaunchError::WineNotFound(message)) => message,
+                other => panic!("expected WineNotFound, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn override_file_wins_without_consulting_the_engine() {
+            let temp = tempfile::tempdir().unwrap();
+            let wine = temp.path().join("wine");
+            std::fs::write(&wine, b"").unwrap();
+
+            let (path, source) =
+                select_wine(Some(wine.clone()), unreachable_managed, unreachable_system).unwrap();
+
+            assert_eq!(path, wine);
+            assert_eq!(source, WineSource::Override);
+        }
+
+        #[test]
+        fn override_that_is_not_a_file_is_an_error() {
+            let temp = tempfile::tempdir().unwrap();
+
+            let message = not_found_message(select_wine(
+                Some(temp.path().to_path_buf()),
+                unreachable_managed,
+                unreachable_system,
+            ));
+
+            assert!(message.contains(WINE_OVERRIDE_ENV), "got {message:?}");
+        }
+
+        #[test]
+        fn installed_engine_is_used_before_system_wine() {
+            let engine = PathBuf::from("/cache/wine-11.18-x/bin/wine");
+
+            let (path, source) = select_wine(
+                None,
+                || ManagedEngine::Installed(engine.clone()),
+                unreachable_system,
+            )
+            .unwrap();
+
+            assert_eq!(path, engine);
+            assert_eq!(source, WineSource::ManagedEngine);
+        }
+
+        #[test]
+        fn failed_engine_falls_back_to_system_wine_with_the_reason() {
+            let system = PathBuf::from("/usr/bin/wine");
+
+            let (path, source) = select_wine(
+                None,
+                || ManagedEngine::Failed("SHA-256 mismatch".to_string()),
+                || Some(system.clone()),
+            )
+            .unwrap();
+
+            assert_eq!(path, system);
+            match source {
+                WineSource::SystemFallback { reason } => {
+                    assert!(reason.contains("SHA-256 mismatch"), "got {reason:?}")
+                }
+                other => panic!("expected a system fallback, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn unsupported_host_falls_back_to_system_wine() {
+            let system = PathBuf::from("/usr/bin/wine");
+
+            let (path, source) =
+                select_wine(None, || ManagedEngine::Unsupported, || Some(system.clone())).unwrap();
+
+            assert_eq!(path, system);
+            match source {
+                WineSource::SystemFallback { reason } => {
+                    assert!(reason.contains("x86_64"), "got {reason:?}")
+                }
+                other => panic!("expected a system fallback, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn no_engine_and_no_system_wine_names_the_engine_failure() {
+            let message = not_found_message(select_wine(
+                None,
+                || ManagedEngine::Failed("GET timed out".to_string()),
+                || None,
+            ));
+
+            assert!(message.contains("GET timed out"), "got {message:?}");
+            assert!(message.contains("Wine 7 or newer"), "got {message:?}");
+            assert!(message.contains(WINE_OVERRIDE_ENV), "got {message:?}");
+        }
+
+        #[test]
+        fn unsupported_host_without_system_wine_is_an_error() {
+            let message =
+                not_found_message(select_wine(None, || ManagedEngine::Unsupported, || None));
+
+            assert!(message.contains("x86_64"), "got {message:?}");
+            assert!(message.contains("Wine 7 or newer"), "got {message:?}");
+        }
+
+        #[test]
+        fn managed_engine_is_only_installed_on_x86_64() {
+            assert_eq!(
+                managed_engine(false, || panic!("must not install off x86_64")),
+                ManagedEngine::Unsupported
+            );
+            assert_eq!(
+                managed_engine(true, || Ok(PathBuf::from("/cache/engine"))),
+                ManagedEngine::Installed(PathBuf::from("/cache/engine/bin/wine"))
+            );
+            assert_eq!(
+                managed_engine(true, || Err("no network".to_string())),
+                ManagedEngine::Failed("no network".to_string())
+            );
+        }
 
         /// /proc/uptime's first field is the kernel boottime clock, the same clock as the launch tick.
         #[test]

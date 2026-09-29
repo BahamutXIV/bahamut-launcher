@@ -56,8 +56,8 @@ after confirmation. The script is
 
 | Exit status | Meaning |
 |---|---|
-| 0 | Every checked library and Wine requirement is satisfied. |
-| 1 | A library is missing; Wine is missing, older than 7, or lacks 32-bit support; or the package command that `--install` runs failed or was declined. |
+| 0 | Every checked library is satisfied, and so is the Wine requirement when it applies. |
+| 1 | A library or the `tar` or `xz` unpack tool is missing; a Wine selected through `BAHAMUT_WINE`, or on a host that is not x86_64, is missing, older than 7, or lacks 32-bit support; or the package command that `--install` runs failed or was declined. |
 | 2 | The command line is invalid. |
 | 3 | The host cannot be checked: no `ldd` or glibc loader, the launcher file is not an ELF executable, or it is built for another CPU architecture. |
 | 4 | The distribution uses musl. The launcher needs a glibc-based distribution. |
@@ -71,14 +71,35 @@ raised for a library other than the launcher, comes from mismatched system
 packages; the script prints it as a missing library, and updating the
 distribution's packages fixes it.
 
-`Wine lacks 32-bit support` means the Wine found through `BAHAMUT_WINE` or
-`PATH` has no 32-bit Windows libraries (`i386-windows/ntdll.dll`), which the
-client needs. Install a Wine build with 32-bit support. The launcher needs
-Wine 7 or newer; the script reports an older Wine by its version. On Debian
-and Ubuntu, the WineHQ packages provide a current Wine. On Gentoo, build Wine
-with the `abi_x86_32` USE flag or use a `wow64` build, list the installed
-Wine slots with `eselect wine list`, and select one with
-`eselect wine set <n>`.
+On an x86_64 host with `BAHAMUT_WINE` unset, the script reports that the
+launcher downloads its own Wine on the first game launch, and reports a system
+`wine` as the fallback when one exists. A missing, old, or 32-bit-less system
+Wine does not change the exit status there. With `BAHAMUT_WINE` set, or on
+another CPU architecture, the script checks that Wine.
+`Wine lacks 32-bit support` means the checked Wine has no 32-bit Windows
+libraries (`i386-windows/ntdll.dll`), which the client needs. Point
+`BAHAMUT_WINE` at a Wine build with 32-bit support. The launcher needs Wine 7
+or newer; the script reports an older Wine by its version.
+
+The script also reports whether a Vulkan loader (`libvulkan.so.1`) and a
+driver are installed. Their absence never changes the exit status; the game
+uses the slower OpenGL renderer until a Vulkan driver is installed.
+
+On an x86_64 host with `BAHAMUT_WINE` unset, the script also reports the
+engine's display and font libraries (`engine libraries:`) and an audio library
+(`audio:`, `libpulse.so.0` or `libasound.so.2`). Missing ones never change the
+exit status; the game has no sound without an audio library. The list is in
+[Linux Wine engine](configuration.md#linux-wine-engine).
+
+The RHEL family is decided by the `ID` in `/etc/os-release`: `rhel`, `centos`,
+`rocky`, `almalinux`, and `ol`. The script prints no package command there.
+On release 10 or newer, WebKitGTK 4.1 is in EPEL: enable EPEL, then install
+`webkit2gtk4.1`, which the script prints as a command to run yourself. On
+release 9 or older the distribution does not package WebKitGTK 4.1 and the
+launcher is not supported. Derivatives such as Nobara resolve to Fedora and
+get its package command. A system with a read-only root, such as SteamOS or
+Bazzite, gets no package command either; install the missing packages with
+the system's own tooling, for example `rpm-ostree` or a distrobox container.
 
 ### Hyprland
 
@@ -314,9 +335,11 @@ client. See the
 [game content delivery reference](content-delivery.md) for cache verification
 and recovery. Existing local payloads are never deleted by launcher startup.
 
-On Linux, the launcher looks for `wine` on `PATH` unless `BAHAMUT_WINE` is
-set, initializes a managed prefix with `wineboot --init` when needed, and
-falls back from an attempted DXVK setup to `wined3d`. On macOS, the managed
+On Linux, the launcher runs the `BAHAMUT_WINE` file when that variable is set,
+otherwise the managed Wine engine on an x86_64 host, and otherwise `wine` on
+`PATH` (see [Linux Wine engine](configuration.md#linux-wine-engine)). It
+initializes a managed prefix with `wineboot --init` when needed, and falls back
+from an attempted DXVK setup to `wined3d`. On macOS, the managed
 Sikarugir Wine engine is downloaded on first launch. Wine output goes to the
 `wine.log` for that launch under the launcher's data directory, and the Wine
 extension launch adds `helper.log` beside it (see
@@ -339,6 +362,22 @@ An archive verification failure leaves installed runtime components unchanged.
 Check the launcher log for the named archive and retry after resolving a
 failed download. Linux retains its `wined3d` fallback when DXVK setup fails.
 Only DXVK caches created from a verified download are reused.
+
+### Wine engine download
+
+The Linux engine downloads on the first game launch and is reused afterwards.
+A failed or interrupted download leaves the previous engine and the prefix
+untouched. When the engine cannot be installed, the launcher uses `wine` on
+`PATH`; when no `wine` is found either, it reports an error naming the engine
+failure. Install Wine 7 or newer with 32-bit support, or set `BAHAMUT_WINE`,
+in that case. To download the engine again, delete
+`~/.bahamut-launcher/runtime/wine-*` and start the game.
+
+Selecting a Wine does not change the prefix rules. A prefix that a different
+Wine created is updated by Wine itself on first use, and a `wineserver` from
+another Wine that still runs on the same prefix must exit first (run
+`wineserver -k` from that Wine). A 32-bit-only prefix that you manage yourself
+needs `BAHAMUT_WINE` pointing at the Wine that owns it.
 
 ## Wine extension launch
 

@@ -18,7 +18,6 @@ RESTRICT="mirror strip"
 RDEPEND="
 	net-libs/webkit-gtk:4.1
 	x11-libs/gtk+:3
-	virtual/wine
 "
 
 QA_PREBUILT="opt/bahamut-launcher/bahamut-launcher"
@@ -44,6 +43,8 @@ src_install() {
 
 pkg_postinst() {
 	xdg_pkg_postinst
-	elog "The launcher needs a Wine build with 32-bit support (abi_x86_32 or wow64)."
+	elog "The launcher downloads its own Wine on the first Play and keeps it in"
+	elog "~/.bahamut-launcher/runtime."
+	elog "Set BAHAMUT_WINE to use another Wine."
 	elog "Launcher state lives in ~/.bahamut-launcher."
 }

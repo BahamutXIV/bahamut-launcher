@@ -48,11 +48,12 @@ valid Gentoo versions and have no matching asset name.
 
 ## Wine
 
-The launcher runs the FFXIV client through the system Wine, which needs
-32-bit support. `virtual/wine` with its default USE flags requires a
-wine-vanilla, wine-staging, or wine-proton build with abi_x86_32 or wow64.
-List the slots with `eselect wine list` and select one with
-`eselect wine set <n>`.
+On x86_64 the launcher downloads its own Wine on the first Play and keeps
+it in `~/.bahamut-launcher/runtime`, so the ebuild does not depend on
+`virtual/wine`. The download is unpacked with `tar` and `xz`, which the
+`@system` set provides. To use another Wine, set `BAHAMUT_WINE` to its `wine`
+binary; that Wine needs 32-bit support (the `abi_x86_32` or `wow64` USE flag
+on wine-vanilla or wine-staging), and `eselect wine list` shows the slots.
 
 ## Layout
 

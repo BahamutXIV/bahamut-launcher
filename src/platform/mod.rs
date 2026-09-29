@@ -200,6 +200,9 @@ mod wine;
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 mod runtime_archive;
 
+#[cfg(any(target_os = "linux", all(test, unix)))]
+mod wine_engine;
+
 #[cfg(target_os = "linux")]
 mod dxvk;
 #[cfg(target_os = "linux")]
