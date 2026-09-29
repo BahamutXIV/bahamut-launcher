@@ -61,7 +61,7 @@ class OutputSafetyTests(unittest.TestCase):
 
     def test_success_preserves_manifest_encoding_and_input(self):
         self.output.write_bytes(b"previous output")
-        manifest = {"schema_version": 2, "name": "example", "files": []}
+        manifest = {"schema_version": 3, "name": "example", "files": []}
         INTAKE["write_manifest"](self.archive, self.output, manifest)
         expected = (json.dumps(manifest, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
         self.assertEqual(self.output.read_bytes(), expected)
@@ -73,7 +73,7 @@ class OutputSafetyTests(unittest.TestCase):
         writer = INTAKE["write_manifest"]
         with mock.patch.object(writer.__globals__["os"], "replace", side_effect=OSError("fixture failure")):
             with self.assertRaises(OSError):
-                writer(self.archive, self.output, {"schema_version": 2})
+                writer(self.archive, self.output, {"schema_version": 3})
         self.assertEqual(self.output.read_bytes(), b"previous output")
         self.assertEqual(self.archive.read_bytes(), b"input sentinel")
         self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["client.zip", "manifest.json"])

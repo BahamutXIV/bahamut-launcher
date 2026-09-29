@@ -2,14 +2,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
-use bahamut_launcher::patcher::PatcherShared;
-use bahamut_launcher::patcher::repair::RepairShared;
+use bahamut_launcher::content::InstallShared;
+use bahamut_launcher::content::repair::RepairShared;
 use bahamut_launcher::platform::LaunchedGame;
 
-pub(crate) struct PatcherRun {
-    pub(crate) shared: Arc<PatcherShared>,
+pub(crate) struct InstallRun {
+    pub(crate) shared: Arc<InstallShared>,
     pub(crate) worker: Option<JoinHandle<()>>,
-    pub(crate) installing: bool,
 }
 
 pub(crate) struct GameRepairRun {
@@ -17,10 +16,10 @@ pub(crate) struct GameRepairRun {
     pub(crate) worker: Option<JoinHandle<()>>,
 }
 
-/// Patcher state and the close gate shared by IPC and native window events.
+/// Install and repair state and the close gate shared by IPC and native window events.
 #[derive(Default)]
-pub(crate) struct PatcherIpcState {
-    pub(crate) patcher: Mutex<Option<PatcherRun>>,
+pub(crate) struct ContentIpcState {
+    pub(crate) install: Mutex<Option<InstallRun>>,
     pub(crate) repair: Mutex<Option<GameRepairRun>>,
     closing: AtomicBool,
     shutdown_pending: AtomicBool,
@@ -42,7 +41,7 @@ impl ShutdownRequest {
     }
 }
 
-impl PatcherIpcState {
+impl ContentIpcState {
     pub(crate) fn is_closing(&self) -> bool {
         self.closing.load(Ordering::Acquire)
     }
@@ -64,10 +63,10 @@ impl PatcherIpcState {
 
         self.shutdown_pending.store(true, Ordering::Release);
         let mut guard = self
-            .patcher
+            .install
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let patch_worker = guard.as_mut().and_then(|run| {
+        let install_worker = guard.as_mut().and_then(|run| {
             run.shared.request_cancel();
             run.worker.take()
         });
@@ -80,7 +79,7 @@ impl PatcherIpcState {
             run.shared.request_cancel();
             run.worker.take()
         });
-        let workers = [patch_worker, repair_worker]
+        let workers = [install_worker, repair_worker]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();

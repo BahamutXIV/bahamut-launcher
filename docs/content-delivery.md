@@ -15,40 +15,39 @@ installation with an explicit message. A missing host disables downloads unless
 `launcher.content_root` specifies an HTTPS host. Host selection changes only
 where known objects are fetched, never which bytes are trusted.
 
-The base package records its baseline and target versions, supported patch
-transition, immutable object keys, archive lengths and SHA-256 identities,
-complete extracted-file inventories, final-file checks, and a staging-space
-reservation. Patch metadata comes from the existing [`patch identities`](../manifests/patches-1.23b.json)
-and [`patch catalogue`](../src/patcher/manifest.rs). Normal builds and tests
-need neither game files nor storage credentials.
+The base package records its target version, immutable object keys, archive
+lengths and SHA-256 identities, complete extracted-file inventories, final-file
+checks, and a staging-space reservation. The shipped package is one full
+final-client archive. Normal builds and tests need neither game files nor
+storage credentials.
 
-The shipped schema 2 manifest pins `xiv1point0.zip` on the configured R2 host
-with `transition: none` and `hosted_patches: false`. The network patch command
-rejects requests for this deployment. A host override cannot enable absent
-patch objects. Older clients are offered a fresh final installation.
+The shipped schema 3 manifest pins `xiv1point0.zip` on the configured R2 host.
+The launcher accepts only schema 3. A client that is not the final 1.23b build
+is offered a fresh final installation.
 
 An offline [signed release descriptor](release-metadata.md) can pin this
 manifest's identity for a stable game offer. Its game inventory refers to
 `base.final_files`. It does not create another file list or enable remote
 replacement.
 
-## Installation and updates
+## Installation
 
 Install accepts a new or empty destination. Home displays the destination and
 uses PATH to change it. Install runs a disk-space preflight and reports failures
 in the strip. The worker repeats space checks before modifying the destination.
 It extracts into owned staging on the destination volume, verifies the archive
-inventory, applies the declared patch transition, and checks the final files and
-version before publishing the directory. A nonempty destination is never cleared
-to make it fit. The selected client changes only after successful installation.
+inventory, and checks the final files and version before publishing the
+directory. A nonempty destination is never cleared to make it fit. The selected
+client changes only after successful installation. Repair Install, described
+under [Troubleshooting](troubleshooting.md#repair-install), verifies the managed
+files of an installed client and replaces damaged ones from the same archive.
 
-One operation owns downloading, verification, extraction, and patch application.
-Its reservation prevents conflicting game launch, backup, restore, and HUD
-reset operations. Changing configuration cannot retarget an active worker.
-Closing the launcher requests cancellation and waits for the worker to finish.
-Pause is acknowledged only at a durable download checkpoint or a safe disk
-operation boundary. A patch file already being written finishes before
-cancellation or pause.
+One operation owns downloading, verification, and extraction. Its reservation
+prevents conflicting game launch, backup, restore, and HUD reset operations.
+Changing configuration cannot retarget an active worker. Closing the launcher
+requests cancellation and waits for the worker to finish. Pause is acknowledged
+only at a durable download checkpoint or a safe disk operation boundary. A file
+already being written finishes before cancellation or pause.
 
 Partial transfers belong to a specific expected length and SHA-256 identity.
 Resume checks the server's byte-range response before appending. A server that
@@ -58,10 +57,8 @@ to the cache, and cached objects are verified again before reuse.
 
 An interrupted base install can restart extraction from verified archives after
 its staging receipt and path containment are checked. A folder with an install
-receipt cannot become Ready or accept ordinary patching. Retry Install completes
-its verification first. Existing client patching applies files in order and
-stamps the final version only after successful application. It does not provide
-rollback of the whole game. Retry verifies the source and reapplies the chain.
+receipt cannot become Ready until it completes. Retry Install completes its
+verification first.
 
 This ZIP uses the explicit `final-fantasy-xiv-wrapper` layout. The installer
 strips exactly `FINAL FANTASY XIV/`, checks the source `boot.ver` and `game.ver`
@@ -80,36 +77,36 @@ original in process memory and writes no patched copy.
 
 ## Publisher and intake workflows
 
-Use an explicit clean base source, its baseline version, final inventory, and
-measured staging requirement with
+Use an explicit final client source, its inventory, and measured staging
+requirement with
 [`package-game-content.py`](../scripts/package-game-content.py). The command
 emits deterministic archives and a delivery manifest from explicit file
 allowlists, one relative path per line. Review the inventory for
 the intended game payload before adopting the metadata. Keep credentials,
 character settings, macros, logs, caches, and local overrides outside the input.
 
-For example, after preparing and identifying the clean base and final trees:
+For example, after preparing and identifying the base and final trees, whose
+payloads are identical apart from `boot.ver` and `game.ver`:
 
 ```powershell
-python scripts/package-game-content.py --input-root C:/Content/Base --base-allowlist C:/Content/base-files.txt --final-root C:/Content/Final --final-allowlist C:/Content/final-files.txt --output-dir C:/Content/Output --baseline-version BASELINE --transition full-chain --staging-bytes MEASURED_PEAK --max-archive-uncompressed-bytes SELECTED_LIMIT
+python scripts/package-game-content.py --input-root C:/Content/Base --base-allowlist C:/Content/base-files.txt --final-root C:/Content/Final --final-allowlist C:/Content/final-files.txt --output-dir C:/Content/Output --staging-bytes MEASURED_PEAK --max-archive-uncompressed-bytes SELECTED_LIMIT
 ```
 
-Replace the uppercase values with the identified baseline and measured byte
-counts. Use `--transition none` only for an already-final baseline. The base
-allowlist excludes `boot.ver` and `game.ver`. The final allowlist includes their
-exact target values. Copy the generated metadata into the tracked
-manifest and set its public host before building a release with delivery enabled.
+Replace the uppercase values with the measured byte counts. The base and final
+payloads must match. The base allowlist excludes `boot.ver` and `game.ver`. The
+final allowlist includes their exact target values. Copy the generated metadata
+into the tracked manifest and set its public host before building a release
+with delivery enabled.
 
-Publish those exact objects to an R2 bucket controlled by the owner behind an HTTPS
-custom domain. Keep keys immutable and retain lengths and SHA-256 identities.
-Object layout is `game/<baseline>/<sha256>/<archive>.zip` and
-`patches/1.23b/<runtime-patch-path>`. Upload credentials belong in the operator's
-secret store and are not launcher inputs.
+Publish those exact objects to an R2 bucket controlled by the owner behind an
+HTTPS custom domain. Keep keys immutable and retain lengths and SHA-256
+identities. Packager objects use `game/<sha256>/<archive>.zip`. Upload
+credentials belong in the operator's secret store and are not launcher inputs.
 
 For the pinned full 1.23b object, [`intake-full-client.py`](../scripts/intake-full-client.py)
 rechecks the complete archive length and SHA-256, every ZIP entry and selected
 file hash, the exact source exclusions, the version stamps, and empty directories.
-It emits schema 2 metadata without rewriting the object. The `--staging-bytes`
+It emits schema 3 metadata without rewriting the object. The `--staging-bytes`
 value must cover the inventory being staged. Installer preflight also accounts
 for file and directory allocation on the destination volume. The importer never
 publishes game bytes. The normalized publisher above also accepts other

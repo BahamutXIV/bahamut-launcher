@@ -88,7 +88,7 @@
               </div>
             </article>
             <button class="primary-action" type="button" id="home-primary" data-gamepad-region data-gamepad-region-order="4">Install</button>
-            <div class="home-version" id="launcher-version" aria-label="Launcher version">v-</div>
+            <div class="home-version" id="launcher-version" aria-label="Launcher version">-</div>
           </div>
 
           <div class="home-right">
@@ -127,8 +127,7 @@
                 </div>
                 <div class="lifecycle-body" id="lifecycle-body">
                   <div class="lifecycle-status-content">
-                    <div class="lifecycle-detail" id="lifecycle-detail"></div>
-                    <div class="inline-alert lifecycle-alert" id="patch-home-alert" aria-live="polite"></div>
+                    <div class="inline-alert lifecycle-alert" id="install-home-alert" aria-live="polite"></div>
                     <div class="progress-row" id="lifecycle-progress" hidden>
                       <div class="progress-track"><div class="progress-fill" id="lifecycle-progress-fill"></div></div>
                       <span class="progress-text" id="lifecycle-progress-text">0%</span>
@@ -210,18 +209,16 @@
               <article class="settings-card settings-card--locations glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
                 <h2>Install Location</h2>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Install location"><div class="settings-path-picker"><div class="settings-value" id="settings-game-path">Checking...</div><button class="settings-action settings-path-action accent-action" type="button" data-settings-action="browse-game">Path</button></div></div>
-                <div class="settings-field settings-field--full settings-update-field" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Launcher update"><button class="settings-action accent-action" type="button" data-launcher-update-action="check">Check for Updates</button></div>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Repair game install"><button class="settings-action accent-action" type="button" data-game-files-action="repair">Repair Install</button></div>
-                <div class="settings-status settings-update-status" id="launcher-update-status" role="status" aria-live="polite"></div>
               </article>
-              <article class="settings-card settings-card--client-patches glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
+              <article class="settings-card settings-card--backups glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
                 <h2>User Settings and Macros</h2>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="User Settings and Macros backups"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-backup-action="create" data-backup-target="user-settings">Backup</button><button class="settings-action settings-action--secondary" type="button" data-backup-action="restore" data-backup-target="user-settings">Restore</button></div></div>
                 <h2>Extensions</h2>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Extensions backups"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-backup-action="create" data-backup-target="extensions">Backup</button><button class="settings-action settings-action--secondary" type="button" data-backup-action="restore" data-backup-target="extensions">Restore</button></div></div>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Backup and install folders"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-extension-folder="backups">Open Backup Folder</button><button class="settings-action settings-action--secondary" type="button" data-extension-folder="install">Open Install Folder</button></div></div>
                 <div class="settings-status" id="settings-backup-status" aria-live="polite"></div>
-                <div class="settings-status" id="settings-patch-status" aria-live="polite"></div>
+                <div class="settings-status" id="settings-misc-status" aria-live="polite"></div>
                 <div class="settings-field settings-field--full settings-field--screenshots" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Open screenshots folder"><button class="settings-action accent-action" type="button" data-extension-folder="screenshots">Open Screenshots Folder</button></div>
               </article>
             </div>

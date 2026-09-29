@@ -157,13 +157,13 @@ directory must contain `ffxivboot.exe`. A ready install also needs
   takes precedence over Windows registry detection. Linux and macOS rely on
   the configured path. Select or replace that path from the install strip on
   Home or the Install Location path row in Settings > Misc.
-- `not-patched` or `needs-patch` means the base install was found, but
-  `game.ver` is not at the target version or `ffxivgame.exe` is absent. Fix
-  the path first. The shipped manifest has no incremental remote retail patch
-  objects.
-  Choose Install Fresh on Home for another empty folder. The configured host
-  must return the pinned final client archive for that download to succeed. See
-  the [game content delivery reference](content-delivery.md) for verification.
+- `outdated-client` (auth) or `outdated-install` (lifecycle state,
+  diagnostics `STATE_OUTDATED_INSTALL`, game `outdated`) means an install was
+  found, but `game.ver` is not at the target version or `ffxivgame.exe` is
+  absent. Choose Install on Home and pick a new, empty folder. The configured
+  host must return the pinned final client archive for that download to
+  succeed. See the [game content delivery reference](content-delivery.md) for
+  verification.
 - A download failure shows its cause in the fixed size recovery strip and
   launcher log. Press Retry Install after correcting the cause.
 - Active download, extraction, and verification expose Pause or Resume beside
@@ -174,7 +174,7 @@ directory must contain `ffxivboot.exe`. A ready install also needs
 - Closing the launcher during installation requests cancellation and waits for
   worker cleanup before exiting. This also applies to Alt-F4 and normal
   application quit. The closing message stays visible until the worker stops.
-  Home shows install, patch, and repair progress.
+  Home shows install and repair progress.
 
 ### Repair Install
 
@@ -196,12 +196,6 @@ and are preserved. Repair restores changed managed files, including intentional
 changes to those files.
 
 ### Launcher updates
-
-On Windows, the launcher checks signed update metadata quietly at startup.
-Open Settings > Misc > Install Location and choose Check for Updates to check
-again. If a release is available, the same button becomes Update Launcher. That action
-downloads the signed package and restarts through the staged update helper
-when other launcher work is idle.
 
 If a restart is interrupted, startup uses the staged signed helper to confirm a
 complete update or restore the previous signed release. If the helper is still
@@ -278,7 +272,7 @@ path writes two logs under the launcher data directory's `logs/` folder
 ## Authentication failures
 
 Login is gated by the install check, so resolve `no-install` and
-`not-patched` before diagnosing the server. Then check the selected profile on
+`outdated-client` before diagnosing the server. Then check the selected profile on
 Profiles from the Home login card or in `config/bahamut.ini`:
 
 - `host` is a bare hostname or IP and is also the lobby host patched into the

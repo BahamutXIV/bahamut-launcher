@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use bahamut_launcher::patcher::http::{self, CheckpointAction, ObjectSpec};
+use bahamut_launcher::content::http::{self, CheckpointAction, ObjectSpec};
 use bahamut_launcher::release::{
     self, Channel, FileOwnership, Product, ReleaseInventory, ReleaseMetadata, ReleaseScope, Target,
     VerifiedRelease,

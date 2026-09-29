@@ -79,15 +79,12 @@ statically links its runtime into
 - LLVM libc++, libc++abi, libunwind, and compiler-rt. The release's
   `LICENSE.TXT` records their Apache License v2.0 with LLVM Exceptions.
 
-### Patcher provenance
+### SeventhUmbral provenance
 
-The patcher (`src/patch_format/` and `src/patcher/`) reimplements the FFXIV
-1.x ZiPatch container format and the historical patch-download flow. It is
-fresh code written against the publicly documented format, with per-chunk and
-per-stage semantics cross-checked against the SeventhUmbral launcher, which is
-distributed under the 2-clause BSD license reproduced below. No SeventhUmbral
-source is copied into this repository; the notice is retained as attribution
-for that behavioral reference.
+Early launcher development cross-checked FFXIV 1.x patch handling against the
+SeventhUmbral launcher, distributed under the 2-clause BSD license reproduced
+below. No SeventhUmbral source is copied into this repository; the notice is
+retained as attribution for that behavioral reference.
 
 ### SeventhUmbral (2-clause BSD)
 

@@ -76,8 +76,10 @@ version above the highest tag is rewritten back down by the next release.
 
 ## Version identity
 
-The runtime version the launcher reports comes from `BAHAMUT_RELEASE_TAG` on a
-tag build and from `git describe` on an ordinary branch build; see
+The runtime version the launcher reports is `BAHAMUT_RELEASE_TAG` on a tag
+build, such as `v1.0.0`. An ordinary branch build reports the latest reachable
+tag, a hyphen, and the short commit hash, such as `v1.0.0-222f317`, with a
+`-dirty` suffix when tracked files have uncommitted changes; see
 [`build.rs`](../build.rs). The release bump commit keeps the Cargo and Tauri
 package versions in lockstep, but that package version is metadata, not the
 runtime identity. The [signed release metadata](release-metadata.md) version
@@ -205,17 +207,12 @@ launch; Control-click Open no longer bypasses Gatekeeper.
 
 ## Portable updates
 
-Windows checks signed stable launcher metadata quietly at startup. Settings >
-Misc > Install Location offers **Check for Updates** for a manual check. When a
-new release is available, the same button becomes **Update Launcher**. That
-action downloads the verified package and applies it after gameplay, install,
-patch, repair, restore, launch, and backup operations are idle. The separate
-helper process is included in the signed managed inventory and runs from staging
-on the same volume outside the portable directory. It applies managed files after
-normal launcher exit, keeps recoverable prior state, and restarts the updated
-launcher. Startup confirms a complete signed inventory or restores the previous
-release after a failed update. Offline checks or downloads leave the installed
-launcher available.
+The Windows package includes the update helper in its signed managed
+inventory. The helper runs from staging on the same volume outside the
+portable directory, applies managed files after normal launcher exit, keeps
+recoverable prior state, and restarts the updated launcher. Startup confirms a
+complete signed inventory or restores the previous release after a failed
+update. A newer release is installed from its archive.
 
 The portable archive does not contain production update endpoints, trust keys,
 or a signed bootstrap release. The owner must provision the explicit
@@ -250,7 +247,7 @@ R2 URLs and checks exact length and SHA-256 before running them. The
 synthetic fixture can inspect package contents without a full build. It does
 not prove installer execution or game launch compatibility.
 
-Game archives and patch objects have a separate
+Game archives have a separate
 [game content delivery reference](content-delivery.md). A release with
 installation enabled needs pinned base metadata and live HTTPS range, full
 download, and fresh installation checks for its production host.

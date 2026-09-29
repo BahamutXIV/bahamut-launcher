@@ -103,7 +103,7 @@ sudo apt-get install --no-install-recommends -y \
 
 The install-strip preview opens the real frontend in nine isolated Chrome or
 Edge tabs. It uses mocked launcher commands and cannot change configuration,
-client files, or patch storage:
+client files, or the download cache:
 
 ```powershell
 node scripts/preview-install-strip.mjs
@@ -272,12 +272,6 @@ input identity is declared in
 [`manifests/retail-inputs.json`](../manifests/retail-inputs.json). The binary
 itself is not part of this repository.
 
-The workflow also offers an optional `validate_patches` job because it reads
-private Git LFS objects. The public
-[`patches-1.23b.json`](../manifests/patches-1.23b.json) manifest records the
-required patch provenance. Normal builds and hosted CI do not access those
-private files.
-
 ## Generated icon assets
 
 The application icon is generated from `src-tauri/icons/icon-source.png`. After
@@ -296,5 +290,5 @@ transparent icon-grid padding. The macOS app bundle consumes
 Tests and implementation in this tree describe the launcher's current behavior.
 They do not prove retail client behavior, server behavior, or compatibility on
 every Wine and operating system combination. Limit compatibility, protocol,
-patch, and platform claims to the versions and environments named by their
+launch patch, and platform claims to the versions and environments named by their
 source.

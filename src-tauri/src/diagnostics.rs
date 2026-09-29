@@ -6,7 +6,7 @@ use bahamut_launcher::extensions::layout::ExtensionLayout;
 use chrono::{DateTime, SecondsFormat, Utc};
 use tauri::Manager;
 
-use crate::shell_config::{resolve_game_dir, resolve_patch_storage_dir};
+use crate::shell_config::{resolve_download_cache_dir, resolve_game_dir};
 
 pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
     tracing::info!("--- SUPPORT DIAGNOSTICS ---");
@@ -25,12 +25,12 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
     let layout = ExtensionLayout::new(&roots.install, &roots.state);
     let config_root = dirs::portable_config_dir().ok();
     let game_root = resolve_game_dir();
-    let patch_root = resolve_patch_storage_dir().ok();
+    let download_cache = resolve_download_cache_dir().ok();
 
     log_path_value("Install root", Some(&roots.install));
     log_path_value("State root", Some(&roots.state));
     log_path_value("Game root", game_root.as_deref());
-    log_path_value("Patch root", patch_root.as_deref());
+    log_path_value("Download cache", download_cache.as_deref());
     log_path_value("Config root", config_root.as_deref());
     log_path_value("Logs root", Some(&layout.logs));
     log_path_value("Shipped addons root", Some(&layout.shipped_addons));
@@ -69,8 +69,8 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
 
     log_free_disk("install root", &roots.install);
     log_free_disk("state root", &roots.state);
-    if let Some(patch_root) = patch_root.as_deref() {
-        log_free_disk("patch root", patch_root);
+    if let Some(download_cache) = download_cache.as_deref() {
+        log_free_disk("download cache", download_cache);
     }
 
     if let Ok(executable) = std::env::current_exe() {

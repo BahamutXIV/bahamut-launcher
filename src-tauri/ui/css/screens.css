@@ -146,9 +146,6 @@
     .lifecycle-location-help { color:var(--muted); font-size:12px; line-height:1.5; }
     .lifecycle-body { display:grid; grid-template-columns:minmax(0,1fr) 176px; gap:10px; align-items:start; min-width:0; }
     .lifecycle-status-content { display:grid; align-content:start; min-width:0; }
-    .lifecycle-detail { height:32px; overflow:hidden; color:var(--muted); font-size:12px; line-height:16px; }
-    .lifecycle-detail:empty { display:none; }
-    .lifecycle-detail-line { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .lifecycle-alert { max-height:32px; margin:0; overflow:hidden; line-height:16px; }
     .lifecycle-alert:empty { display:none; }
     .progress-row { display:flex; align-items:center; gap:10px; height:18px; margin:0; }
@@ -160,7 +157,6 @@
     .lifecycle-strip[data-mode="error"] .lifecycle-status { gap:5px; }
     .lifecycle-strip[data-mode="error"] .lifecycle-title { color:var(--danger); }
     .lifecycle-strip[data-mode="error"] .lifecycle-body { grid-template-columns:minmax(0,1fr); }
-    .lifecycle-strip[data-mode="error"] .lifecycle-detail { height:45px; color:var(--text); font-size:12px; line-height:15px; }
     .session-summary { display:grid; gap:10px; }
     .summary-row { padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--panel-sunk); }
     .summary-label { color:var(--muted-2); font:500 9px/1.3 var(--font-mono); letter-spacing:.1em; text-transform:uppercase; }
@@ -277,10 +273,10 @@
     .settings-card { min-width:0; min-height:0; padding:12px 14px 14px; overflow:visible; backdrop-filter:none; }
     .settings-card h2 { margin:4px 0; color:var(--accent-text); font:700 22px/1.25 var(--font-display); letter-spacing:.05em; }
     .settings-pane[data-settings-pane="misc"] .settings-card h2 { margin:2px 0 16px; color:var(--text); font:700 15px/1.4 var(--font-body); letter-spacing:0; }
-    .settings-pane[data-settings-pane="misc"] .settings-card--client-patches h2:not(:first-child) { margin-top:18px; }
+    .settings-pane[data-settings-pane="misc"] .settings-card--backups h2:not(:first-child) { margin-top:18px; }
     .settings-card--locations { display:flex; flex-direction:column; }
-    .settings-card--client-patches { display:flex; flex-direction:column; }
-    .settings-card--client-patches .settings-field--screenshots { margin-top:auto; }
+    .settings-card--backups { display:flex; flex-direction:column; }
+    .settings-card--backups .settings-field--screenshots { margin-top:auto; }
     .settings-page .input { min-height:48px; padding:8px 12px; border-radius:14px; }
     .settings-field {
       display:grid;
@@ -293,7 +289,7 @@
     }
     .settings-field:last-child { border-bottom:0; }
     .settings-card--locations .settings-field,
-    .settings-card--client-patches .settings-field { border-bottom:0; }
+    .settings-card--backups .settings-field { border-bottom:0; }
     .settings-field--full { grid-template-columns:minmax(0,1fr); }
     .settings-label { font-weight:700; line-height:1.4; }
     .choice-row { display:flex; min-width:0; gap:8px; }
@@ -355,8 +351,6 @@
     .settings-status { margin-top:10px; color:var(--danger); font-size:11px; }
     .settings-status:empty { display:none; }
     .settings-status[data-tone="success"] { color:var(--success); }
-    .settings-card--locations .settings-update-status { display:block; flex:none; height:48px; margin:auto 12px 0; overflow:hidden; overflow-wrap:anywhere; color:var(--muted); line-height:1.4; }
-    .settings-card--locations .settings-update-status[data-tone="error"] { color:var(--danger); }
     .confirmation-dialog {
       width:min(460px,calc(100% - 32px));
       padding:24px;

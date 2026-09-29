@@ -21,28 +21,27 @@ use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::logging;
 use bahamut_launcher::news;
 use commands::{
-    apply_launcher_update, cancel_game_repair, cancel_patch, check_launcher_update,
+    apply_launcher_update, cancel_game_repair, cancel_install, check_launcher_update,
     config_tool_supported, control_window, create_backup, detect_game_install_command,
     fit_window_to_work_area, game_repair_status, game_status, get_borderless_monitors,
     get_camera_zoom_selection, get_extension_inventory, get_game_settings, get_home_status,
     get_launcher_behavior, get_launcher_log, get_launcher_update_status,
-    get_object_distance_selection, get_patch_settings, get_server_settings, install_game,
-    install_quote, launch_config_tool, launch_game, launcher_update_restart_available,
+    get_object_distance_selection, get_server_settings, install_game, install_quote,
+    install_status, launch_config_tool, launch_game, launcher_update_restart_available,
     launcher_version, list_news, login, logout, open_extension_folder, open_external,
-    open_launcher_log, patch_status, pause_game_repair, pause_patch, pick_directory,
-    pick_install_dir, register, reorder_dat_package, reset_patch, restore_backup,
-    resume_game_repair, resume_patch, save_server_profile, set_addon_enabled,
-    set_borderless_monitor, set_camera_zoom_selection, set_close_on_game_start,
-    set_dat_package_enabled, set_discord_rpc_enabled, set_game_settings,
-    set_native_resolution_override, set_object_distance_selection, set_screenshot_enabled,
-    set_selected_server, start_game_repair, start_local_patch, start_patch_download,
+    open_launcher_log, pause_game_repair, pause_install, pick_directory, pick_install_dir,
+    register, reorder_dat_package, reset_install, restore_backup, resume_game_repair,
+    resume_install, save_server_profile, set_addon_enabled, set_borderless_monitor,
+    set_camera_zoom_selection, set_close_on_game_start, set_dat_package_enabled,
+    set_discord_rpc_enabled, set_game_settings, set_native_resolution_override,
+    set_object_distance_selection, set_screenshot_enabled, set_selected_server, start_game_repair,
     validate_session,
 };
 use shell_config::{load_dats_config, load_extensions_config, load_screenshot_config};
-use state::{BackupIpcState, GameIpcState, PatcherIpcState};
+use state::{BackupIpcState, ContentIpcState, GameIpcState};
 use tauri::{Emitter, Manager};
 
-fn continue_shutdown(app: tauri::AppHandle, state: &PatcherIpcState, exit_code: i32) -> bool {
+fn continue_shutdown(app: tauri::AppHandle, state: &ContentIpcState, exit_code: i32) -> bool {
     let game_pending = app.state::<GameIpcState>().request_shutdown();
     let backup_pending = app.state::<BackupIpcState>().request_shutdown();
     let request = state.request_shutdown(game_pending || backup_pending);
@@ -57,12 +56,12 @@ fn continue_shutdown(app: tauri::AppHandle, state: &PatcherIpcState, exit_code: 
         let app_for_waiter = app.clone();
         std::thread::spawn(move || {
             if request.join_worker() {
-                tracing::error!("patcher worker panicked while launcher was closing");
+                tracing::error!("install worker panicked while launcher was closing");
             }
             app_for_waiter.state::<GameIpcState>().wait_for_worker();
             app_for_waiter.state::<BackupIpcState>().wait_for_worker();
             app_for_waiter
-                .state::<PatcherIpcState>()
+                .state::<ContentIpcState>()
                 .mark_shutdown_complete();
             app_for_waiter.exit(exit_code);
         });
@@ -231,7 +230,7 @@ fn main() {
             );
             Ok(())
         })
-        .manage(PatcherIpcState::default())
+        .manage(ContentIpcState::default())
         .manage(GameIpcState::default())
         .manage(BackupIpcState::default())
         .on_window_event(|window, event| {
@@ -240,7 +239,7 @@ fn main() {
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle().clone();
-                let state = app.state::<PatcherIpcState>();
+                let state = app.state::<ContentIpcState>();
                 if continue_shutdown(app.clone(), &state, 0) {
                     api.prevent_close();
                 }
@@ -298,16 +297,13 @@ fn main() {
             restore_backup,
             open_extension_folder,
             get_launcher_log,
-            start_local_patch,
-            start_patch_download,
             install_game,
             install_quote,
-            cancel_patch,
-            pause_patch,
-            resume_patch,
-            reset_patch,
-            patch_status,
-            get_patch_settings,
+            cancel_install,
+            pause_install,
+            resume_install,
+            reset_install,
+            install_status,
         ])
         .build(tauri::generate_context!())
     {
@@ -350,7 +346,7 @@ fn main() {
     }
     app.run(|app, event| {
         if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
-            let state = app.state::<PatcherIpcState>();
+            let state = app.state::<ContentIpcState>();
             if continue_shutdown(app.clone(), &state, code.unwrap_or(0)) {
                 api.prevent_exit();
             }

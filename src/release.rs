@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zip::ZipArchive;
 
-use crate::patcher::content::{DeliveryManifest, validate_hash, validate_relative_path};
+use crate::content::manifest::{DeliveryManifest, validate_hash, validate_relative_path};
 
 pub const MAX_METADATA_BYTES: usize = 1024 * 1024;
 pub const MAX_DELIVERY_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
@@ -416,9 +416,7 @@ fn validate_game_manifest(
 ) -> Result<()> {
     let manifest: DeliveryManifest = serde_json::from_slice(manifest_bytes)
         .map_err(|_| invalid("Game delivery manifest JSON is invalid."))?;
-    if !matches!(manifest.schema_version, 1 | 2)
-        || (manifest.schema_version == 1 && !manifest.hosted_patches)
-    {
+    if manifest.schema_version != 3 {
         return Err(invalid("Unsupported game delivery manifest schema."));
     }
     let package = manifest
@@ -1356,8 +1354,8 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     use super::*;
-    use crate::patcher::content::{BaseArchive, BasePackage, InstallFile, PatchTransition};
-    use crate::patcher::http::ObjectSpec;
+    use crate::content::http::ObjectSpec;
+    use crate::content::manifest::{BaseArchive, BasePackage, InstallFile};
     use crate::version::FFXIV_GAME_VERSION;
 
     const TEST_SEED: [u8; ED25519_SEED_BYTES] = [0x53; ED25519_SEED_BYTES];
@@ -1706,13 +1704,10 @@ mod tests {
             sha256: sha256_hex(b"archive bytes"),
         };
         let manifest = DeliveryManifest {
-            schema_version: 2,
+            schema_version: 3,
             content_root: None,
-            hosted_patches: false,
             base: Some(BasePackage {
-                baseline_version: FFXIV_GAME_VERSION.into(),
                 target_version: FFXIV_GAME_VERSION.into(),
-                transition: PatchTransition::None,
                 archives: vec![BaseArchive {
                     object: archive_object.clone(),
                     files: vec![boot.clone(), game.clone()],
@@ -1862,6 +1857,22 @@ mod tests {
         };
         *target_version = "different-game-version".into();
         assert!(validate_metadata(&wrong_archive, Some(&manifest_bytes)).is_err());
+    }
+
+    #[test]
+    fn game_inventory_rejects_a_delivery_manifest_below_schema_3() {
+        let (mut metadata, manifest_bytes) = game_fixture();
+        let mut manifest: DeliveryManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+        manifest.schema_version = 2;
+        let old_bytes = serde_json::to_vec(&manifest).unwrap();
+        let ReleaseInventory::GameDelivery {
+            manifest_sha256, ..
+        } = &mut metadata.inventory
+        else {
+            unreachable!();
+        };
+        *manifest_sha256 = sha256_hex(&old_bytes);
+        assert!(validate_metadata(&metadata, Some(&old_bytes)).is_err());
     }
 
     #[test]

@@ -32,7 +32,7 @@ function loginContent(loginEnabled = true) {
 function renderHome() {
   if (!home.status) return;
   const state = home.status.state;
-  const operationActive = Boolean(home.patchSnapshot?.is_running || repairState.status?.is_running);
+  const operationActive = Boolean(home.installSnapshot?.is_running || repairState.status?.is_running);
   if (state !== 'logged-out') clearRetryCountdown();
   document.querySelector('#home-layout').dataset.lifecycle = state;
   document.querySelector('#home-layout').dataset.operationActive = String(operationActive);
@@ -40,10 +40,10 @@ function renderHome() {
   document.querySelector('#home-title').textContent = home.status.title;
   const content = document.querySelector('#home-session-content');
   const primary = document.querySelector('#home-primary');
-  primary.textContent = state === 'no-valid-install' ? 'Install' : home.status.primary_action;
-  primary.disabled = operationActive || home.downloadStartPending || home.installStartPending || state === 'logged-out' || (state === 'ready' && home.gameRunning);
+  primary.textContent = state === 'no-valid-install' || state === 'outdated-install' ? 'Install' : home.status.primary_action;
+  primary.disabled = operationActive || home.installStartPending || state === 'logged-out' || (state === 'ready' && home.gameRunning);
 
-  if (['no-valid-install', 'patch-required', 'logged-out'].includes(state)) {
+  if (['no-valid-install', 'outdated-install', 'logged-out'].includes(state)) {
     content.replaceChildren(loginContent(state === 'logged-out'));
   }
   if (state === 'logged-out') {
@@ -61,19 +61,17 @@ function renderHome() {
   renderLifecycleStrip();
 }
 
-function renderLifecycleStrip(snapshot = {}) {
+function renderLifecycleStrip() {
   if (!home.status) return;
   const state = home.status.state;
-  const patch = snapshot.patch || home.patchSnapshot || home.patchTerminal;
-  const patchTerminal = patch && patch.is_terminal && patch.phase !== 'done';
-  const patchRunning = patch && patch.is_running;
+  const install = home.installSnapshot || home.installTerminal;
+  const installTerminal = install && install.is_terminal && install.phase !== 'done';
+  const installRunning = install && install.is_running;
   const repair = repairState.status;
   const repairRunning = Boolean(repair?.is_running);
   const repairTerminal = Boolean(repair?.is_terminal && !repairRunning);
-  const freshOnly = state === 'patch-required' && home.status.hosted_patches === false;
-  const patchIdle = state === 'patch-required' && !freshOnly && !patchTerminal && !patchRunning;
-  const installIdle = (state === 'no-valid-install' || freshOnly) && !patchTerminal && !patchRunning;
-  const installRecovery = (state === 'no-valid-install' || freshOnly || patch?.is_install) && patchTerminal;
+  const installIdle = (state === 'no-valid-install' || state === 'outdated-install') && !installTerminal && !installRunning;
+  const installRecovery = Boolean(installTerminal);
   const strip = document.querySelector('#lifecycle-strip');
   const location = document.querySelector('#lifecycle-location');
   const status = document.querySelector('#lifecycle-status');
@@ -84,26 +82,24 @@ function renderLifecycleStrip(snapshot = {}) {
   const title = document.querySelector('#lifecycle-title');
   const copy = document.querySelector('#lifecycle-copy');
   const metric = document.querySelector('#lifecycle-metric');
-  const detail = document.querySelector('#lifecycle-detail');
   const progress = document.querySelector('#lifecycle-progress');
   const fill = document.querySelector('#lifecycle-progress-fill');
   const progressText = document.querySelector('#lifecycle-progress-text');
-  const patchActions = document.querySelector('#lifecycle-actions');
+  const installActions = document.querySelector('#lifecycle-actions');
   const pauseAction = document.querySelector('#lifecycle-pause');
   const cancelAction = document.querySelector('#lifecycle-cancel');
   const primary = document.querySelector('#home-primary');
-  const operationActive = Boolean(patchRunning || repairRunning);
+  const operationActive = Boolean(installRunning || repairRunning);
   let percent = 0;
   document.querySelector('#home-layout').dataset.operationActive = String(operationActive);
   document.querySelector('#home-layout').dataset.repairResult = String(repairTerminal);
   document.querySelectorAll('[data-settings-action="browse-game"]').forEach(button => { button.disabled = operationActive; });
   progress.hidden = true;
-  patchActions.hidden = true;
+  installActions.hidden = true;
   pauseAction.hidden = true;
   cancelAction.hidden = true;
   metric.textContent = '';
-  detail.replaceChildren();
-  const showLocation = !repairRunning && !repairTerminal && (installIdle || patchIdle || installRecovery);
+  const showLocation = !repairRunning && !repairTerminal && (installIdle || installRecovery);
   location.hidden = !showLocation;
   status.hidden = showLocation;
   strip.dataset.mode = showLocation ? 'location' : 'status';
@@ -138,7 +134,7 @@ function renderLifecycleStrip(snapshot = {}) {
       metric.textContent = `File ${Math.min(completedFiles + 1, totalFiles)} of ${totalFiles}`;
     }
     progress.hidden = !totalBytes && !totalFiles;
-    patchActions.hidden = false;
+    installActions.hidden = false;
     pauseAction.hidden = false;
     cancelAction.hidden = repair.can_cancel === false;
     pauseAction.disabled = repair.can_cancel === false;
@@ -155,98 +151,66 @@ function renderLifecycleStrip(snapshot = {}) {
     copy.textContent = repair.phase === 'cancelled'
       ? 'The repair was cancelled.'
       : failed ? repair.error || 'The repair stopped before completion.' : 'Managed game files are ready.';
-  } else if (patchTerminal) {
-    if (installRecovery) {
-      strip.dataset.mode = 'location';
-      const cancelled = patch.phase === 'cancelled';
-      const previousUpdate = freshOnly && !patch.is_install;
-      locationTitle.textContent = previousUpdate ? 'Install Game' : cancelled ? 'Install Cancelled' : 'Install Failed';
-      locationHelp.textContent = home.installStartPending
-          ? 'Checking required space and starting the installation...'
-          : home.installError || (previousUpdate
-            ? 'The previous update stopped. Install the client in a new folder.'
-            : cancelled
-            ? 'The installation was cancelled. Choose a different folder or retry this destination.'
-            : patch.error || 'The installation stopped with an error. Choose a different folder or retry this destination.');
-      const installHint = installTarget() || 'Choose a folder for the new game install';
-      locationPath.textContent = installHint;
-      locationPath.title = installHint;
-      pathAction.textContent = 'PATH';
-      pathAction.dataset.action = 'install-folder';
-      primary.textContent = previousUpdate ? 'Install Fresh' : 'Retry Install';
-      primary.disabled = home.installStartPending;
-    } else {
-      strip.dataset.mode = 'error';
-      const cancelled = patch.phase === 'cancelled';
-      title.textContent = `Update ${cancelled ? 'Cancelled' : 'Failed'}`;
-      copy.textContent = '';
-      const cause = document.createElement('span');
-      cause.className = 'lifecycle-detail-line';
-      cause.textContent = cancelled ? 'The operation was cancelled.' : (patch.error || 'The update stopped with an error.');
-      const recovery = document.createElement('span');
-      recovery.className = 'lifecycle-detail-line';
-      recovery.textContent = home.status.hosted_patches === false
-        ? 'Choose Install Fresh to use the final client in a new folder.'
-        : 'Press Retry to try again.';
-      detail.append(cause, recovery);
-      primary.textContent = home.status.hosted_patches === false ? 'Install Fresh' : 'Retry';
-      primary.disabled = home.downloadStartPending;
-    }
-  } else if (patchRunning) {
-    strip.dataset.mode = 'progress';
-    const installation = state === 'no-valid-install' || Boolean(patch.is_install);
-    const completed = (patch.previous_completed_bytes || 0) + (patch.bytes_downloaded || 0);
-    const total = patch.total_download_bytes || 0;
-    const itemTotal = patch.total_patches || 0;
-    const itemNumber = Math.min((patch.patch_idx || 0) + 1, Math.max(1, itemTotal));
-    title.textContent = installation ? 'Game Installation' : 'Client Update';
-    if (patch.is_paused) copy.textContent = installation ? 'Installation paused.' : 'Update paused.';
-    else if (patch.pause_requested) copy.textContent = 'Pausing after the current step.';
-    else if (patch.phase === 'starting') copy.textContent = installation ? 'Preparing the game installation.' : 'Preparing the client update.';
-    else if (patch.phase === 'downloading') copy.textContent = installation ? 'Downloading game files.' : 'Downloading verified client patches.';
-    else if (patch.phase === 'extracting') copy.textContent = 'Extracting game files.';
-    else if (patch.phase === 'validating-files') copy.textContent = 'Checking the installed client before finishing.';
-    else if (patch.phase === 'validating') copy.textContent = 'Verifying patch files.';
-    else if (patch.phase === 'installing') copy.textContent = installation ? 'Installing game files.' : 'Finishing the client update.';
-    else if (patch.phase === 'patching') copy.textContent = 'Applying client patches.';
-    else copy.textContent = installation ? 'Installing the game.' : 'Updating the client.';
-    if (['downloading', 'validating'].includes(patch.phase)) {
-      percent = total ? completed / total * 100 : 0;
-      metric.textContent = total ? `${formatBytes(completed)} / ${formatBytes(total)}` : '';
-    } else if (['extracting', 'installing', 'validating-files', 'patching'].includes(patch.phase) && itemTotal) {
-      percent = itemTotal ? (patch.patch_idx || 0) / itemTotal * 100 : 0;
-      metric.textContent = `${patch.phase === 'patching' ? 'Patch' : 'File'} ${itemNumber} of ${itemTotal}`;
-    } else {
-      metric.textContent = '';
-    }
-    progress.hidden = false;
-    patchActions.hidden = false;
-    pauseAction.hidden = false;
-    cancelAction.hidden = false;
-    pauseAction.textContent = patch.pause_requested || patch.is_paused ? 'Resume' : 'Pause';
-    pauseAction.dataset.paused = String(Boolean(patch.pause_requested || patch.is_paused));
-    primary.textContent = installation ? 'Installing...' : 'Update';
-    primary.disabled = true;
-  } else if (installIdle) {
+  } else if (installTerminal) {
+    strip.dataset.mode = 'location';
+    const cancelled = install.phase === 'cancelled';
+    locationTitle.textContent = cancelled ? 'Install Cancelled' : 'Install Failed';
+    locationHelp.textContent = home.installStartPending
+        ? 'Checking required space and starting the installation...'
+        : home.installError || (cancelled
+          ? 'The installation was cancelled. Choose a different folder or retry this destination.'
+          : install.error || 'The installation stopped with an error. Choose a different folder or retry this destination.');
     const installHint = installTarget() || 'Choose a folder for the new game install';
-    locationTitle.textContent = 'Install Game';
-    locationHelp.textContent = home.installStartPending ? 'Checking required space and starting the installation...' : (home.installError || 'Install the client. Change the destination with PATH.');
     locationPath.textContent = installHint;
     locationPath.title = installHint;
     pathAction.textContent = 'PATH';
     pathAction.dataset.action = 'install-folder';
-    primary.textContent = freshOnly ? 'Install Fresh' : 'Install';
-    primary.disabled = home.downloadStartPending || home.installStartPending;
-  } else if (patchIdle) {
-    const patchPath = settingsState.patchSettings?.storage_dir || 'Choose a client patch folder';
-    locationTitle.textContent = 'Client Update';
-    locationHelp.textContent = 'Download verified patches, or apply files from your selected patch folder.';
-    locationPath.textContent = patchPath;
-    locationPath.title = patchPath;
-    pathAction.textContent = 'Use Local Files';
-    pathAction.dataset.action = 'local-patch';
-    primary.textContent = 'Update';
-    primary.disabled = home.downloadStartPending;
+    primary.textContent = 'Retry Install';
+    primary.disabled = home.installStartPending;
+  } else if (installRunning) {
+    strip.dataset.mode = 'progress';
+    const completed = (install.previous_completed_bytes || 0) + (install.bytes_downloaded || 0);
+    const total = install.total_download_bytes || 0;
+    const itemTotal = install.total_files || 0;
+    const itemNumber = Math.min((install.file_idx || 0) + 1, Math.max(1, itemTotal));
+    title.textContent = 'Game Installation';
+    if (install.is_paused) copy.textContent = 'Installation paused.';
+    else if (install.pause_requested) copy.textContent = 'Pausing after the current step.';
+    else if (install.phase === 'starting') copy.textContent = 'Preparing the game installation.';
+    else if (install.phase === 'downloading') copy.textContent = 'Downloading game files.';
+    else if (install.phase === 'validating-files') copy.textContent = 'Checking the installed client before finishing.';
+    else if (install.phase === 'installing') copy.textContent = 'Installing game files.';
+    else copy.textContent = 'Installing the game.';
+    if (install.phase === 'downloading') {
+      percent = total ? completed / total * 100 : 0;
+      metric.textContent = total ? `${formatBytes(completed)} / ${formatBytes(total)}` : '';
+    } else if (['installing', 'validating-files'].includes(install.phase) && itemTotal) {
+      percent = itemTotal ? (install.file_idx || 0) / itemTotal * 100 : 0;
+      metric.textContent = `File ${itemNumber} of ${itemTotal}`;
+    } else {
+      metric.textContent = '';
+    }
+    progress.hidden = false;
+    installActions.hidden = false;
+    pauseAction.hidden = false;
+    cancelAction.hidden = false;
+    pauseAction.textContent = install.pause_requested || install.is_paused ? 'Resume' : 'Pause';
+    pauseAction.dataset.paused = String(Boolean(install.pause_requested || install.is_paused));
+    primary.textContent = 'Installing...';
+    primary.disabled = true;
+  } else if (installIdle) {
+    const installHint = installTarget() || 'Choose a folder for the new game install';
+    locationTitle.textContent = 'Install Game';
+    const idleHelp = state === 'outdated-install'
+      ? 'The selected game folder is not the final 1.23b client. Install the game into a new folder.'
+      : 'Install the client. Change the destination with PATH.';
+    locationHelp.textContent = home.installStartPending ? 'Checking required space and starting the installation...' : (home.installError || idleHelp);
+    locationPath.textContent = installHint;
+    locationPath.title = installHint;
+    pathAction.textContent = 'PATH';
+    pathAction.dataset.action = 'install-folder';
+    primary.textContent = 'Install';
+    primary.disabled = home.installStartPending;
   } else if (state === 'logged-out') {
     title.textContent = 'Account session required';
     copy.textContent = 'Sign in against the selected server profile to enable Play.';
@@ -320,8 +284,8 @@ function showLoginError(error, alert) {
     alert.textContent = 'The selected server could not be reached.';
   } else if (kind === AUTH_ERROR_KINDS.noInstall) {
     alert.textContent = 'Select a valid game install before logging in.';
-  } else if (kind === AUTH_ERROR_KINDS.notPatched) {
-    alert.textContent = 'Update the client to 1.23b before logging in.';
+  } else if (kind === AUTH_ERROR_KINDS.outdatedClient) {
+    alert.textContent = 'Install the final 1.23b client before logging in.';
   } else {
     alert.textContent = (error && error.message) || 'The server could not complete login.';
   }
@@ -344,7 +308,7 @@ function startRetryCountdown(alert, seconds) {
   }, 1000);
 }
 async function chooseInstallFolder() {
-  if (home.patchSnapshot?.is_running || home.installStartPending) return;
+  if (home.installSnapshot?.is_running || home.installStartPending) return;
   try {
     const destination = await invoke('pick_directory');
     if (!destination) return;
@@ -360,7 +324,7 @@ async function chooseInstallFolder() {
 
 async function startInstall() {
   const destination = installTarget();
-  if (!destination || home.installStartPending || home.patchSnapshot?.is_running) return;
+  if (!destination || home.installStartPending || home.installSnapshot?.is_running) return;
   home.installDestination = destination;
   localStorage.setItem('bahamut-install-destination', destination);
   home.installStartPending = true;
@@ -369,7 +333,7 @@ async function startInstall() {
   try {
     await invoke('install_quote', { destination });
     await invoke('install_game', { destination });
-    await refreshPatchSnapshot();
+    await refreshInstallSnapshot();
   } catch (error) {
     home.installError = error.message || String(error);
     console.error('Unable to start the game installation.', error);
@@ -380,44 +344,12 @@ async function startInstall() {
   }
 }
 
-async function startUpdate(reset = false, local = false) {
-  if (!local && home.status?.hosted_patches === false) {
-    home.installError = 'This content host has no retail patches. Install the final client into a new folder.';
-    renderLifecycleStrip();
-    return;
-  }
-  if (home.downloadStartPending || home.patchSnapshot?.is_running) return;
-  home.downloadStartPending = true;
-  home.patchRetryLocal = Boolean(local);
-  localStorage.setItem('bahamut-patch-retry-local', String(home.patchRetryLocal));
-  home.patchStartFailure = null;
-  renderLifecycleStrip();
-  const alert = document.querySelector('#patch-home-alert');
-  if (alert) alert.textContent = '';
-  try {
-    if (reset) {
-      await invoke('reset_patch');
-      resetPatchStatus();
-    }
-    await invoke(local ? 'start_local_patch' : 'start_patch_download');
-    await refreshPatchSnapshot();
-  } catch (error) {
-    console.error('Unable to start the client update.', error);
-    home.patchStartFailure = { phase:'error', is_running:false, is_terminal:true, error:error.message || String(error) };
-    home.patchSnapshot = home.patchStartFailure;
-    home.patchTerminal = home.patchSnapshot;
-  } finally {
-    home.downloadStartPending = false;
-  }
-  renderLifecycleStrip();
-}
-
 function installTarget() {
   return home.installDestination || home.status?.default_game_dir || '';
 }
 
 async function launchGame() {
-  if (home.gameRunning || home.patchSnapshot?.is_running) return;
+  if (home.gameRunning || home.installSnapshot?.is_running) return;
   const alert = document.querySelector('#launch-alert');
   if (alert) alert.textContent = '';
   const primary = document.querySelector('#home-primary');
@@ -436,9 +368,9 @@ async function launchGame() {
       document.querySelector('#login-alert').textContent = 'The server address changed. Log in again.';
       return;
     }
-    const titles = { 'no-install':'Game install not found', patch:'Patch verification failed', lobby:'Lobby connection failed', 'not-patched':'Client is not 1.23b', extensions:'Client extensions were not loaded', prerequisite:'Windows runtime is required', 'game-running':'Game is already running' };
+    const titles = { 'no-install':'Game install not found', patch:'Patch verification failed', lobby:'Lobby connection failed', 'outdated-client':'Client is not 1.23b', extensions:'Client extensions were not loaded', prerequisite:'Windows runtime is required', 'game-running':'Game is already running' };
     // extensions always carries a backend message; the empty copy falls through to it.
-    const copies = { 'no-install':'Set the game install path in Settings to continue.', patch:'The configured client files failed patch verification.', lobby:'The lobby could not be reached. Check the selected server and try again.', 'not-patched':'Apply the client patches before launching.', extensions:'', prerequisite:'', 'game-running':'Close the current client before launching another.' };
+    const copies = { 'no-install':'Set the game install path in Settings to continue.', patch:'The configured client files failed patch verification.', lobby:'The lobby could not be reached. Check the selected server and try again.', 'outdated-client':'Install the final 1.23b client into a new folder before launching.', extensions:'', prerequisite:'', 'game-running':'Close the current client before launching another.' };
     const kind = (error && error.kind) || 'lobby';
     const message = `${titles[kind] || 'Launch failed'}: ${copies[kind] || (error && error.message) || 'The extension bootstrap did not complete and the game was not started.'}`;
     if (alert) alert.textContent = message;
@@ -456,63 +388,47 @@ async function refreshGameStatus() {
     const gameRunning = Boolean(await invoke('game_status'));
     if (revision !== home.gameStatusRevision || (!gameRunning && home.gameLaunchPending)) return;
     home.gameRunning = gameRunning;
-    document.querySelector('#home-primary').disabled = home.gameRunning || Boolean(home.patchSnapshot?.is_running);
+    document.querySelector('#home-primary').disabled = home.gameRunning || Boolean(home.installSnapshot?.is_running);
   } catch (error) {
     console.error('Unable to refresh the game process status.', error);
   }
 }
 
-async function refreshPatchSnapshot() {
+async function refreshInstallSnapshot() {
   if (!home.status) return;
-  const revision = ++home.patchSnapshotRevision;
-  const patch = await invoke('patch_status').catch(() => null);
-  if (!patch || revision !== home.patchSnapshotRevision) return;
-  if (home.patchStartFailure && patch.phase === 'idle' && !patch.is_running && !patch.is_terminal) {
-    home.patchSnapshot = home.patchStartFailure;
-    home.patchTerminal = home.patchStartFailure;
-    renderLifecycleStrip();
-    return;
-  }
-  home.patchStartFailure = null;
-  home.patchSnapshot = patch;
-  home.patchTerminal = patch.is_terminal && patch.phase !== 'done' ? patch : null;
-  if (patch.phase !== 'done') home.patchDoneHandled = false;
-  if (patch.phase === 'done' && patch.is_terminal && !home.patchDoneHandled) {
-    home.patchDoneHandled = true;
-    await refreshHomeStatus(patch);
+  const revision = ++home.installSnapshotRevision;
+  const install = await invoke('install_status').catch(() => null);
+  if (!install || revision !== home.installSnapshotRevision) return;
+  home.installSnapshot = install;
+  home.installTerminal = install.is_terminal && install.phase !== 'done' ? install : null;
+  if (install.phase !== 'done') home.installDoneHandled = false;
+  if (install.phase === 'done' && install.is_terminal && !home.installDoneHandled) {
+    home.installDoneHandled = true;
+    await refreshHomeStatus(install);
     return;
   }
   renderLifecycleStrip();
 }
 
-async function refreshHomeStatus(patchSnapshot = null) {
+async function refreshHomeStatus(installSnapshot = null) {
   const sessionToken = home.token;
   const gameStatusRevision = ++home.gameStatusRevision;
-  const patchRevision = ++home.patchSnapshotRevision;
-  const [status, patchSettings, gameRunning, patch] = await Promise.all([
+  const installRevision = ++home.installSnapshotRevision;
+  const [status, gameRunning, install] = await Promise.all([
     invoke('get_home_status', { authenticated:!!home.token }),
-    invoke('get_patch_settings'),
     invoke('game_status'),
-    patchSnapshot ? Promise.resolve(patchSnapshot) : invoke('patch_status'),
+    installSnapshot ? Promise.resolve(installSnapshot) : invoke('install_status'),
   ]);
   if (sessionToken !== home.token) return;
   home.status = status;
   if (gameStatusRevision === home.gameStatusRevision && (gameRunning || !home.gameLaunchPending)) {
     home.gameRunning = Boolean(gameRunning);
   }
-  settingsState.patchSettings = patchSettings;
-  if (patchRevision === home.patchSnapshotRevision) {
-    const preserveStartFailure = home.patchStartFailure && patch.phase === 'idle' && !patch.is_running && !patch.is_terminal;
-    const effectivePatch = preserveStartFailure ? home.patchStartFailure : patch;
-    if (!preserveStartFailure) home.patchStartFailure = null;
-    home.patchSnapshot = effectivePatch;
-    home.patchTerminal = effectivePatch.is_terminal && effectivePatch.phase !== 'done' ? effectivePatch : null;
+  if (installRevision === home.installSnapshotRevision) {
+    home.installSnapshot = install;
+    home.installTerminal = install.is_terminal && install.phase !== 'done' ? install : null;
   }
-  if (patch.phase === 'done') {
-    home.patchRetryLocal = false;
-    localStorage.removeItem('bahamut-patch-retry-local');
-  }
-  if (patch.phase === 'done' && status.state !== 'no-valid-install') {
+  if (install.phase === 'done' && status.state !== 'no-valid-install' && status.state !== 'outdated-install') {
     home.installDestination = '';
     home.installError = '';
     localStorage.removeItem('bahamut-install-destination');
@@ -520,28 +436,13 @@ async function refreshHomeStatus(patchSnapshot = null) {
   renderHome();
 }
 
-function resetPatchStatus() {
-  home.patchTerminal = null;
-  home.patchSnapshot = null;
-  home.patchStartFailure = null;
-  home.patchDoneHandled = false;
+function resetInstallStatus() {
+  home.installTerminal = null;
+  home.installSnapshot = null;
+  home.installDoneHandled = false;
   renderLifecycleStrip();
 }
 
-async function handleLifecycleAction(action) {
-  try {
-    if (action === 'retry') {
-      if (home.status?.state === 'no-valid-install' || home.patchTerminal?.is_install) await startInstall();
-      else if (home.status?.hosted_patches === false) await startInstall();
-      else await startUpdate(true, home.patchRetryLocal);
-    } else if (action === 'local-patch') {
-      await startUpdate(false, true);
-    }
-  } catch (error) {
-    const alert = document.querySelector('#patch-home-alert') || document.querySelector('#settings-patch-status');
-    if (alert) alert.textContent = error.message || String(error);
-  }
-}
 async function restoreSession() {
   let saved;
   try { saved = JSON.parse(localStorage.getItem('bahamut-session') || 'null'); } catch { saved = null; }
@@ -561,21 +462,21 @@ async function restoreSession() {
   home.server = saved.server || '';
 }
 async function handleSettingsAction(action) {
-  const status = document.querySelector('#settings-patch-status');
+  const status = document.querySelector('#settings-misc-status');
   const gamepadStatus = document.querySelector('#gamepad-action-status');
   if (status) status.textContent = '';
   if (action === 'open-config') gamepadStatus.textContent = '';
-  if (home.patchSnapshot?.is_running && action === 'browse-game') {
-    if (status) status.textContent = 'Wait for the current install or update to finish.';
+  if (home.installSnapshot?.is_running && action === 'browse-game') {
+    if (status) status.textContent = 'Wait for the current install to finish.';
     return;
   }
   try {
     if (action === 'browse-game') {
       const path = await invoke('pick_install_dir');
       if (path) {
-        if (home.patchSnapshot?.is_terminal) {
-          await invoke('reset_patch');
-          resetPatchStatus();
+        if (home.installSnapshot?.is_terminal) {
+          await invoke('reset_install');
+          resetInstallStatus();
         }
         home.installDestination = '';
         home.installError = '';
@@ -593,4 +494,4 @@ async function handleSettingsAction(action) {
   }
 }
 
-export { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshPatchSnapshot, refreshHomeStatus, resetPatchStatus, restoreSession, chooseInstallFolder, startInstall, startUpdate, launchGame, handleLifecycleAction, handleSettingsAction };
+export { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshInstallSnapshot, refreshHomeStatus, resetInstallStatus, restoreSession, chooseInstallFolder, startInstall, launchGame, handleSettingsAction };

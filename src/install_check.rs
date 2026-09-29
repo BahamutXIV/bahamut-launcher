@@ -10,12 +10,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::patcher::check_game_version;
+use crate::content::check_game_version;
 
 /// Present from the base 1.x install; absence means the path is not an FFXIV install.
 const BOOT_EXE: &str = "ffxivboot.exe";
 
-/// Created by the patch chain and required to launch.
+/// Present only in the final 1.23b client and required to launch.
 const CLIENT_EXE: &str = "ffxivgame.exe";
 
 /// Install state relative to the 1.23b launch requirement.
@@ -23,8 +23,8 @@ const CLIENT_EXE: &str = "ffxivgame.exe";
 pub enum InstallState {
     /// No base install exists, or its owned staging receipt is still present.
     NotFound,
-    /// A real install that is not at the target 1.23b build.
-    FoundNeedsPatch {
+    /// A real install that is not the final 1.23b client.
+    FoundOutdated {
         /// Trimmed `game.ver` contents for the UI.
         game_version: Option<String>,
     },
@@ -47,7 +47,7 @@ pub fn check_install(game_dir: Option<&Path>) -> InstallStatus {
             game_dir: None,
         };
     };
-    if !dir.join(BOOT_EXE).is_file() || crate::patcher::installation_in_progress(dir) {
+    if !dir.join(BOOT_EXE).is_file() || crate::content::installation_in_progress(dir) {
         return InstallStatus {
             state: InstallState::NotFound,
             game_dir: Some(dir.to_path_buf()),
@@ -56,7 +56,7 @@ pub fn check_install(game_dir: Option<&Path>) -> InstallStatus {
     let state = if check_game_version(dir) && dir.join(CLIENT_EXE).is_file() {
         InstallState::Ready
     } else {
-        InstallState::FoundNeedsPatch {
+        InstallState::FoundOutdated {
             game_version: read_game_version(dir),
         }
     };
@@ -103,41 +103,41 @@ mod tests {
     }
 
     #[test]
-    fn base_install_needs_patch_and_reports_its_version() {
+    fn base_install_is_outdated_and_reports_its_version() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("ffxivboot.exe"), b"x").unwrap();
         fs::write(tmp.path().join("game.ver"), "2010.07.10.0000\n").unwrap();
         let status = check_install(Some(tmp.path()));
         assert_eq!(
             status.state,
-            InstallState::FoundNeedsPatch {
+            InstallState::FoundOutdated {
                 game_version: Some("2010.07.10.0000".into())
             }
         );
     }
 
     #[test]
-    fn boot_exe_without_game_ver_needs_patch() {
+    fn boot_exe_without_game_ver_is_outdated() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("ffxivboot.exe"), b"x").unwrap();
         let status = check_install(Some(tmp.path()));
         assert_eq!(
             status.state,
-            InstallState::FoundNeedsPatch { game_version: None }
+            InstallState::FoundOutdated { game_version: None }
         );
     }
 
     #[test]
-    fn target_game_ver_without_client_exe_still_needs_patch() {
+    fn target_game_ver_without_client_exe_is_outdated() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("ffxivboot.exe"), b"x").unwrap();
         fs::write(tmp.path().join("game.ver"), FFXIV_GAME_VERSION).unwrap();
         let status = check_install(Some(tmp.path()));
-        assert!(matches!(status.state, InstallState::FoundNeedsPatch { .. }));
+        assert!(matches!(status.state, InstallState::FoundOutdated { .. }));
     }
 
     #[test]
-    fn patched_install_is_ready() {
+    fn final_install_is_ready() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("ffxivboot.exe"), b"x").unwrap();
         fs::write(tmp.path().join("ffxivgame.exe"), b"x").unwrap();
@@ -152,7 +152,7 @@ mod tests {
         fs::write(tmp.path().join("ffxivboot.exe"), b"x").unwrap();
         fs::write(tmp.path().join("ffxivgame.exe"), b"x").unwrap();
         fs::write(tmp.path().join("game.ver"), FFXIV_GAME_VERSION).unwrap();
-        let receipt = tmp.path().join(crate::patcher::INSTALL_RECEIPT_FILE);
+        let receipt = tmp.path().join(crate::content::INSTALL_RECEIPT_FILE);
         fs::write(&receipt, b"pending verification").unwrap();
         assert_eq!(
             check_install(Some(tmp.path())).state,

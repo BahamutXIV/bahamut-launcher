@@ -212,13 +212,10 @@ def main():
         if args.staging_bytes < final_bytes:
             fail("Staging bytes are smaller than the final inventory.")
         manifest = {
-            "schema_version": 2,
+            "schema_version": 3,
             "content_root": HOST,
-            "hosted_patches": False,
             "base": {
-                "baseline_version": "2012.09.19.0001",
                 "target_version": "2012.09.19.0001",
-                "transition": "none",
                 "archives": [{
                     "object": {"object_key": OBJECT_KEY, "length": ARCHIVE_LENGTH, "sha256": ARCHIVE_SHA256},
                     "files": base_files,

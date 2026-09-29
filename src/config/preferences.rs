@@ -459,8 +459,8 @@ pub struct LauncherSection {
     pub game_location: Option<PathBuf>,
     /// Override only the delivery host, never the shipped content identities.
     pub content_root: Option<String>,
-    /// `None` uses `XIVLegacy_Patches` under the user's Documents folder.
-    pub patch_download_dir: Option<PathBuf>,
+    /// `None` uses `XIVLegacy_Downloads` under the user's Documents folder.
+    pub download_cache_dir: Option<PathBuf>,
     /// Optional Windows monitor device-interface identity for borderless mode.
     pub borderless_monitor: Option<String>,
 }
@@ -480,7 +480,7 @@ impl Default for LauncherSection {
             native_resolution_override: false,
             game_location: None,
             content_root: None,
-            patch_download_dir: None,
+            download_cache_dir: None,
             borderless_monitor: None,
         }
     }
