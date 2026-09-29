@@ -10,7 +10,7 @@
 2. Start `bahamut-launcher.exe` on Windows, or run `./bahamut-launcher` from
    the extracted folder on Linux. On macOS, open `Bahamut Launcher.app`; the
    first launch may ask for access to the Documents folder, where the retail
-   config file and the patch download folder live, and, when a server
+   config file and the download cache folder live, and, when a server
    profile points at a machine on the local network, for local network
    access.
 3. Choose Install to download the game into a new or empty folder. The default
@@ -18,8 +18,8 @@
    Linux and macOS. Use PATH to choose a different location before installing.
    Keep the game in its own directory, separate from the launcher.
 4. To use an existing, fully updated 1.23b client, select its folder under
-   Settings > Misc > Install Location. For an older client, choose Install
-   Fresh on Home and use a different empty folder.
+   Settings > Misc > Install Location. For an older client, choose Install on
+   Home and use a different empty folder.
 5. Follow progress on Home. The launcher checks available disk space before
    installation; macOS purgeable storage does not count as free space. When
    installation is ready, choose a server profile, sign in, and start the game.

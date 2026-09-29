@@ -68,7 +68,6 @@ class PackageGameContentTests(unittest.TestCase):
         final: Path | None = None,
         base_allow: Path | None = None,
         final_allow: Path | None = None,
-        transition: str = "none",
         staging_bytes: int = 1024,
         max_archive_bytes: int = 1024,
     ) -> subprocess.CompletedProcess[str]:
@@ -86,10 +85,6 @@ class PackageGameContentTests(unittest.TestCase):
                 str(final_allow or self.final_allow),
                 "--output-dir",
                 str(output),
-                "--baseline-version",
-                TARGET if transition == "none" else "2010.09.18.0000",
-                "--transition",
-                transition,
                 "--staging-bytes",
                 str(staging_bytes),
                 "--max-archive-uncompressed-bytes",
@@ -119,7 +114,9 @@ class PackageGameContentTests(unittest.TestCase):
         manifest = json.loads((output / "game-delivery.json").read_text(encoding="ascii"))
         package = manifest["base"]
         self.assertEqual(package["target_version"], TARGET)
-        self.assertEqual(package["transition"], "none")
+        self.assertEqual(manifest["schema_version"], 3)
+        self.assertNotIn("baseline_version", package)
+        self.assertNotIn("transition", package)
         self.assertEqual(package["staging_bytes"], 1024)
         self.assertEqual(len(package["archives"]), 1)
         archive_spec = package["archives"][0]
@@ -168,6 +165,15 @@ class PackageGameContentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("exceeds the selected archive size limit", result.stderr)
 
+    def test_object_key_layout_is_hash_then_archive_name(self) -> None:
+        output = self.root / "package"
+        result = self._run(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((output / "game-delivery.json").read_text(encoding="ascii"))
+        for index, archive in enumerate(manifest["base"]["archives"], 1):
+            item = archive["object"]
+            self.assertEqual(item["object_key"], f"game/{item['sha256']}/base-{index:04}.zip")
+
     def test_existing_output_is_preserved(self) -> None:
         output = self.root / "existing-output"
         output.mkdir()
@@ -177,7 +183,7 @@ class PackageGameContentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(sentinel.read_text(encoding="ascii"), "owner data")
 
-    def test_no_patch_transition_requires_unchanged_payload(self) -> None:
+    def test_final_payload_must_match_base_payload(self) -> None:
         changed = self.root / "changed-final"
         changed.mkdir()
         self._populate(changed, b"changed game")
@@ -185,7 +191,7 @@ class PackageGameContentTests(unittest.TestCase):
         (changed / "game.ver").write_text(TARGET, encoding="ascii")
         result = self._run(self.root / "package", final=changed)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("identical base and final payloads", result.stderr)
+        self.assertIn("Base and final payloads must be identical", result.stderr)
 
 
 if __name__ == "__main__":

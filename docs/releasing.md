@@ -209,7 +209,7 @@ Windows checks signed stable launcher metadata quietly at startup. Settings >
 Misc > Install Location offers **Check for Updates** for a manual check. When a
 new release is available, the same button becomes **Update Launcher**. That
 action downloads the verified package and applies it after gameplay, install,
-patch, repair, restore, launch, and backup operations are idle. The separate
+repair, restore, launch, and backup operations are idle. The separate
 helper process is included in the signed managed inventory and runs from staging
 on the same volume outside the portable directory. It applies managed files after
 normal launcher exit, keeps recoverable prior state, and restarts the updated
@@ -250,7 +250,7 @@ R2 URLs and checks exact length and SHA-256 before running them. The
 synthetic fixture can inspect package contents without a full build. It does
 not prove installer execution or game launch compatibility.
 
-Game archives and patch objects have a separate
+Game archives have a separate
 [game content delivery reference](content-delivery.md). A release with
 installation enabled needs pinned base metadata and live HTTPS range, full
 download, and fresh installation checks for its production host.

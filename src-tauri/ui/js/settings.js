@@ -242,7 +242,7 @@ async function hydrateSettings() {
     const gamePath = document.querySelector('#settings-game-path');
     gamePath.textContent = install.detected || 'No install selected';
     gamePath.title = install.detected || '';
-    const operationActive = Boolean(home.patchSnapshot?.is_running);
+    const operationActive = Boolean(home.installSnapshot?.is_running);
     document.querySelector('[data-settings-action="browse-game"]').disabled = operationActive;
     const monitorResultIsCurrent = monitorRevision === borderlessMonitorRevision;
     if (monitorResultIsCurrent) renderBorderlessMonitorSettings(monitorResult.view);
@@ -263,7 +263,7 @@ async function hydrateSettings() {
     }
   } catch (error) {
     if (revision !== settingsHydrationRevision) return;
-    document.querySelector('#settings-patch-status').textContent = error.message || String(error);
+    document.querySelector('#settings-misc-status').textContent = error.message || String(error);
   }
 }
 function renderServerSettings(serverSettings) {

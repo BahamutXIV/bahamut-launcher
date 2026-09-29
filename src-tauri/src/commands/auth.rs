@@ -7,9 +7,9 @@ use bahamut_launcher::config::dirs;
 use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::config::preferences::DisplayMode;
 use bahamut_launcher::config::retail_game;
+use bahamut_launcher::content;
 use bahamut_launcher::install_check::{self, InstallState};
 use bahamut_launcher::login::dev_token::parse_dev_token;
-use bahamut_launcher::patcher;
 use bahamut_launcher::platform;
 use bahamut_launcher::profiles::ServerProfile;
 use tauri::{Manager, State};
@@ -93,13 +93,13 @@ pub(crate) fn launch_game_inner(
         .map_err(|error| translate_client_error(error, AuthOp::Login))?;
     let game_dir = resolve_game_dir_for_preferences(&config.preferences)
         .ok_or_else(|| AuthError::bare("no-install"))?;
-    if game_dir.is_dir() && patcher::repair::recovery_pending(&game_dir) {
+    if game_dir.is_dir() && content::repair::recovery_pending(&game_dir) {
         return Err(AuthError::server(
             "Game repair recovery is required. Choose Repair Install in Settings before launching.",
         ));
     }
-    if !patcher::check_game_version(&game_dir) {
-        return Err(AuthError::bare("not-patched"));
+    if !content::check_game_version(&game_dir) {
+        return Err(AuthError::bare("outdated-client"));
     }
     let native_resolution = if config.preferences.launcher.native_resolution_override {
         let selected_resolution = selected_borderless_monitor_resolution(
@@ -206,7 +206,7 @@ pub(crate) async fn login(
 ) -> Result<LoginShellResponse, AuthError> {
     match install_check::check_install(resolve_game_dir().as_deref()).state {
         InstallState::NotFound => return Err(AuthError::bare("no-install")),
-        InstallState::FoundNeedsPatch { .. } => return Err(AuthError::bare("not-patched")),
+        InstallState::FoundOutdated { .. } => return Err(AuthError::bare("outdated-client")),
         InstallState::Ready => {}
     }
 

@@ -3,7 +3,7 @@ import { renderChoice, setNestedValue, queueGameSettingsUpdate, queueBorderlessM
 import { hydrateExtensions, renderExtensionLibrary } from './extensions.js';
 import { repairState, refreshGameRepairStatus, startGameRepair, controlGameRepair } from './game-repair.js';
 import { hydrateLauncherUpdates, handleLauncherUpdateAction, refreshLauncherUpdateAvailability, startBackgroundLauncherUpdateCheck } from './launcher-updates.js';
-import { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshPatchSnapshot, refreshHomeStatus, restoreSession, chooseInstallFolder, startInstall, startUpdate, launchGame, handleLifecycleAction, handleSettingsAction } from './home.js';
+import { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshInstallSnapshot, refreshHomeStatus, restoreSession, chooseInstallFolder, startInstall, launchGame, handleSettingsAction } from './home.js';
 
 let activePrimaryRoute = 'home';
 const PROFILE_SUCCESS_MS = 2500;
@@ -375,7 +375,6 @@ document.addEventListener('click', event => {
   if (action.dataset.action === 'close-profiles') activateRoute('home');
   if (action.dataset.action === 'open-gamepad') activateGamepadScreen();
   if (action.dataset.action === 'install-folder') chooseInstallFolder();
-  if (action.dataset.action === 'local-patch') handleLifecycleAction('local-patch');
   if (action.dataset.action === 'logout') {
     const token = home.token;
     const server = home.server;
@@ -486,17 +485,9 @@ document.querySelectorAll('[data-settings-tab]').forEach(tab => {
 
 document.querySelector('#home-primary').addEventListener('click', () => {
   if (!home.status) return;
-  if (home.status.state === 'no-valid-install') {
+  if (['no-valid-install', 'outdated-install'].includes(home.status.state)) {
     if (home.installDestination || home.status.default_game_dir) startInstall();
     else chooseInstallFolder();
-  }
-  if (home.status.state === 'patch-required') {
-    if (home.patchTerminal) handleLifecycleAction('retry');
-    else if (home.status.hosted_patches === false) {
-      if (home.installDestination || home.status.default_game_dir) startInstall();
-      else chooseInstallFolder();
-    }
-    else startUpdate();
   }
   if (home.status.state === 'ready') launchGame();
 });
@@ -506,7 +497,7 @@ document.querySelector('#lifecycle-cancel').addEventListener('click', async () =
     await controlGameRepair('cancel');
     renderLifecycleStrip();
   } else {
-    await invoke('cancel_patch').catch(() => {});
+    await invoke('cancel_install').catch(() => {});
   }
 });
 
@@ -517,11 +508,11 @@ document.querySelector('#lifecycle-pause').addEventListener('click', async event
       await controlGameRepair(resume ? 'resume' : 'pause');
       renderLifecycleStrip();
     } else {
-      await invoke(resume ? 'resume_patch' : 'pause_patch');
-      await refreshPatchSnapshot();
+      await invoke(resume ? 'resume_install' : 'pause_install');
+      await refreshInstallSnapshot();
     }
   } catch (error) {
-    const alert = document.querySelector('#patch-home-alert');
+    const alert = document.querySelector('#install-home-alert');
     if (alert) alert.textContent = error.message || String(error);
   }
 });
@@ -1279,7 +1270,7 @@ async function boot() {
 
 setInterval(() => {
   if (home.status) {
-    refreshPatchSnapshot();
+    refreshInstallSnapshot();
     void refreshGameRepairStatus().then(renderLifecycleStrip);
   }
   if (home.status && home.status.state === 'ready' && home.gameRunning) refreshGameStatus();

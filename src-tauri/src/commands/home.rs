@@ -1,6 +1,5 @@
 use bahamut_launcher::install_check::{self, InstallState};
 use bahamut_launcher::news::{self, NewsItem};
-use bahamut_launcher::patcher::content;
 use std::sync::Mutex;
 
 use crate::presentation::{
@@ -22,7 +21,7 @@ pub(crate) fn get_home_status_for(authenticated: bool) -> HomeStatusView {
     let state = resolve_home_lifecycle(&status.state, authenticated);
     let presentation = home_presentation(state);
     let game_version = match status.state {
-        InstallState::FoundNeedsPatch { game_version } => game_version,
+        InstallState::FoundOutdated { game_version } => game_version,
         InstallState::NotFound | InstallState::Ready => None,
     };
     let view = HomeStatusView {
@@ -35,7 +34,6 @@ pub(crate) fn get_home_status_for(authenticated: bool) -> HomeStatusView {
             .map(|path| path.to_string_lossy().into_owned()),
         default_game_dir: default_game_dir_hint().map(|path| path.to_string_lossy().into_owned()),
         game_version,
-        hosted_patches: content::hosted_patches().unwrap_or(false),
     };
     log_home_transition(&view);
     view
@@ -65,11 +63,11 @@ pub(crate) fn home_state_diagnostics(
             "missing",
             "select-install",
         ),
-        HomeLifecycleState::PatchRequired => (
-            "STATE_PATCH_REQUIRED",
-            "patch-required",
-            "needs-patch",
-            "update-client",
+        HomeLifecycleState::OutdatedInstall => (
+            "STATE_OUTDATED_INSTALL",
+            "outdated-install",
+            "outdated",
+            "install-fresh",
         ),
         HomeLifecycleState::LoggedOut => ("STATE_LOGGED_OUT", "account-login", "ready", "login"),
         HomeLifecycleState::Ready => ("STATE_READY", "ready", "ready", "launch"),

@@ -16,7 +16,7 @@ const stages = [
   ['install', 'Install'],
   ['installing', 'Installing'],
   ['downloading', 'Downloading'],
-  ['extracting', 'Installing Files'],
+  ['installing-files', 'Installing Files'],
   ['validating-files', 'Final Install Check'],
   ['paused', 'Paused'],
   ['cancelled', 'Install Cancelled'],
@@ -43,16 +43,16 @@ function fixtureSource() {
     (() => {
       const stage = new URLSearchParams(location.search).get('stage') || 'install';
       const labels = Object.fromEntries(${JSON.stringify(stages)});
-      const patchByStage = {
-        installing:{ phase:'starting', is_install:true, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null },
-        downloading:{ phase:'downloading', is_install:true, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, download_idx:0, previous_completed_bytes:0, bytes_downloaded:402653184, total_download_bytes:7770236904 },
-        extracting:{ phase:'installing', is_install:true, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, patch_idx:38500, total_patches:191958 },
-        'validating-files':{ phase:'validating-files', is_install:true, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, patch_idx:100000, total_patches:191960 },
-        paused:{ phase:'downloading', is_install:true, is_running:true, is_paused:true, pause_requested:false, is_terminal:false, previous_completed_bytes:0, bytes_downloaded:2542620639, total_download_bytes:7770236904 },
-        cancelled:{ phase:'cancelled', is_install:true, is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:null },
-        failed:{ phase:'error', is_install:true, is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:'The content host could not provide a required file.' },
+      const installByStage = {
+        installing:{ phase:'starting', is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null },
+        downloading:{ phase:'downloading', is_running:true, is_paused:false, pause_requested:false, is_terminal:false, download_idx:0, previous_completed_bytes:0, bytes_downloaded:402653184, total_download_bytes:7770236904 },
+        'installing-files':{ phase:'installing', is_running:true, is_paused:false, pause_requested:false, is_terminal:false, file_idx:38500, total_files:191958 },
+        'validating-files':{ phase:'validating-files', is_running:true, is_paused:false, pause_requested:false, is_terminal:false, file_idx:100000, total_files:191960 },
+        paused:{ phase:'downloading', is_running:true, is_paused:true, pause_requested:false, is_terminal:false, previous_completed_bytes:0, bytes_downloaded:2542620639, total_download_bytes:7770236904 },
+        cancelled:{ phase:'cancelled', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:null },
+        failed:{ phase:'error', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:'The content host could not provide a required file.' },
       };
-      const idlePatch = { phase:'idle', download_idx:0, patch_idx:0, total_patches:8, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:3650722202, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+      const idleInstall = { phase:'idle', download_idx:0, file_idx:0, total_files:0, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:0, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
       const serverSettings = {
         selected_server:'Bahamut',
         servers:[{ display_name:'Bahamut', host:'bahamut.stegall.me', auth_port:443, lobby_port:54994, use_https:true }]
@@ -76,12 +76,10 @@ function fixtureSource() {
             primary_action:state === 'no-valid-install' ? 'Install' : 'Play',
             game_dir:state === 'no-valid-install' ? null : 'C:/LegacyClient',
             default_game_dir:'C:/Games/FINAL FANTASY XIV',
-            game_version:null,
-            hosted_patches:false
+            game_version:null
           };
         }
-        if (command === 'patch_status') return structuredClone(patchByStage[stage] || idlePatch);
-        if (command === 'get_patch_settings') return { storage_dir:'C:/Users/Preview/Documents/BahamutXIV_Patches', storage_overridden:false };
+        if (command === 'install_status') return structuredClone(installByStage[stage] || idleInstall);
         if (command === 'get_borderless_monitors') return structuredClone(borderlessMonitors);
         if (command === 'set_borderless_monitor') {
           borderlessMonitors.selected = args.monitorId ?? null;

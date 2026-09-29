@@ -183,32 +183,27 @@ async function connectDevTools(port) {
 function evaluateScript() {
   return `(() => {
     const state = {
-      patchRequired: false,
+      outdatedInstall: false,
       noValidInstall: false,
-      hostedPatches: true,
       mode: 'success',
       loginGate: false,
       loginStarted: false,
       finishLogin: null,
       lastLoginRecipient: null,
       lastLoginResponseEndpoint: null,
-      patch: { phase: 'idle', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running: false, is_paused: false, pause_requested:false, is_terminal: false, error: null },
-      patchStartError: null,
-      patchStartDelayMs: 0,
+      install: { phase: 'idle', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running: false, is_paused: false, pause_requested:false, is_terminal: false, error: null },
       installQuote: { download_bytes:100, staging_bytes:200, destination_bytes:300, available_cache_bytes:1000, available_destination_bytes:2000 },
       installQuoteError: null,
       installStartError: null,
-      nextDirectory: 'C:/patch-source',
       nextInstallDir: 'C:/game',
       pickerSelectsFinal: false,
-      patchStatusDelayMs: 0,
+      installStatusDelayMs: 0,
       readyStatusDelayMs: 0,
       sessionValidation: 'invalid',
       gameRunning: false,
       gameStatusDelayMs: 0,
       launchDelayMs: 0,
       launchError: null,
-      patchSettings: { storage_dir: 'C:/patches', storage_overridden: true },
       launcherBehavior: { close_on_game_start: true, native_resolution_override: false },
       borderlessMonitors: {
         supported:true,
@@ -378,14 +373,14 @@ function evaluateScript() {
       if (command === 'get_home_status') {
         const authenticated = !!args.authenticated;
         if (authenticated && state.readyStatusDelayMs) await new Promise(resolve => setTimeout(resolve, state.readyStatusDelayMs));
-        const stateName = state.noValidInstall ? 'no-valid-install' : state.patchRequired ? 'patch-required' : authenticated ? 'ready' : 'logged-out';
+        const stateName = state.noValidInstall ? 'no-valid-install' : state.outdatedInstall ? 'outdated-install' : authenticated ? 'ready' : 'logged-out';
         const presentation = {
           ready: ['', 'Account Login', 'Play'],
-          'patch-required': ['', 'Account Login', 'Update'],
+          'outdated-install': ['', 'Account Login', 'Install'],
           'no-valid-install': ['', 'Account Login', 'Install'],
           'logged-out': ['', 'Account Login', 'Play'],
         }[stateName];
-        return { state: stateName, eyebrow: presentation[0], title: presentation[1], primary_action: presentation[2], game_dir: state.noValidInstall ? null : 'C:/game', default_game_dir:'C:/Games/FINAL FANTASY XIV', game_version: state.patchRequired ? 'old' : null, hosted_patches: state.hostedPatches };
+        return { state: stateName, eyebrow: presentation[0], title: presentation[1], primary_action: presentation[2], game_dir: state.noValidInstall ? null : 'C:/game', default_game_dir:'C:/Games/FINAL FANTASY XIV', game_version: state.outdatedInstall ? 'old' : null };
       }
       if (command === 'validate_session') return state.sessionValidation;
       if (command === 'game_status') {
@@ -429,18 +424,12 @@ function evaluateScript() {
         if (state.registerMode === 'server') throw { kind: 'server', message: 'internal detail' };
         return { ok: true };
       }
-      if (command === 'patch_status') {
-        const snapshot = structuredClone(state.patch);
-        if (state.patchStatusDelayMs) await new Promise(resolve => setTimeout(resolve, state.patchStatusDelayMs));
+      if (command === 'install_status') {
+        const snapshot = structuredClone(state.install);
+        if (state.installStatusDelayMs) await new Promise(resolve => setTimeout(resolve, state.installStatusDelayMs));
         return snapshot;
       }
-      if (command === 'reset_patch') { state.patch = { phase:'idle', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null }; return null; }
-      if (['start_patch_download', 'start_local_patch'].includes(command)) {
-        if (state.patchStartDelayMs) await new Promise(resolve => setTimeout(resolve, state.patchStartDelayMs));
-        if (state.patchStartError) throw new Error(state.patchStartError);
-        state.patch = { ...state.patch, phase:'starting', is_install:false, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
-        return null;
-      }
+      if (command === 'reset_install') { state.install = { phase:'idle', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null }; return null; }
       if (command === 'install_quote') {
         if (state.installQuoteError) throw new Error(state.installQuoteError);
         return structuredClone(state.installQuote);
@@ -448,22 +437,21 @@ function evaluateScript() {
       if (command === 'install_game') {
         if (state.installStartError) throw new Error(state.installStartError);
         state.installDestination = args.destination;
-        state.patch = { ...state.patch, phase:'starting', is_install:true, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+        state.install = { ...state.install, phase:'starting', is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
         return null;
       }
-      if (command === 'cancel_patch' && state.patch.is_running) state.patch = { ...state.patch, phase:'cancelled', is_running:false, is_terminal:true, pause_requested:false };
-      if (command === 'pause_patch' && state.patch.is_running) state.patch.pause_requested = true;
-      if (command === 'resume_patch' && state.patch.is_running) { state.patch.pause_requested = false; state.patch.is_paused = false; }
+      if (command === 'cancel_install' && state.install.is_running) state.install = { ...state.install, phase:'cancelled', is_running:false, is_terminal:true, pause_requested:false };
+      if (command === 'pause_install' && state.install.is_running) state.install.pause_requested = true;
+      if (command === 'resume_install' && state.install.is_running) { state.install.pause_requested = false; state.install.is_paused = false; }
       if (command === 'pick_directory') return state.nextDirectory;
       if (command === 'pick_install_dir') {
         if (state.nextInstallDir && state.pickerSelectsFinal) {
-          state.patchRequired = false;
+          state.outdatedInstall = false;
           state.noValidInstall = false;
         }
         return state.nextInstallDir;
       }
       if (command === 'detect_game_install_command') return { detected: state.installPath || 'C:/game', source: 'preferences' };
-      if (command === 'get_patch_settings') return { ...state.patchSettings };
       if (command === 'config_tool_supported') return true;
       if (command === 'get_launcher_behavior') return { ...state.launcherBehavior };
       if (command === 'get_borderless_monitors') return structuredClone(state.borderlessMonitors);
@@ -709,9 +697,9 @@ async function exposeFrontendModules(devtools) {
       queueLauncherBehaviorUpdate:settings.queueLauncherBehaviorUpdate,
       hydrateSettings:settings.hydrateSettings,
       refreshHomeStatus:homeModule.refreshHomeStatus,
-      refreshPatchSnapshot:homeModule.refreshPatchSnapshot,
+      refreshInstallSnapshot:homeModule.refreshInstallSnapshot,
       refreshGameStatus:homeModule.refreshGameStatus,
-      resetPatchStatus:homeModule.resetPatchStatus,
+      resetInstallStatus:homeModule.resetInstallStatus,
       chooseInstallFolder:homeModule.chooseInstallFolder,
       startInstall:homeModule.startInstall,
       hydrateExtensions:extensions.hydrateExtensions,
@@ -722,7 +710,6 @@ async function exposeFrontendModules(devtools) {
       refreshGameRepairStatus:gameRepair.refreshGameRepairStatus,
       startGameRepair:gameRepair.startGameRepair,
       controlGameRepair:gameRepair.controlGameRepair,
-      startUpdate:homeModule.startUpdate,
       restoreSession:homeModule.restoreSession,
       activateSettingsTab:main.activateSettingsTab,
       focusAdjacentRegion:main.focusAdjacentRegion,
@@ -738,7 +725,7 @@ async function exposeFrontendModules(devtools) {
   })()`);
 }
 
-test('home_auth_and_terminal_patch_states', async t => {
+test('home_auth_and_terminal_install_states', async t => {
   const server = createServer(serveUiFixture);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const httpPort = server.address().port;
@@ -988,7 +975,7 @@ test('home_auth_and_terminal_patch_states', async t => {
   await assertUi(`
     const state = window.__launcherBrowserState;
     state.noValidInstall = true;
-    state.patchRequired = false;
+    state.outdatedInstall = false;
     localStorage.removeItem('bahamut-install-destination');
     window.__launcherHome.installDestination = '';
     window.__launcherHome.installError = '';
@@ -1014,15 +1001,15 @@ test('home_auth_and_terminal_patch_states', async t => {
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 40));
     if (document.querySelector('#install-quote-dialog')) throw new Error('install confirmation dialog was not removed');
-    if (!state.calls.some(call => call.command === 'install_quote' && call.args.destination === 'C:/new-game') || !state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/new-game') || !window.__launcherHome.patchSnapshot.is_running || !document.querySelector('#home-primary').disabled || document.querySelector('#lifecycle-title').textContent !== 'Game Installation' || document.querySelector('#lifecycle-pause').hidden || state.calls.some(call => call.command === 'set_game_dir')) throw new Error('install did not start after inline preflight or its operation was hidden');
-    state.patch = { phase:'downloading', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:15, previous_completed_bytes:25, total_download_bytes:100, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
-    await window.refreshPatchSnapshot();
+    if (!state.calls.some(call => call.command === 'install_quote' && call.args.destination === 'C:/new-game') || !state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/new-game') || !window.__launcherHome.installSnapshot.is_running || !document.querySelector('#home-primary').disabled || document.querySelector('#lifecycle-title').textContent !== 'Game Installation' || document.querySelector('#lifecycle-pause').hidden || state.calls.some(call => call.command === 'set_game_dir')) throw new Error('install did not start after inline preflight or its operation was hidden');
+    state.install = { phase:'downloading', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:15, previous_completed_bytes:25, total_download_bytes:100, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+    await window.refreshInstallSnapshot();
     if (document.querySelector('#lifecycle-copy').textContent !== 'Downloading game files.' || document.querySelector('#lifecycle-metric').textContent !== '40 B / 100 B' || document.querySelector('#home-layout').dataset.operationActive !== 'true') throw new Error('install download progress did not use real byte counters');
     const activeInstallStrip = document.querySelector('#lifecycle-strip').getBoundingClientRect();
     if (Math.abs(activeInstallStrip.height - idleInstallStrip.height) >= .1 || Math.abs(activeInstallStrip.top - idleInstallStrip.top) >= .1) throw new Error('install strip moved or resized when download started');
-    state.patch = { ...state.patch, phase:'extracting', patch_idx:2 };
-    await window.refreshPatchSnapshot();
-    if (document.querySelector('#lifecycle-metric').textContent !== 'File 3 of 4' || document.querySelector('#lifecycle-progress-text').textContent !== '50%') throw new Error('install extraction did not show file progress');
+    state.install = { ...state.install, phase:'installing', file_idx:2 };
+    await window.refreshInstallSnapshot();
+    if (document.querySelector('#lifecycle-metric').textContent !== 'File 3 of 4' || document.querySelector('#lifecycle-progress-text').textContent !== '50%') throw new Error('install did not show file progress');
     const strip = document.querySelector('#lifecycle-strip');
     const actions = document.querySelector('#lifecycle-actions');
     const track = document.querySelector('#lifecycle-progress .progress-track');
@@ -1033,17 +1020,17 @@ test('home_auth_and_terminal_patch_states', async t => {
     percent.textContent = '100%';
     const atHundred = layout();
     if (atZero.some((value, index) => Math.abs(value - atHundred[index]) > .1)) throw new Error('progress percentage shifted the install strip or controls');
-    state.patch = { ...state.patch, phase:'validating-files', patch_idx:2 };
-    await window.refreshPatchSnapshot();
+    state.install = { ...state.install, phase:'validating-files', file_idx:2 };
+    await window.refreshInstallSnapshot();
     if (document.querySelector('#lifecycle-copy').textContent !== 'Checking the installed client before finishing.') throw new Error('final install check was labeled as repair');
     document.querySelector('#lifecycle-cancel').click();
-    await window.refreshPatchSnapshot();
+    await window.refreshInstallSnapshot();
     if (document.querySelector('#lifecycle-strip').dataset.mode !== 'location' || !document.querySelector('#lifecycle-location-help').textContent.includes('installation was cancelled') || document.querySelector('#lifecycle-path-action').textContent !== 'PATH') throw new Error('cancel did not leave actionable installation recovery');
     const recoveryInstallStrip = document.querySelector('#lifecycle-strip').getBoundingClientRect();
     if (Math.abs(recoveryInstallStrip.height - idleInstallStrip.height) >= .1 || Math.abs(recoveryInstallStrip.top - idleInstallStrip.top) >= .1) throw new Error('install strip moved or resized during recovery');
     const recoveredDestination = localStorage.getItem('bahamut-install-destination');
     window.__launcherHome.installDestination = '';
-    window.__launcherHome.patchSnapshot = { phase:'idle', is_running:false, is_paused:false, pause_requested:false, is_terminal:false };
+    window.__launcherHome.installSnapshot = { phase:'idle', is_running:false, is_paused:false, pause_requested:false, is_terminal:false };
     window.__launcherHome.installDestination = localStorage.getItem('bahamut-install-destination') || '';
     await window.refreshHomeStatus();
     if (recoveredDestination !== 'C:/new-game' || window.__launcherHome.installDestination !== 'C:/new-game' || document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('reopening the launcher did not recover the saved destination hint');
@@ -1065,14 +1052,14 @@ test('home_auth_and_terminal_patch_states', async t => {
     await new Promise(resolve => setTimeout(resolve, 40));
     if (state.calls.filter(call => call.command === 'install_game').length !== 3 || !state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/alternate-game')) throw new Error('new destination was not used for the recovered install');
     state.noValidInstall = false;
-    state.patch = { ...state.patch, phase:'done', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:null };
-    await window.refreshPatchSnapshot();
+    state.install = { ...state.install, phase:'done', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:null };
+    await window.refreshInstallSnapshot();
     if (localStorage.getItem('bahamut-install-destination') || document.querySelector('#home-layout').dataset.lifecycle !== 'logged-out') throw new Error('successful installation did not select the client and clear its recovery hint');
   `);
 
   await assertUi(`
     const state = window.__launcherBrowserState;
-    state.patchRequired = false;
+    state.outdatedInstall = false;
     state.calls.length = 0;
     await window.refreshHomeStatus();
     state.mode = 'invalid';
@@ -1236,139 +1223,116 @@ test('home_auth_and_terminal_patch_states', async t => {
     const state = window.__launcherBrowserState;
     await window.restoreSession();
     await new Promise(resolve => setTimeout(resolve, 50));
-    state.patchRequired = true;
-    state.patch = { phase:'idle', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+    state.outdatedInstall = true;
+    state.install = { phase:'idle', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
     await window.refreshHomeStatus();
-    if (!document.querySelector('#login-form') || !document.querySelector('#login-submit').disabled) throw new Error('patch-required state replaced or enabled the Account Login card');
-    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'location' || document.querySelector('#lifecycle-location-title').textContent !== 'Client Update' || document.querySelector('#lifecycle-location-path').textContent !== 'C:/patches') throw new Error('idle update strip did not use the path-picker composition');
-    if (document.querySelector('#lifecycle-location-help').textContent !== 'Download verified patches, or apply files from your selected patch folder.') throw new Error('Client Update helper copy drifted');
+    if (!document.querySelector('#login-form') || !document.querySelector('#login-submit').disabled) throw new Error('outdated-install state replaced or enabled the Account Login card');
+    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'location' || document.querySelector('#lifecycle-location-title').textContent !== 'Install Game' || document.querySelector('#lifecycle-location-path').textContent !== 'C:/Games/FINAL FANTASY XIV' || document.querySelector('#lifecycle-path-action').textContent !== 'PATH') throw new Error('outdated-install strip did not use the install path-picker composition');
+    if (document.querySelector('#lifecycle-location-help').textContent !== 'The selected game folder is not the final 1.23b client. Install the game into a new folder.') throw new Error('outdated-install helper copy drifted');
     const locationStripRect = document.querySelector('#lifecycle-strip').getBoundingClientRect();
     const locationHelpRect = document.querySelector('#lifecycle-location-help').getBoundingClientRect();
     const locationPickerRect = document.querySelector('.lifecycle-path-picker').getBoundingClientRect();
-    if (locationHelpRect.bottom >= locationPickerRect.top || locationPickerRect.bottom > locationStripRect.bottom - 19) throw new Error('Client Update help overflowed the fixed location strip');
-    if (Math.abs(locationPickerRect.top - locationStripRect.top - state.locationPickerOffset) >= .1) throw new Error('Client Update shifted the Path row below the Install Location position');
-    if (Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().height - 137) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('idle update strip is not bottom-pinned independently of Recent News');
-    const updateAction = document.querySelector('#home-primary');
-    if (updateAction.textContent !== 'Update' || updateAction.disabled) throw new Error('idle patch action is not the stable Update button');
-    state.patchStartDelayMs = 60;
+    if (locationHelpRect.bottom >= locationPickerRect.top || locationPickerRect.bottom > locationStripRect.bottom - 19) throw new Error('outdated-install help overflowed the fixed location strip');
+    if (Math.abs(locationPickerRect.top - locationStripRect.top - state.locationPickerOffset) >= .1) throw new Error('outdated-install shifted the Path row below the Install Location position');
+    if (Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().height - 137) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('outdated-install strip is not bottom-pinned independently of Recent News');
+    const installAction = document.querySelector('#home-primary');
+    if (installAction.textContent !== 'Install' || installAction.disabled) throw new Error('outdated-install action is not the stable Install button');
     state.calls.length = 0;
-    updateAction.click();
-    updateAction.dispatchEvent(new MouseEvent('click', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 60));
-    updateAction.click();
-    if (!updateAction.disabled || updateAction.textContent !== 'Update' || state.calls.filter(call => call.command === 'start_patch_download').length !== 1) throw new Error('pending Update did not fence a delayed double click');
-    await new Promise(resolve => setTimeout(resolve, 100));
-    if (!updateAction.disabled || state.calls.filter(call => call.command === 'start_patch_download').length !== 1) throw new Error('Update request released its fence before rendering active state');
-    state.patchStartDelayMs = 0;
-    if (!state.patch.is_running || !updateAction.disabled) throw new Error('accepted update was not retained as an active operation');
-    state.patch = { phase:'idle', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+    installAction.click();
+    installAction.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    installAction.click();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    if (state.calls.filter(call => call.command === 'install_game').length !== 1) throw new Error('pending Install did not fence a synchronous double click');
+    if (!state.install.is_running || !installAction.disabled) throw new Error('accepted install was not retained as an active operation');
+    state.install = { phase:'idle', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
     await window.refreshHomeStatus();
-    if (updateAction.disabled) throw new Error('idle Update action remained disabled after the fixture operation ended');
-    state.calls.length = 0;
-    document.querySelector('#lifecycle-path-action').click();
-    await new Promise(resolve => setTimeout(resolve, 50));
-    if (!state.calls.some(call => call.command === 'start_local_patch')) throw new Error('Use Local Files did not start the local patch flow');
-    if (document.querySelector('#lifecycle-title').textContent !== 'Client Update' || document.querySelector('#lifecycle-cancel').hidden) throw new Error('local patch work did not use the shared operation status');
-    state.patch = { ...state.patch, phase:'cancelled', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:null };
-    await window.refreshPatchSnapshot();
-    state.calls.length = 0;
-    updateAction.click();
-    await new Promise(resolve => setTimeout(resolve, 50));
-    if (!state.calls.some(call => call.command === 'reset_patch') || !state.calls.some(call => call.command === 'start_local_patch') || state.calls.some(call => call.command === 'start_patch_download')) throw new Error('Retry after local patch cancellation changed the selected source');
-    state.patch = { phase:'idle', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:0, previous_completed_bytes:0, total_download_bytes:100, is_running:false, is_paused:false, pause_requested:false, is_terminal:false, error:null };
-    await window.refreshHomeStatus();
+    if (installAction.disabled) throw new Error('idle Install action remained disabled after the fixture operation ended');
     const accountHeight = document.querySelector('#session-card').getBoundingClientRect().height;
-    const patchStartError = 'The content host rejected the patch request.';
-    state.patchStartError = patchStartError;
+    const installStartError = 'The installer could not start.';
+    state.installStartError = installStartError;
     state.calls.length = 0;
-    updateAction.click();
+    installAction.click();
     await new Promise(resolve => setTimeout(resolve, 40));
     const errorStrip = document.querySelector('#lifecycle-strip');
-    const errorDetail = document.querySelector('#lifecycle-detail');
-    if (errorStrip.dataset.mode !== 'error' || !errorDetail.textContent.includes(patchStartError) || Math.abs(errorStrip.getBoundingClientRect().height - 137) >= .1) throw new Error('patch acquisition failure did not show its backend reason in the fixed recovery strip');
-    await window.refreshPatchSnapshot();
+    if (errorStrip.dataset.mode !== 'location' || document.querySelector('#lifecycle-location-help').textContent !== installStartError || Math.abs(errorStrip.getBoundingClientRect().height - 137) >= .1) throw new Error('install start failure did not show its backend reason in the fixed location strip');
+    await window.refreshInstallSnapshot();
     await window.refreshHomeStatus();
-    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'error' || !document.querySelector('#lifecycle-detail').textContent.includes(patchStartError)) throw new Error('IPC start failure disappeared when idle patch status was polled');
-    if (Math.abs(document.querySelector('#session-card').getBoundingClientRect().height - accountHeight) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(errorStrip.getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('patch error changed Home card geometry');
-    if (document.querySelector('#home-primary').textContent !== 'Retry' || document.querySelector('#home-primary').disabled) throw new Error('patch failure did not expose primary Retry');
-    state.patchStartError = null;
+    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'location' || document.querySelector('#lifecycle-location-help').textContent !== installStartError) throw new Error('IPC start failure disappeared when idle install status was polled');
+    if (Math.abs(document.querySelector('#session-card').getBoundingClientRect().height - accountHeight) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(errorStrip.getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('install error changed Home card geometry');
+    if (document.querySelector('#home-primary').textContent !== 'Install' || document.querySelector('#home-primary').disabled) throw new Error('install start failure did not keep the primary Install action');
+    state.installStartError = null;
     state.calls.length = 0;
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.calls.some(call => call.command === 'reset_patch') || !state.calls.some(call => call.command === 'start_patch_download') || state.patch.is_terminal) throw new Error('Retry did not reset the terminal run and start a new download');
-    state.patch = { phase:'downloading', download_idx:0, patch_idx:0, total_patches:4, bytes_downloaded:40, previous_completed_bytes:0, total_download_bytes:100, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
+    if (!state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/Games/FINAL FANTASY XIV') || state.calls.some(call => call.command === 'reset_install') || !state.install.is_running) throw new Error('Install did not start a new run after a start failure');
+    state.install = { phase:'downloading', download_idx:0, file_idx:0, total_files:4, bytes_downloaded:40, previous_completed_bytes:0, total_download_bytes:100, is_running:true, is_paused:false, pause_requested:false, is_terminal:false, error:null };
     await window.refreshHomeStatus();
-    if (document.querySelector('#lifecycle-pause').textContent !== 'Pause' || document.querySelector('#lifecycle-pause').hidden || document.querySelector('#lifecycle-cancel').hidden || updateAction.textContent !== 'Update' || !updateAction.disabled || document.querySelector('#lifecycle-metric').textContent !== '40 B / 100 B') throw new Error('active update controls or real download progress drifted');
-    if (Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().height - 137) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('active update strip is not bottom-pinned independently of Recent News');
+    if (document.querySelector('#lifecycle-pause').textContent !== 'Pause' || document.querySelector('#lifecycle-pause').hidden || document.querySelector('#lifecycle-cancel').hidden || installAction.textContent !== 'Installing...' || !installAction.disabled || document.querySelector('#lifecycle-metric').textContent !== '40 B / 100 B') throw new Error('active install controls or real download progress drifted');
+    if (Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().height - 137) >= .1 || Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('active install strip is not bottom-pinned independently of Recent News');
     document.querySelector('#lifecycle-pause').click();
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (document.querySelector('#lifecycle-pause').textContent !== 'Resume' || !state.calls.some(call => call.command === 'pause_patch') || updateAction.textContent !== 'Update' || document.querySelector('#lifecycle-copy').textContent !== 'Pausing after the current step.') throw new Error('a requested pause was reported as acknowledged');
-    state.patch.is_paused = true;
+    if (document.querySelector('#lifecycle-pause').textContent !== 'Resume' || !state.calls.some(call => call.command === 'pause_install') || document.querySelector('#lifecycle-copy').textContent !== 'Pausing after the current step.') throw new Error('a requested pause was reported as acknowledged');
+    state.install.is_paused = true;
     state.calls.length = 0;
     await window.refreshHomeStatus();
-    if (document.querySelector('#lifecycle-copy').textContent !== 'Update paused.') throw new Error('update pause acknowledgement was not displayed');
+    if (document.querySelector('#lifecycle-copy').textContent !== 'Installation paused.') throw new Error('install pause acknowledgement was not displayed');
     document.querySelector('#lifecycle-pause').click();
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (state.patch.pause_requested || state.patch.is_paused || document.querySelector('#lifecycle-pause').textContent !== 'Pause') throw new Error('Resume did not clear patch pause state');
-    state.patch = { ...state.patch, phase:'extracting', is_paused:false, pause_requested:false, patch_idx:2 };
-    await window.refreshPatchSnapshot();
-    if (document.querySelector('#lifecycle-metric').textContent !== 'File 3 of 4') throw new Error('patch extraction did not show file progress');
-    state.patchStartError = null;
-    state.patchStatusDelayMs = 80;
+    if (!state.calls.some(call => call.command === 'resume_install') || state.install.pause_requested || state.install.is_paused || document.querySelector('#lifecycle-pause').textContent !== 'Pause') throw new Error('Resume did not clear install pause state');
+    state.install = { ...state.install, phase:'installing', is_paused:false, pause_requested:false, file_idx:2 };
+    await window.refreshInstallSnapshot();
+    if (document.querySelector('#lifecycle-metric').textContent !== 'File 3 of 4') throw new Error('install did not show file progress');
+    state.installStatusDelayMs = 80;
     state.calls.length = 0;
-    const stalePatchRefresh = window.refreshPatchSnapshot();
+    const staleInstallRefresh = window.refreshInstallSnapshot();
     await new Promise(resolve => setTimeout(resolve, 10));
-    state.patchStatusDelayMs = 0;
-    state.patch = { ...state.patch, phase:'error', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:'fixture patch failure' };
-    await window.refreshPatchSnapshot();
+    state.installStatusDelayMs = 0;
+    state.install = { ...state.install, phase:'error', is_running:false, is_paused:false, pause_requested:false, is_terminal:true, error:'fixture install failure' };
+    await window.refreshInstallSnapshot();
     await new Promise(resolve => setTimeout(resolve, 30));
-    await stalePatchRefresh;
-    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'error' || !document.querySelector('#lifecycle-detail').textContent.includes('fixture patch failure') || updateAction.textContent !== 'Retry' || updateAction.disabled) throw new Error('stale patch status replaced the newest terminal recovery');
+    await staleInstallRefresh;
+    if (document.querySelector('#lifecycle-strip').dataset.mode !== 'location' || document.querySelector('#lifecycle-location-title').textContent !== 'Install Failed' || document.querySelector('#lifecycle-location-help').textContent !== 'fixture install failure' || installAction.textContent !== 'Retry Install' || installAction.disabled) throw new Error('stale install status replaced the newest terminal recovery');
     if (document.querySelector('.news-panel').getBoundingClientRect().height > state.newsPanelHeight + .1) throw new Error('Recent News grew when the lifecycle strip appeared');
     if (Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().height - 137) >= .1) throw new Error('terminal recovery strip is not 137px tall');
-    if (document.querySelector('#home-primary').textContent !== 'Retry' || document.querySelector('#home-primary').disabled) throw new Error('terminal recovery did not move Retry to the primary action');
-    if (!document.querySelector('#lifecycle-actions').hidden || !document.querySelector('#lifecycle-cancel').hidden || !document.querySelector('#lifecycle-pause').hidden) throw new Error('terminal recovery retained update controls');
-    if (!document.querySelector('#lifecycle-detail').textContent.includes('Press Retry to try again.')) throw new Error('terminal recovery guidance drifted');
+    if (document.querySelector('#home-primary').textContent !== 'Retry Install' || document.querySelector('#home-primary').disabled) throw new Error('terminal recovery did not move Retry Install to the primary action');
+    if (!document.querySelector('#lifecycle-actions').hidden || !document.querySelector('#lifecycle-cancel').hidden || !document.querySelector('#lifecycle-pause').hidden) throw new Error('terminal recovery retained install controls');
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.calls.some(call => call.command === 'reset_patch') || !state.calls.some(call => call.command === 'start_patch_download') || state.patch.is_terminal) throw new Error('terminal Retry did not restart the shared update operation');
+    if (!state.calls.some(call => call.command === 'install_game') || state.calls.some(call => call.command === 'reset_install') || state.install.is_terminal) throw new Error('terminal Retry Install did not start a new install run');
     document.querySelector('#lifecycle-cancel').click();
-    await window.refreshPatchSnapshot();
-    if (document.querySelector('#lifecycle-title').textContent !== 'Update Cancelled' || !document.querySelector('#lifecycle-detail').textContent.includes('The operation was cancelled.')) throw new Error('cancel did not render terminal update recovery');
+    await window.refreshInstallSnapshot();
+    if (document.querySelector('#lifecycle-location-title').textContent !== 'Install Cancelled' || !document.querySelector('#lifecycle-location-help').textContent.includes('installation was cancelled') || document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('cancel did not render terminal install recovery');
   `);
 
   await assertUi(`
     const state = window.__launcherBrowserState;
-    window.resetPatchStatus();
-    state.patch = { phase:'cancelled', is_running:false, is_paused:false, is_terminal:true, error:null };
+    window.resetInstallStatus();
+    state.install = { phase:'cancelled', is_running:false, is_paused:false, is_terminal:true, error:null };
     await window.refreshHomeStatus();
-    if (document.querySelector('#lifecycle-title').textContent !== 'Update Cancelled' || !document.querySelector('#lifecycle-detail').textContent.includes('The operation was cancelled.') || !document.querySelector('#lifecycle-detail').textContent.includes('Press Retry to try again.')) throw new Error('cancelled patch state was not rendered');
+    if (document.querySelector('#lifecycle-location-title').textContent !== 'Install Cancelled' || document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('cancelled install state was not rendered');
   `);
 
   await assertUi(`
     const state = window.__launcherBrowserState;
-    state.hostedPatches = false;
-    state.patchRequired = true;
+    state.outdatedInstall = true;
     state.noValidInstall = false;
-    state.patch = { phase:'idle', is_install:false, is_running:false, is_paused:false, is_terminal:false, error:null };
+    state.install = { phase:'idle', is_running:false, is_paused:false, is_terminal:false, error:null };
     window.__launcherHome.installDestination = '';
+    window.__launcherHome.installError = '';
     await window.refreshHomeStatus();
-    if (document.querySelector('#home-primary').textContent !== 'Install Fresh' || document.querySelector('#lifecycle-location-title').textContent !== 'Install Game' || document.querySelector('#lifecycle-path-action').textContent !== 'PATH' || document.querySelector('#lifecycle-location-help').textContent !== 'Install the client. Change the destination with PATH.' || document.querySelector('#lifecycle-location').textContent.includes('Use Local Files')) throw new Error('older client still exposed a patch install strip');
+    if (document.querySelector('#home-primary').textContent !== 'Install' || document.querySelector('#lifecycle-location-title').textContent !== 'Install Game' || document.querySelector('#lifecycle-path-action').textContent !== 'PATH' || document.querySelector('#lifecycle-location-help').textContent !== 'The selected game folder is not the final 1.23b client. Install the game into a new folder.') throw new Error('outdated install did not show the fresh-install strip');
     state.calls.length = 0;
-    await window.startUpdate(false, false);
-    if (state.calls.some(call => call.command === 'start_patch_download')) throw new Error('unhosted deployment requested absent patch objects');
     state.nextDirectory = 'C:/fresh-final';
     await window.chooseInstallFolder();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (document.querySelector('#lifecycle-location-path').textContent !== 'C:/fresh-final' || state.calls.some(call => call.command === 'install_quote' || call.command === 'install_game')) throw new Error('older client PATH did not select an idle destination');
+    if (document.querySelector('#lifecycle-location-path').textContent !== 'C:/fresh-final' || state.calls.some(call => call.command === 'install_quote' || call.command === 'install_game')) throw new Error('outdated-install PATH did not select an idle destination');
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/fresh-final') || document.querySelector('#lifecycle-title').textContent !== 'Game Installation') throw new Error('older-client fresh install was not identified as install work');
+    if (!state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/fresh-final') || document.querySelector('#lifecycle-title').textContent !== 'Game Installation') throw new Error('outdated-install fresh install was not identified as install work');
     document.querySelector('#lifecycle-cancel').click();
-    await window.refreshPatchSnapshot();
-    if (document.querySelector('#lifecycle-location-title').textContent !== 'Install Cancelled' || document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('older-client install recovery lost the install source');
-    state.hostedPatches = true;
-    state.patch = { phase:'idle', is_install:false, is_running:false, is_terminal:false, error:null };
+    await window.refreshInstallSnapshot();
+    if (document.querySelector('#lifecycle-location-title').textContent !== 'Install Cancelled' || document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('outdated-install recovery lost the install source');
+    state.install = { phase:'idle', is_running:false, is_terminal:false, error:null };
   `);
 
   await assertUi(`
@@ -1376,25 +1340,24 @@ test('home_auth_and_terminal_patch_states', async t => {
     const home = window.__launcherHome;
     home.token = '';
     home.installDestination = 'C:/fresh-final';
-    state.hostedPatches = false;
-    state.patchRequired = true;
-    state.patch = { phase:'error', is_install:true, is_running:false, is_terminal:true, error:'fixture install failure' };
+    state.outdatedInstall = true;
+    state.install = { phase:'error', is_running:false, is_terminal:true, error:'fixture install failure' };
     await window.refreshHomeStatus();
-    if (document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('older-client failure did not offer Retry Install');
+    if (document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('outdated-install failure did not offer Retry Install');
     document.querySelector('[data-route="settings"]').click();
     document.querySelector('[data-settings-tab="misc"]').click();
     state.nextInstallDir = null;
     state.calls.length = 0;
     document.querySelector('[data-settings-action="browse-game"]').click();
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (state.calls.some(call => call.command === 'reset_patch') || home.installDestination !== 'C:/fresh-final' || !state.patch.is_terminal) throw new Error('cancelled install picker discarded the original retry');
+    if (state.calls.some(call => call.command === 'reset_install') || home.installDestination !== 'C:/fresh-final' || !state.install.is_terminal) throw new Error('cancelled install picker discarded the original retry');
     document.querySelector('[data-route="home"]').click();
     state.calls.length = 0;
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 50));
     if (!state.calls.some(call => call.command === 'install_game' && call.args.destination === 'C:/fresh-final')) throw new Error('Retry Install changed the original destination');
-    state.patch = { ...state.patch, phase:'cancelled', is_running:false, is_terminal:true, error:null };
-    await window.refreshPatchSnapshot();
+    state.install = { ...state.install, phase:'cancelled', is_running:false, is_terminal:true, error:null };
+    await window.refreshInstallSnapshot();
     state.nextInstallDir = 'C:/game';
     state.pickerSelectsFinal = true;
     state.calls.length = 0;
@@ -1403,7 +1366,7 @@ test('home_auth_and_terminal_patch_states', async t => {
     document.querySelector('[data-settings-action="browse-game"]').click();
     await new Promise(resolve => setTimeout(resolve, 50));
     document.querySelector('[data-route="home"]').click();
-    if (!state.calls.some(call => call.command === 'reset_patch') || state.patch.is_terminal || home.installDestination || home.installError || localStorage.getItem('bahamut-install-destination')) throw new Error('valid final client selection did not clear finished install recovery');
+    if (!state.calls.some(call => call.command === 'reset_install') || state.install.is_terminal || home.installDestination || home.installError || localStorage.getItem('bahamut-install-destination')) throw new Error('valid final client selection did not clear finished install recovery');
     if (document.querySelector('#home-layout').dataset.lifecycle !== 'logged-out' || document.querySelector('#home-primary').textContent !== 'Play' || !document.querySelector('#home-primary').disabled || !document.querySelector('#login-submit') || document.querySelector('#lifecycle-strip').dataset.recovery !== 'false') throw new Error('logged-out final client selection retained Retry Install or bypassed login');
     state.calls.length = 0;
     document.querySelector('#home-primary').click();
@@ -1411,25 +1374,24 @@ test('home_auth_and_terminal_patch_states', async t => {
 
     home.token = 'fixture-session';
     home.username = 'Fixture';
-    state.patchRequired = true;
-    state.patch = { phase:'error', is_install:true, is_running:false, is_terminal:true, error:'fixture install failure' };
+    state.outdatedInstall = true;
+    state.install = { phase:'error', is_running:false, is_terminal:true, error:'fixture install failure' };
     await window.refreshHomeStatus();
-    if (document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('authenticated older-client failure did not offer Retry Install');
+    if (document.querySelector('#home-primary').textContent !== 'Retry Install') throw new Error('authenticated outdated-install failure did not offer Retry Install');
     state.calls.length = 0;
     document.querySelector('[data-route="settings"]').click();
     document.querySelector('[data-settings-tab="misc"]').click();
     document.querySelector('[data-settings-action="browse-game"]').click();
     await new Promise(resolve => setTimeout(resolve, 50));
     document.querySelector('[data-route="home"]').click();
-    if (!state.calls.some(call => call.command === 'reset_patch') || document.querySelector('#home-layout').dataset.lifecycle !== 'ready' || document.querySelector('#home-primary').textContent !== 'Play' || document.querySelector('#home-primary').disabled || document.querySelector('#lifecycle-strip').dataset.recovery !== 'false') throw new Error('authenticated selection retained install recovery');
+    if (!state.calls.some(call => call.command === 'reset_install') || document.querySelector('#home-layout').dataset.lifecycle !== 'ready' || document.querySelector('#home-primary').textContent !== 'Play' || document.querySelector('#home-primary').disabled || document.querySelector('#lifecycle-strip').dataset.recovery !== 'false') throw new Error('authenticated selection retained install recovery');
     state.calls.length = 0;
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 30));
     if (!state.calls.some(call => call.command === 'launch_game') || state.calls.some(call => call.command === 'install_game')) throw new Error('authenticated final client did not use Play');
     home.token = '';
     state.gameRunning = false;
-    state.patchRequired = false;
-    state.hostedPatches = true;
+    state.outdatedInstall = false;
     state.pickerSelectsFinal = false;
     await window.refreshHomeStatus();
   `);
@@ -1656,11 +1618,11 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 80));
     const settingsPage = document.querySelector('.settings-page').getBoundingClientRect();
     if (settingsPage.width > 1120.1 || settingsPage.width < 900) throw new Error('Settings did not use the centered capped Avalon shell: ' + settingsPage.width);
-    const patchDownloadsCard = document.querySelector('.settings-card--locations');
-    const clientMaintenanceCard = document.querySelector('.settings-card--client-patches');
-    if (/Game installation|selected path is shared|Existing Final Fantasy|Replace the current portable|Open the native XIV Config utility/i.test(patchDownloadsCard.textContent)) throw new Error('Misc retained removed install helper copy');
-    if ([...patchDownloadsCard.querySelectorAll('.settings-field')].some(field => getComputedStyle(field).borderBottomWidth !== '0px')) throw new Error('Misc retained row separators');
-    if ([...clientMaintenanceCard.querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || clientMaintenanceCard.querySelector('[data-extension-folder="screenshots"]') !== clientMaintenanceCard.querySelector('[data-gamepad-settings-row]:last-child button') || /Delivery|Apply a local patch source/i.test(clientMaintenanceCard.textContent)) throw new Error('Right Misc card has the wrong backup headings, final action, or removed patch-operation copy');
+    const locationsCard = document.querySelector('.settings-card--locations');
+    const backupsCard = document.querySelector('.settings-card--backups');
+    if (/Game installation|selected path is shared|Existing Final Fantasy|Replace the current portable|Open the native XIV Config utility/i.test(locationsCard.textContent)) throw new Error('Misc retained removed install helper copy');
+    if ([...locationsCard.querySelectorAll('.settings-field')].some(field => getComputedStyle(field).borderBottomWidth !== '0px')) throw new Error('Misc retained row separators');
+    if ([...backupsCard.querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || backupsCard.querySelector('[data-extension-folder="screenshots"]') !== backupsCard.querySelector('[data-gamepad-settings-row]:last-child button')) throw new Error('Right Misc card has the wrong backup headings or final action');
     const generalPane = document.querySelector('[data-settings-pane="general"]');
     const generalCards = [...generalPane.querySelectorAll('.settings-card')];
     const generalLabels = generalCards.map(card => [...card.querySelectorAll('.settings-label')].map(label => label.textContent).join(','));
@@ -1679,7 +1641,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const monitorSelect = document.querySelector('#borderless-monitor');
     const monitorRow = monitorSelect.closest('.settings-field');
     const monitorFixture = state.borderlessMonitors;
-    if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('#settings-patch-status').textContent,gameSettingsError:document.querySelector('#game-settings-status').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
+    if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('#settings-misc-status').textContent,gameSettingsError:document.querySelector('#game-settings-status').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="borderless"]').click();
     await new Promise(resolve => setTimeout(resolve, 60));
     if (state.gameSettings.settings.display_mode !== 'borderless' || monitorSelect.disabled || monitorSelect.value !== 'removed-display-id') throw new Error('Borderless mode did not enable the retained monitor identity');
@@ -1718,14 +1680,14 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
       throw new Error('delayed settings hydration did not call ' + command);
     };
     state.calls.length = 0;
-    document.querySelector('#settings-patch-status').textContent = '';
+    document.querySelector('#settings-misc-status').textContent = '';
     state.installPath = 'C:/newer-game';
     state.settingsHydrationPlan = { command:'detect_game_install_command', delayMs:80, error:'stale settings hydration failure' };
     const staleFailedHydration = window.hydrateSettings();
     await waitForHydrationCall('detect_game_install_command');
     await window.hydrateSettings();
     await staleFailedHydration;
-    if (document.querySelector('#settings-patch-status').textContent || document.querySelector('#settings-game-path').textContent !== 'C:/newer-game') throw new Error('a stale failed settings hydration overwrote the newer successful result');
+    if (document.querySelector('#settings-misc-status').textContent || document.querySelector('#settings-game-path').textContent !== 'C:/newer-game') throw new Error('a stale failed settings hydration overwrote the newer successful result');
     state.installPath = 'C:/game';
     await window.hydrateSettings();
 
@@ -1785,11 +1747,9 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const disabledSteamActionStyle = getComputedStyle(document.querySelector('.gamepad-card--stub .accent-action'));
     const enabledAccentActions = [...document.querySelectorAll('.accent-action:not(:disabled)')];
     if (!enabledAccentActions.length || enabledAccentActions.some(button => !getComputedStyle(button).backgroundImage.includes('linear-gradient') || getComputedStyle(button).color !== 'rgb(25, 10, 13)') || !accentBackupStyle.backgroundImage.includes('linear-gradient') || secondaryRestoreStyle.backgroundImage !== 'none' || disabledSteamActionStyle.backgroundImage !== 'none' || disabledSteamActionStyle.backgroundColor !== 'rgba(90, 103, 120, 0.28)') throw new Error('night accent, secondary, or disabled action surfaces bypassed their semantic tiers');
-    if (!miscCards[0].querySelector('#settings-game-path') || miscCards[0].querySelector('#settings-patch-path,[data-settings-action="browse-patches"],[data-extension-folder="screenshots"]') || miscCards[1].querySelector('[data-gamepad-settings-row]:last-child button')?.dataset.extensionFolder !== 'screenshots' || miscCards[1].querySelector('[data-settings-action="browse-game"]') || miscCards[1].querySelectorAll('[data-backup-action]').length !== 4) throw new Error('Misc actions are not grouped with their owning content');
-    if (miscPane.querySelector('[data-lifecycle-action],[data-settings-action="download-patches"],[data-settings-action="local-patches"],[data-settings-action="cancel-patches"]')) throw new Error('Misc retained operational patch controls');
-    if (miscPane.textContent.includes('Patch downloads and active update controls')) throw new Error('Misc retained the redundant Home patch-work explanation');
+    if (!miscCards[0].querySelector('#settings-game-path') || miscCards[0].querySelector('[data-extension-folder="screenshots"]') || miscCards[1].querySelector('[data-gamepad-settings-row]:last-child button')?.dataset.extensionFolder !== 'screenshots' || miscCards[1].querySelector('[data-settings-action="browse-game"]') || miscCards[1].querySelectorAll('[data-backup-action]').length !== 4) throw new Error('Misc actions are not grouped with their owning content');
     if ([...document.querySelectorAll('.settings-field')].some(field => Number.parseFloat(getComputedStyle(field).minHeight) < 76) || [...miscPane.querySelectorAll('.settings-action')].some(button => getComputedStyle(button).minHeight !== '48px') || getComputedStyle(miscPane.querySelector('h2')).marginBottom !== '16px') throw new Error('Settings spacing is not consistent across tabs');
-    if (miscPane.querySelector('.settings-progress,#settings-patch-fill') || document.querySelector('#settings-patch-status').textContent) throw new Error('Misc retained operational patch progress');
+    if (miscPane.querySelector('.settings-progress') || document.querySelector('#settings-misc-status').textContent) throw new Error('Misc retained operational install progress');
     if (getComputedStyle(document.querySelector('#game-settings-status')).display !== 'none') throw new Error('empty game-setting feedback still reserves layout space');
     if ([...document.querySelectorAll('[data-settings-tab]')].map(tab => tab.textContent).join(',') !== 'General,Graphics,Misc') throw new Error('flat Settings categories drifted');
     if (generalPane.querySelector('#profile-form,#profile-server-select') || document.querySelector('[data-settings-pane="controls"],#screenshot-hotkey')) throw new Error('retired profile or Controls content remains in Settings');
@@ -1805,11 +1765,11 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 100));
     const storageCard = document.querySelector('.settings-card--locations');
     const gamePicker = storageCard.querySelector('#settings-game-path').closest('.settings-path-picker');
-    if (storageCard.querySelectorAll('h2').length !== 1 || gamePicker.querySelector('#settings-game-path').textContent !== 'C:/game' || gamePicker.querySelector('[data-settings-action="browse-game"]').textContent !== 'Path' || document.querySelector('#reset-patch-storage,#settings-patch-path')) throw new Error('Misc install folder did not use the path-bar contract');
-    if (!document.querySelector('.settings-card--client-patches [data-extension-folder="screenshots"]') || document.querySelectorAll('[data-settings-pane="misc"] .settings-card').length !== 2) throw new Error('Misc did not keep screenshots on the right card');
+    if (storageCard.querySelectorAll('h2').length !== 1 || gamePicker.querySelector('#settings-game-path').textContent !== 'C:/game' || gamePicker.querySelector('[data-settings-action="browse-game"]').textContent !== 'Path') throw new Error('Misc install folder did not use the path-bar contract');
+    if (!document.querySelector('.settings-card--backups [data-extension-folder="screenshots"]') || document.querySelectorAll('[data-settings-pane="misc"] .settings-card').length !== 2) throw new Error('Misc did not keep screenshots on the right card');
     if (document.querySelector('[data-extension-folder="logs"]')) throw new Error('Open Logs Folder retained duplicate ownership');
-    const screenshotsRow = clientMaintenanceCard.querySelector('.settings-field--screenshots').getBoundingClientRect();
-    const rightCard = clientMaintenanceCard.getBoundingClientRect();
+    const screenshotsRow = backupsCard.querySelector('.settings-field--screenshots').getBoundingClientRect();
+    const rightCard = backupsCard.getBoundingClientRect();
     if (Math.abs((rightCard.bottom - 14) - screenshotsRow.bottom) > 1) throw new Error('Open Screenshots Folder is not pinned to the bottom of the right Misc card');
     state.calls.length = 0;
     gamePicker.querySelector('[data-settings-action="browse-game"]').click();
@@ -1817,12 +1777,12 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (!state.calls.some(call => call.command === 'pick_install_dir') || state.calls.some(call => call.command === 'set_game_dir')) throw new Error('Misc Install Location did not reuse the existing picker persistence contract');
 
     state.calls.length = 0;
-    const userBackup = clientMaintenanceCard.querySelector('[data-backup-action="create"][data-backup-target="user-settings"]');
+    const userBackup = backupsCard.querySelector('[data-backup-action="create"][data-backup-target="user-settings"]');
     userBackup.click();
     await new Promise(resolve => setTimeout(resolve, 40));
     if (!state.calls.some(call => call.command === 'create_backup' && call.args.target === 'user-settings') || document.querySelector('#settings-backup-status').textContent !== 'User Settings and Macros backup created.') throw new Error('User Settings backup did not report backend success');
 
-    const extensionRestore = clientMaintenanceCard.querySelector('[data-backup-action="restore"][data-backup-target="extensions"]');
+    const extensionRestore = backupsCard.querySelector('[data-backup-action="restore"][data-backup-target="extensions"]');
     state.calls.length = 0;
     extensionRestore.focus();
     extensionRestore.click();
@@ -1838,7 +1798,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     document.querySelector('#settings-confirmation-confirm').click();
     await new Promise(resolve => setTimeout(resolve, 40));
     if (!state.calls.some(call => call.command === 'restore_backup' && call.args.target === 'extensions') || document.querySelector('#settings-backup-status').textContent !== 'Extensions restored.' || document.activeElement !== extensionRestore) throw new Error('Confirmed Extensions restore did not report success and restore focus');
-    const userRestore = clientMaintenanceCard.querySelector('[data-backup-action="restore"][data-backup-target="user-settings"]');
+    const userRestore = backupsCard.querySelector('[data-backup-action="restore"][data-backup-target="user-settings"]');
     userRestore.click();
     if (!restoreDialog.open || !document.querySelector('#settings-confirmation-copy').textContent.includes('latest backup?') || document.querySelector('#settings-confirmation-confirm').textContent !== 'Confirm') throw new Error('User Settings restore did not use the latest-backup Confirm wording');
     document.querySelector('#settings-confirmation-cancel').click();

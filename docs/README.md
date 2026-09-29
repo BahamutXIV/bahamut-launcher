@@ -10,7 +10,7 @@ behavior.
 
 - [Getting started](getting-started.md) - platform requirements, archive use,
   first launch, and client requirements.
-- [Troubleshooting](troubleshooting.md) - build, logs, configuration, patch,
+- [Troubleshooting](troubleshooting.md) - build, logs, configuration, install,
   authentication, and recovery diagnosis.
 - [Configuration](configuration.md) - portable files, game settings, backups,
   extensions, scripts, and DAT overlays.

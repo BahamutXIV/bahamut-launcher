@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use bahamut_launcher::patcher::PatcherShared;
-use bahamut_launcher::patcher::content;
-use bahamut_launcher::patcher::http::{CheckpointAction, download_object};
-use bahamut_launcher::patcher::installer;
+use bahamut_launcher::content::InstallShared;
+use bahamut_launcher::content::http::{CheckpointAction, download_object};
+use bahamut_launcher::content::installer;
+use bahamut_launcher::content::manifest::shipped_manifest;
 
 #[test]
 #[ignore = "requires the configured content host and an explicit local cache directory"]
@@ -12,7 +12,7 @@ fn reqwest_downloads_the_pinned_full_client() {
         std::env::var_os("BAHAMUT_LIVE_CONTENT_CACHE")
             .expect("set BAHAMUT_LIVE_CONTENT_CACHE to an empty local cache directory"),
     );
-    let manifest = content::shipped_manifest().unwrap();
+    let manifest = shipped_manifest().unwrap();
     let archive = &manifest.base.as_ref().unwrap().archives[0].object;
     let root = manifest.content_root.as_deref().unwrap();
     let mut last_reported_gib = 0;
@@ -52,12 +52,12 @@ fn installs_and_verifies_the_pinned_full_client() {
             .to_string_lossy()
             .starts_with("m0-acceptance-")
     );
-    let manifest = content::shipped_manifest().unwrap();
+    let manifest = shipped_manifest().unwrap();
     let package = manifest.base.unwrap();
     let quote = installer::quote(&destination, &cache, &package).unwrap();
     eprintln!("install quote: {quote:?}");
     let shared =
-        PatcherShared::with_totals(package.download_bytes().unwrap(), package.final_files.len());
+        InstallShared::with_totals(package.download_bytes().unwrap(), package.final_files.len());
     installer::install(
         &shared,
         &destination,

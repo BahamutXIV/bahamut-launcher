@@ -12,7 +12,7 @@ In the portable layout, backend configuration lives beside the executable:
   plugins/screenshot.dll                <- packaged Screenshot implementation
   plugins/discord-rpc.dll               <- packaged DiscordRPC implementation
   backups/                              <- bounded manual backup archives
-  cache/                                <- local patch extraction scratch data
+  cache/                                <- downloaded launcher update packages (Windows)
   data/                                 <- portable WebView profile root and local storage
   config/
     bahamut.ini                         <- launcher, game, and server settings
@@ -44,9 +44,8 @@ and Linux the managed Wine prefix, `wine.log`, and `helper.log` live in the
 launcher data directory: `$BAHAMUT_LAUNCHER_HOME` when that variable holds an
 absolute path, otherwise `~/.bahamut-launcher/`. Linux runs system Wine and
 has no managed Wine engine; its DXVK cache lives under `runtime/` in that same
-directory. macOS additionally keeps the managed Wine engine there. Local patch
-extraction uses `cache/`. Verified downloads and partial transfers use the
-configured patch download folder.
+directory. macOS additionally keeps the managed Wine engine there. Verified
+downloads and partial transfers use the configured download cache folder.
 
 Only the sections shown below are valid in `bahamut.ini`. Screenshot, plugin,
 addon, and DAT settings belong in their dedicated files.
@@ -62,7 +61,7 @@ live under the state root, which is the launcher data directory above:
 ```text
 ~/.bahamut-launcher/
   config/                               <- every settings file listed above
-  backups/  cache/  data/               <- as in the portable layout, except WebView storage (below)
+  backups/  data/                       <- as in the portable layout, except WebView storage (below)
   logs/                                 <- launcher, chat, and packet logs, wine.log, helper.log
   addons/<addon-id>/                    <- player-installed addons
   plugins/dats/<package-id>/            <- player-installed DAT packages
@@ -89,7 +88,7 @@ native_resolution_override = false
 borderless_monitor =
 game_location =
 content_root =
-patch_download_dir =
+download_cache_dir =
 
 [game]
 initialized = false
@@ -140,9 +139,10 @@ starts successfully and defaults to `true` when absent. When the launcher stays
 open, Play remains disabled until that client process exits. The backend also
 rejects a second launch during startup or play. `content_root` overrides the
 HTTPS host in the shipped delivery manifest without changing trusted content
-identities. The default patch download directory is
-`<Documents>/XIVLegacy_Patches`. Setting
-`patch_download_dir` replaces that default. The packaged loader and `bahamut.dll`
+identities. The default download cache directory is
+`<Documents>/XIVLegacy_Downloads`. Setting `download_cache_dir` replaces that
+default. The launcher also accepts `patch_download_dir` for the same setting
+when `download_cache_dir` is absent. The packaged loader and `bahamut.dll`
 are launcher components included by default rather than settings for players.
 `native_resolution_override` belongs to the launcher and defaults to `false` when
 absent. When enabled, Play uses the physical resolution of the explicitly
@@ -169,7 +169,7 @@ retail client switches. They must either all be present or all be absent.
 Settings edits these sections through General and Graphics. Audio switches and
 hardware mouse are part of General. Home owns initial install selection and
 the active installation lifecycle: download, cancellation, progress, and
-terminal recovery. The `patch_download_dir` configuration value remains an
+terminal recovery. The `download_cache_dir` configuration value remains an
 optional override for the verified complete client download cache. Misc keeps the
 Install Location path row, manual User Settings and Macros, Extensions backups,
 portable folder actions, and the action for the screenshots folder. Launcher gamepad
@@ -248,7 +248,7 @@ Extensions backups read the state root. They contain installed Lua addons under
 `addons/`, installed DAT packages under `plugins/dats/`, `scripts/default.txt`,
 `config/extensions.ini`, `config/dats.ini`, and writable settings below
 `config/addons/` and `config/plugins/`. They exclude native DLLs, `bahamut.ini`,
-credentials, logs, screenshots, patch/cache data, WebView state, and the
+credentials, logs, screenshots, download and cache data, WebView state, and the
 shipped packages inside the macOS app bundle. Extensions restore treats
 each included directory as a snapshot: packages or settings added below one of
 those owned directories after the backup are removed when that archive is

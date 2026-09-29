@@ -80,17 +80,17 @@ pub(crate) fn default_game_dir_hint() -> Option<PathBuf> {
 pub(crate) fn resolve_content_root() -> Result<String, String> {
     let configured = load_preferences()?.launcher.content_root;
     configured
-        .or(bahamut_launcher::patcher::content::shipped_manifest()?.content_root)
+        .or(bahamut_launcher::content::manifest::shipped_manifest()?.content_root)
         .filter(|root| !root.trim().is_empty())
         .ok_or_else(|| "Game content delivery is not configured for this build.".to_owned())
 }
 
-/// `patch_download_dir` overrides the platform default (`Documents/XIVLegacy_Patches`).
-pub(crate) fn resolve_patch_storage_dir() -> Result<PathBuf, String> {
+/// `download_cache_dir` overrides the platform default (`Documents/XIVLegacy_Downloads`).
+pub(crate) fn resolve_download_cache_dir() -> Result<PathBuf, String> {
     let prefs = load_preferences()?;
-    match prefs.launcher.patch_download_dir {
+    match prefs.launcher.download_cache_dir {
         Some(dir) => Ok(dir),
-        None => dirs::default_patch_storage_dir().map_err(|e| e.to_string()),
+        None => dirs::default_download_cache_dir().map_err(|e| e.to_string()),
     }
 }
 
@@ -152,8 +152,8 @@ mod tests {
         std::thread::scope(|scope| {
             let first = scope.spawn(move || {
                 update_launcher_config(|config| {
-                    config.preferences.launcher.patch_download_dir =
-                        Some(PathBuf::from("concurrent-patches"));
+                    config.preferences.launcher.download_cache_dir =
+                        Some(PathBuf::from("concurrent-downloads"));
                     first_loaded_tx.send(()).unwrap();
                     release_first_rx.recv().unwrap();
                     Ok(())
@@ -187,8 +187,8 @@ mod tests {
 
         let config = load_launcher_config().unwrap();
         assert_eq!(
-            config.preferences.launcher.patch_download_dir,
-            Some(PathBuf::from("concurrent-patches"))
+            config.preferences.launcher.download_cache_dir,
+            Some(PathBuf::from("concurrent-downloads"))
         );
         assert!(!config.preferences.launcher.close_on_game_start);
     }

@@ -19,7 +19,7 @@ Use the narrowest class that supports the claim:
 | Exact-binary validation | Identity-gated bytes, offsets, signatures, or patch results checked against the named client build | Live client behavior, server behavior, or another client build |
 | Unverified observation | A bounded uncertainty attached to a named surface | Shipped or supported behavior |
 | Public format or protocol source | A clean room format rule or a published wire fact when the source is identified | An unverified interpretation of a client binary |
-| Provenance and licensing record | Attribution, license compatibility, and the method used for the patcher or launch backends | Runtime behavior |
+| Provenance and licensing record | Attribution, license compatibility, and the method used for the installer or launch backends | Runtime behavior |
 | Reproducible observation | A named client build, OS, Wine engine, server, endpoint, or launch run under stated conditions | Behavior outside those conditions |
 | Report or search lead | A question to investigate | A merged fact |
 

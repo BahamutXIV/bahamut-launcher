@@ -1,11 +1,10 @@
-use bahamut_launcher::config::dirs;
 use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::config::preferences::{
-    AudioSettings, DisplayMode, GameSettings, GraphicsSettings, Multisampling, Preferences,
+    AudioSettings, DisplayMode, GameSettings, GraphicsSettings, Multisampling,
     SUPPORTED_RESOLUTIONS, ShadowDetail, TextureFiltering, TextureQuality,
 };
+use bahamut_launcher::content::Phase;
 use bahamut_launcher::install_check::InstallState;
-use bahamut_launcher::patcher::{self, Phase};
 use bahamut_launcher::platform::{self, BorderlessMonitorSnapshot};
 use bahamut_launcher::profiles::ServerProfile;
 use serde::{Deserialize, Serialize};
@@ -91,39 +90,35 @@ pub(crate) struct LauncherLogView {
     pub(crate) updated_at: Option<u64>,
 }
 
-/// One-moment patcher snapshot returned to the WebView; JS redraws it on a fixed cadence.
+/// One-moment install snapshot returned to the WebView; JS redraws it on a fixed cadence.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct PatchStatusView {
+pub(crate) struct InstallStatusView {
     pub(crate) phase: &'static str,
-    pub(crate) is_install: bool,
     pub(crate) download_idx: usize,
-    pub(crate) patch_idx: usize,
-    pub(crate) total_patches: usize,
+    pub(crate) file_idx: usize,
+    pub(crate) total_files: usize,
     pub(crate) bytes_downloaded: u64,
     pub(crate) previous_completed_bytes: u64,
     pub(crate) total_download_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
-    pub(crate) warnings: Vec<String>,
     pub(crate) is_running: bool,
     pub(crate) is_paused: bool,
     pub(crate) pause_requested: bool,
     pub(crate) is_terminal: bool,
 }
 
-impl PatchStatusView {
+impl InstallStatusView {
     pub(crate) fn idle() -> Self {
         Self {
             phase: "idle",
-            is_install: false,
             download_idx: 0,
-            patch_idx: 0,
-            total_patches: patcher::PATCH_MANIFEST.len(),
+            file_idx: 0,
+            total_files: 0,
             bytes_downloaded: 0,
             previous_completed_bytes: 0,
-            total_download_bytes: patcher::total_bytes(),
+            total_download_bytes: 0,
             error: None,
-            warnings: Vec::new(),
             is_running: false,
             is_paused: false,
             pause_requested: false,
@@ -135,12 +130,9 @@ impl PatchStatusView {
 pub(crate) fn phase_label(phase: Phase) -> &'static str {
     match phase {
         Phase::Starting => "starting",
-        Phase::Extracting => "extracting",
         Phase::Downloading => "downloading",
         Phase::Installing => "installing",
         Phase::ValidatingFiles => "validating-files",
-        Phase::Validating => "validating",
-        Phase::Patching => "patching",
         Phase::Done => "done",
         Phase::Error => "error",
         Phase::Cancelled => "cancelled",
@@ -151,7 +143,7 @@ pub(crate) fn phase_label(phase: Phase) -> &'static str {
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum HomeLifecycleState {
     NoValidInstall,
-    PatchRequired,
+    OutdatedInstall,
     LoggedOut,
     Ready,
 }
@@ -169,7 +161,7 @@ pub(crate) fn resolve_home_lifecycle(
 ) -> HomeLifecycleState {
     match install {
         InstallState::NotFound => HomeLifecycleState::NoValidInstall,
-        InstallState::FoundNeedsPatch { .. } => HomeLifecycleState::PatchRequired,
+        InstallState::FoundOutdated { .. } => HomeLifecycleState::OutdatedInstall,
         InstallState::Ready if authenticated => HomeLifecycleState::Ready,
         InstallState::Ready => HomeLifecycleState::LoggedOut,
     }
@@ -182,10 +174,10 @@ pub(crate) fn home_presentation(state: HomeLifecycleState) -> HomePresentation {
             title: "Account Login",
             primary_action: "Install",
         },
-        HomeLifecycleState::PatchRequired => HomePresentation {
+        HomeLifecycleState::OutdatedInstall => HomePresentation {
             eyebrow: "",
             title: "Account Login",
-            primary_action: "Update",
+            primary_action: "Install",
         },
         HomeLifecycleState::LoggedOut => HomePresentation {
             eyebrow: "",
@@ -209,7 +201,6 @@ pub(crate) struct HomeStatusView {
     pub(crate) game_dir: Option<String>,
     pub(crate) default_game_dir: Option<String>,
     pub(crate) game_version: Option<String>,
-    pub(crate) hosted_patches: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -503,24 +494,4 @@ pub(crate) struct LoginShellResponse {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RegisterShellResponse {
     pub(crate) ok: bool,
-}
-
-/// Effective patch settings returned to the Settings screen.
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct PatchSettingsView {
-    pub(crate) storage_dir: String,
-    pub(crate) storage_overridden: bool,
-}
-
-/// Resolves an unset storage override to the platform default.
-pub(crate) fn patch_settings_view(prefs: &Preferences) -> Result<PatchSettingsView, String> {
-    let storage_overridden = prefs.launcher.patch_download_dir.is_some();
-    let storage_dir = match &prefs.launcher.patch_download_dir {
-        Some(dir) => dir.clone(),
-        None => dirs::default_patch_storage_dir().map_err(|e| e.to_string())?,
-    };
-    Ok(PatchSettingsView {
-        storage_dir: storage_dir.to_string_lossy().into_owned(),
-        storage_overridden,
-    })
 }

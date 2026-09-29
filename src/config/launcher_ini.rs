@@ -206,6 +206,7 @@ impl LauncherConfig {
                 "native_resolution_override",
                 "game_location",
                 "content_root",
+                "download_cache_dir",
                 "patch_download_dir",
                 "borderless_monitor",
             ],
@@ -227,7 +228,11 @@ impl LauncherConfig {
             };
         preferences.launcher.game_location = optional_path(launcher, "game_location");
         preferences.launcher.content_root = optional_string(launcher, "content_root");
-        preferences.launcher.patch_download_dir = optional_path(launcher, "patch_download_dir");
+        preferences.launcher.download_cache_dir = if launcher.get("download_cache_dir").is_none() {
+            optional_path(launcher, "patch_download_dir")
+        } else {
+            optional_path(launcher, "download_cache_dir")
+        };
         preferences.launcher.borderless_monitor = optional_string(launcher, "borderless_monitor");
         preferences.developer.enable_verbose_wine_debug =
             parse_bool(developer, "developer", "enable_verbose_wine_debug")?;
@@ -313,8 +318,8 @@ impl LauncherConfig {
         push_optional_str(&mut out, "content_root", p.launcher.content_root.as_deref());
         push_optional(
             &mut out,
-            "patch_download_dir",
-            p.launcher.patch_download_dir.as_deref(),
+            "download_cache_dir",
+            p.launcher.download_cache_dir.as_deref(),
         );
         push_optional_str(
             &mut out,
@@ -410,8 +415,8 @@ impl LauncherConfig {
                 self.preferences.launcher.game_location.as_deref(),
             ),
             (
-                "patch_download_dir",
-                self.preferences.launcher.patch_download_dir.as_deref(),
+                "download_cache_dir",
+                self.preferences.launcher.download_cache_dir.as_deref(),
             ),
         ] {
             if let Some(value) = value {
@@ -1004,6 +1009,21 @@ mod tests {
             LauncherConfig::from_ini_str(starter).unwrap(),
             LauncherConfig::defaults()
         );
+    }
+
+    #[test]
+    fn compatibility_cache_key_is_read_and_rewritten_under_the_current_name() {
+        let defaults = LauncherConfig::defaults().to_ini_string();
+        assert!(defaults.contains("download_cache_dir = \n"));
+        let text = defaults.replace("download_cache_dir = \n", "patch_download_dir = C:/Cache\n");
+        let config = LauncherConfig::from_ini_str(&text).unwrap();
+        assert_eq!(
+            config.preferences.launcher.download_cache_dir,
+            Some(PathBuf::from("C:/Cache"))
+        );
+        let rewritten = config.to_ini_string();
+        assert!(rewritten.contains("download_cache_dir = C:/Cache\n"));
+        assert!(!rewritten.contains("patch_download_dir"));
     }
 
     #[test]

@@ -291,7 +291,6 @@ dependencies = [
  "byteorder",
  "chrono",
  "cipher",
- "crc32fast",
  "directories",
  "flate2",
  "httpmock",

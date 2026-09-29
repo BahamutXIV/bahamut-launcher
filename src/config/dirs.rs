@@ -12,8 +12,6 @@ pub const DATS_CONFIG_FILE: &str = "dats.ini";
 
 pub const PORTABLE_CONFIG_DIR_NAME: &str = "config";
 
-pub const PORTABLE_CACHE_DIR_NAME: &str = "cache";
-
 pub const PORTABLE_DATA_DIR_NAME: &str = "data";
 
 pub const PORTABLE_BACKUPS_DIR_NAME: &str = "backups";
@@ -35,7 +33,7 @@ const LAUNCHER_LOGS_SCOPE_NAME: &str = "launcher";
 
 const LAUNCHER_LOG_FILE_NAME: &str = "bahamut-launcher.log";
 
-const DEFAULT_PATCH_STORAGE_DIR_NAME: &str = "XIVLegacy_Patches";
+const DEFAULT_DOWNLOAD_CACHE_DIR_NAME: &str = "XIVLegacy_Downloads";
 
 const BUNDLE_EXTENSION: &str = "app";
 
@@ -297,31 +295,21 @@ pub fn launcher_log_path() -> Result<PathBuf, ConfigDirError> {
         .join(LAUNCHER_LOG_FILE_NAME))
 }
 
-/// Resolve the cache for patch scratch files.
-pub(crate) fn cache_dir() -> Result<PathBuf, ConfigDirError> {
-    Ok(state_root()?.join(PORTABLE_CACHE_DIR_NAME))
-}
-
 /// Resolve the WebView profile used for local storage and browser caches.
 pub fn webview_data_dir() -> Result<PathBuf, ConfigDirError> {
     Ok(state_root()?.join(PORTABLE_DATA_DIR_NAME))
 }
 
-/// Resolve the long-lived `XIVLegacy_Patches/` download cache from Documents, falling back to [`data_dir`].
-pub fn default_patch_storage_dir() -> Result<PathBuf, ConfigDirError> {
+/// Resolve the long-lived `XIVLegacy_Downloads/` download cache from Documents, falling back to [`data_dir`].
+pub fn default_download_cache_dir() -> Result<PathBuf, ConfigDirError> {
     match directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf())) {
-        Some(documents) => Ok(default_patch_storage_dir_under(&documents)),
-        None => data_dir().map(|dir| dir.join(DEFAULT_PATCH_STORAGE_DIR_NAME)),
+        Some(documents) => Ok(default_download_cache_dir_under(&documents)),
+        None => data_dir().map(|dir| dir.join(DEFAULT_DOWNLOAD_CACHE_DIR_NAME)),
     }
 }
 
-fn default_patch_storage_dir_under(documents: &Path) -> PathBuf {
-    documents.join(DEFAULT_PATCH_STORAGE_DIR_NAME)
-}
-
-/// Resolve the cache path for temporary local patch extraction.
-pub fn patch_staging_dir() -> Result<PathBuf, ConfigDirError> {
-    cache_dir().map(|dir| dir.join("patch-staging"))
+fn default_download_cache_dir_under(documents: &Path) -> PathBuf {
+    documents.join(DEFAULT_DOWNLOAD_CACHE_DIR_NAME)
 }
 
 /// Write `default` only when `dir/file_name` is absent, creating `dir` first; return whether it was written.
@@ -386,16 +374,6 @@ mod tests {
         );
         assert_eq!(dir.parent(), Some(test_exe_dir().as_path()));
         assert_eq!(state_config_dir().unwrap(), dir);
-    }
-
-    #[test]
-    fn cache_dir_is_portable() {
-        let cache = cache_dir().expect("resolvable");
-        assert_eq!(cache.parent(), Some(test_exe_dir().as_path()));
-        assert_eq!(
-            cache.file_name().and_then(|name| name.to_str()),
-            Some(PORTABLE_CACHE_DIR_NAME)
-        );
     }
 
     #[test]
@@ -592,10 +570,10 @@ mod tests {
     }
 
     #[test]
-    fn patch_storage_uses_a_named_documents_folder() {
+    fn download_cache_uses_a_named_documents_folder() {
         assert_eq!(
-            default_patch_storage_dir_under(Path::new("Documents")),
-            Path::new("Documents").join(DEFAULT_PATCH_STORAGE_DIR_NAME)
+            default_download_cache_dir_under(Path::new("Documents")),
+            Path::new("Documents").join(DEFAULT_DOWNLOAD_CACHE_DIR_NAME)
         );
     }
 
