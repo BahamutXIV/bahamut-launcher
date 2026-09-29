@@ -44,6 +44,8 @@ used by the launcher and its boundaries. Players can usually skip them.
   test commands and their coverage limits.
 - [Gentoo package template](../packaging/gentoo/README.md) - local overlay
   ebuild for the Linux release archive.
+- [Linux archive README](../packaging/linux/README.md) - the `README.md` that
+  ships inside the Linux release archive.
 
 ## Public documentation policy
 

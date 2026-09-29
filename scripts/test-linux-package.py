@@ -200,6 +200,7 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(sidecar, f"{digest}  {LABEL}.tar.gz\n")
         marker = (self.payload / ".bahamut-launcher-package").read_bytes()
         self.assertEqual(marker, (LINUX / "package-marker.txt").read_bytes())
+        self.assertEqual((self.payload / "README.md").read_bytes(), (LINUX / "README.md").read_bytes())
         self.assertEqual(
             (self.payload / "share/applications/bahamut-launcher.desktop").read_bytes(),
             (LINUX / "bahamut-launcher.desktop").read_bytes(),
@@ -1244,6 +1245,43 @@ class DependencyClassificationTests(unittest.TestCase):
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "the Linux archive needs GNU tar and a Linux host")
+class LinuxReadmeTests(unittest.TestCase):
+    """Guard packaging/linux/README.md, the archive's README.md, against drift."""
+
+    README = LINUX / "README.md"
+    SCRIPT_NAME = re.compile(r"install-dependencies\.sh|install\.sh")
+    OPTION = re.compile(r"(?<![\w-])--[a-z][a-z-]*")
+
+    def usage(self, script):
+        result = run(LINUX / script, "--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_options_appear_in_the_usage_of_the_script_they_are_attributed_to(self):
+        text = self.README.read_text(encoding="ascii")
+        usages = {name: set(self.OPTION.findall(self.usage(name))) for name in ["install.sh", "install-dependencies.sh"]}
+        attributed = {name: set() for name in usages}
+        current = None
+        for match in re.finditer(f"{self.SCRIPT_NAME.pattern}|{self.OPTION.pattern}", text):
+            token = match.group(0)
+            if token.startswith("--"):
+                self.assertIsNotNone(current, f"{token} precedes any script name")
+                attributed[current].add(token)
+            else:
+                current = token
+        for name, options in attributed.items():
+            self.assertNotEqual(options, set(), name)
+            self.assertEqual(options - usages[name], set(), name)
+
+    def test_relative_link_targets_are_limited_to_files_beside_the_readme(self):
+        text = self.README.read_text(encoding="ascii")
+        targets = {t.split("#", 1)[0] for t in re.findall(r"\]\(([^)\s]+)\)", text) if not t.startswith("https://")}
+        self.assertLessEqual(targets, {"install.sh", "install-dependencies.sh", "Makefile"})
+
+    def test_readme_is_plain_ascii(self):
+        self.README.read_bytes().decode("ascii")
+
+
 class PackagerInputTests(unittest.TestCase):
     """Run a copy of the packager in a synthetic repository with a stub stage script."""
 
@@ -1324,6 +1362,13 @@ cp -R "$repo/plugins/dats/bahamut-dats-overlay" "$destination/plugins/dats/"
         self.assertIn(f"{TOP}/scripts/default.txt", names)
         self.assertIn(f"{TOP}/plugins/dats/bahamut-dats-overlay/data/a b.txt", names)
         self.assertNotIn(f"{TOP}/config", {m.name.rstrip("/") for m in members})
+
+    def test_staged_readme_is_replaced_by_the_linux_readme(self):
+        self.assertEqual(self.package().returncode, 0)
+        with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
+            packaged = archive.extractfile(f"{TOP}/README.md").read()
+        self.assertEqual(packaged, (LINUX / "README.md").read_bytes())
+        self.assertNotEqual(packaged, b"synthetic README.md")
 
     def test_extra_staged_file_is_rejected(self):
         self.write_stage_stub('printf x > "$destination/unexpected-extra.bin"')

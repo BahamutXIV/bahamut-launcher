@@ -191,7 +191,8 @@ Rebuilding an existing tag requires a tag whose tree contains
 Every archive carries `README.md`, `LICENSE.md`, and the MinHook, Dear ImGui,
 Lua, Miniz, and bundled font notices under `licenses/` (under
 `Contents/Resources/licenses/` inside the macOS app). Linux and macOS
-archives add the MinGW-w64 runtime notice. The archive README is sourced from
+archives add the MinGW-w64 runtime notice. The Linux archive's README is
+`packaging/linux/README.md`; the Windows and macOS archives' README is
 `docs/getting-started.md`. The workflow publishes a SHA-256 sidecar alongside
 each archive. [Platform support](extensions.md#platform-support)
 defines which platforms load the client module and records its status.

@@ -255,7 +255,9 @@ of them. The staged tree has no package marker, so it keeps the
 release archive from a launcher binary and a client build. It stages through
 `stage-unix-release.sh`, adds the package marker, install scripts, desktop
 entry, and icons, asserts the exact file manifest and modes, and writes the
-archive with GNU tar:
+archive with GNU tar. The archive's `README.md` is
+[`packaging/linux/README.md`](../packaging/linux/README.md), which replaces the
+`docs/getting-started.md` copy that the stage script writes:
 
 ```bash
 cargo build --release --locked -p bahamut-launcher-shell

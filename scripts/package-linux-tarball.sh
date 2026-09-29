@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Package the Linux launcher as <label>.tar.gz: the tree stage-unix-release.sh
 # stages plus the install scripts, the desktop entry, and the icons, checked
-# against a fixed file manifest before and after archiving.
+# against a fixed file manifest before and after archiving. The archive's
+# README.md is packaging/linux/README.md; the README.md the stage script copies
+# is dropped.
 #
 #   scripts/package-linux-tarball.sh --launcher <elf> --client-build <dir>
 #                                    --label <asset name> --output <dir>
@@ -77,6 +79,7 @@ fi
 linux="$repo_root/packaging/linux"
 icon_sizes=(48x48 128x128 256x256)
 extras_src=(
+    "$linux/README.md"
     "$linux/package-marker.txt"
     "$linux/install.sh"
     "$linux/install-dependencies.sh"
@@ -84,6 +87,7 @@ extras_src=(
     "$linux/bahamut-launcher.desktop"
 )
 extras_dst=(
+    "README.md"
     ".bahamut-launcher-package"
     "install.sh"
     "install-dependencies.sh"
@@ -154,7 +158,7 @@ license_files=(
 expected_list=(
     bahamut-launcher bahamut-loader.exe bahamut.dll
     plugins/screenshot.dll plugins/discord-rpc.dll
-    LICENSE.md README.md scripts/default.txt
+    LICENSE.md scripts/default.txt
 )
 for license in "${license_files[@]}"; do
     expected_list+=("licenses/$license")
@@ -176,7 +180,8 @@ if [ -d "$overlay_source" ]; then
 fi
 
 # Only files are copied, so the empty skeleton directories never reach the
-# archive while their non-empty siblings (scripts/) do.
+# archive while their non-empty siblings (scripts/) do. The staged README.md
+# is skipped; packaging/linux/README.md is copied in its place below.
 while IFS= read -r -d '' entry; do
     rel="${entry#"$stage"/}"
     if [ -L "$entry" ]; then
@@ -187,6 +192,9 @@ while IFS= read -r -d '' entry; do
     fi
     if [ ! -f "$entry" ]; then
         fail "staged release tree entry is not a regular file: $rel"
+    fi
+    if [ "$rel" = "README.md" ]; then
+        continue
     fi
     mkdir -p "$tree/$(dirname -- "$rel")"
     cp "$entry" "$tree/$rel"
