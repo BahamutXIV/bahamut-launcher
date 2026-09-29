@@ -43,7 +43,6 @@ blowfish = "0.9"
 byteorder = "1"
 chrono = "0.4"
 cipher = "0.4"
-crc32fast = "1"
 directories = "5"
 flate2 = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
@@ -60,7 +59,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter"] }
 url = "2"
 zeroize = { version = "1", features = ["serde"] }
-# Deflate and ZIP64 support portable game and local patch archives.
+# Deflate and ZIP64 support portable game archives.
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 # Wine patching translates client PE RVAs to file offsets on Linux and macOS.

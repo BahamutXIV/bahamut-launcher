@@ -927,7 +927,7 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patcher::test_support::tempdir;
+    use crate::content::test_support::tempdir;
     use std::cell::Cell;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};

@@ -1,0 +1,17 @@
+# The X11 instance and the Wayland app_id equal the executable name, and the X11
+# class is the same name capitalized; tauri.conf.json must not set app.enableGTKAppId.
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Bahamut Launcher
+GenericName=Game Launcher
+Comment=Launcher for the BahamutXIV Final Fantasy XIV 1.23b server
+Exec=bahamut-launcher
+TryExec=bahamut-launcher
+Icon=bahamut-launcher
+Terminal=false
+Categories=Game;RolePlaying;
+Keywords=FFXIV;Final Fantasy;Bahamut;
+StartupNotify=false
+StartupWMClass=bahamut-launcher
+SingleMainWindow=true

@@ -11,10 +11,10 @@
 #               out/release/<version>; the default is Debug under out/dev.
 # --test        Run the client module tests under Wine through
 #               client/tools/run-under-wine.sh before publishing. The Wine
-#               binary defaults to the launcher's managed macOS engine, then
-#               wine on PATH. The prefix defaults to out/wine-test-prefix; a
-#               new prefix takes minutes to initialize on its first run, and
-#               the loader test needs a GUI session.
+#               binary defaults to the launcher's managed engine (macOS or
+#               Linux), then wine on PATH. The prefix defaults to
+#               out/wine-test-prefix; a new prefix takes minutes to initialize
+#               on its first run, and the loader test needs a GUI session.
 # --skip-build  Publish from the existing client and shell build outputs.
 #
 # The llvm-mingw root comes from --llvm-mingw, then LLVM_MINGW_ROOT, then
@@ -137,6 +137,16 @@ if [[ $run_tests -eq 1 ]]; then
     if [[ -z "$wine_binary" && -x "$managed_runtime/wswine.bundle/bin/wine" ]]; then
         wine_binary="$managed_runtime/wswine.bundle/bin/wine"
         export BAHAMUT_WINE_DYLD_FALLBACK="$managed_runtime/Frameworks:$managed_runtime/Frameworks/GStreamer.framework/Versions/Current/lib:$managed_runtime/wswine.bundle/lib:/usr/local/lib:/usr/lib"
+    fi
+    if [[ -z "$wine_binary" ]]; then
+        # Newest verified engine by version order; the marker proves the
+        # launcher finished installing it.
+        while IFS= read -r engine_dir; do
+            if [[ -f "$engine_dir/.bahamut-sha256" && -x "$engine_dir/bin/wine" ]]; then
+                wine_binary="$engine_dir/bin/wine"
+                break
+            fi
+        done < <(find "$managed_runtime" -mindepth 1 -maxdepth 1 -type d -name 'wine-*' 2> /dev/null | sort -rV)
     fi
     if [[ -z "$wine_binary" ]]; then
         wine_binary="$(command -v wine || true)"

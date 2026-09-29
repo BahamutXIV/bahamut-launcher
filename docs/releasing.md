@@ -76,12 +76,20 @@ version above the highest tag is rewritten back down by the next release.
 
 ## Version identity
 
-The runtime version the launcher reports comes from `BAHAMUT_RELEASE_TAG` on a
-tag build and from `git describe` on an ordinary branch build; see
+The runtime version the launcher reports is `BAHAMUT_RELEASE_TAG` on a tag
+build, such as `v1.0.0`. An ordinary branch build reports the latest reachable
+tag, a hyphen, and the short commit hash, such as `v1.0.0-222f317`, with a
+`-dirty` suffix when tracked files have uncommitted changes; see
 [`build.rs`](../build.rs). The release bump commit keeps the Cargo and Tauri
 package versions in lockstep, but that package version is metadata, not the
 runtime identity. The [signed release metadata](release-metadata.md) version
 is a separate value, ordered independently per product and target.
+
+`--version` (or `-V`) prints that runtime version and `--help` (or `-h`)
+prints the usage, on every platform, before the launcher opens a window,
+writes logs, or creates state. The Windows release build uses the windows
+subsystem and prints only to redirected stdout, for example
+`bahamut-launcher.exe --version > version.txt`.
 
 The macOS app's `CFBundleShortVersionString` and `CFBundleVersion` come from
 `src-tauri/tauri.conf.json`, which this bump commit rewrites only on a push to
@@ -177,13 +185,14 @@ Rebuilding an existing tag requires a tag whose tree contains
 | Archive | Contents and runtime limit |
 |---|---|
 | Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the empty official DAT overlay, and the update helper |
-| Linux x86_64 tar.gz | Portable launcher executable plus the Windows ZIP's payload without the update helper, with the Win32 loader, native runtime, and plugins built by llvm-mingw and the MinGW-w64 runtime notice added. System Wine and Linux Tauri libraries are required. |
+| Linux x86_64 tar.gz | One top-level `bahamut-launcher/` folder holding the launcher executable and the Windows ZIP's payload without the update helper, with the Win32 loader, native runtime, and plugins built by llvm-mingw and the MinGW-w64 runtime notice added. It adds the `.bahamut-launcher-package` marker, `install.sh`, `install-dependencies.sh`, a `Makefile`, the desktop entry under `share/applications/`, and the hicolor icons under `share/icons/`. Built on `ubuntu-22.04`, so it needs glibc 2.35 or newer. WebKitGTK 4.1 and GTK 3 are required; the first game launch downloads the Wine engine described in [Linux Wine engine](configuration.md#linux-wine-engine). |
 | macOS universal ZIP | One item, `Bahamut Launcher.app`, a universal app (Apple Silicon and Intel). The launcher sits at `Contents/MacOS/bahamut-launcher`; the Windows ZIP's payload minus the update helper sits under `Contents/Resources` with the MinGW-w64 runtime notice added, alongside `icon.icns`. `Info.plist` sits at `Contents/Info.plist`. Managed Sikarugir Wine is downloaded on first game launch. Apple Silicon needs Rosetta 2 to run the Wine engine. |
 
 Every archive carries `README.md`, `LICENSE.md`, and the MinHook, Dear ImGui,
 Lua, Miniz, and bundled font notices under `licenses/` (under
 `Contents/Resources/licenses/` inside the macOS app). Linux and macOS
-archives add the MinGW-w64 runtime notice. The archive README is sourced from
+archives add the MinGW-w64 runtime notice. The Linux archive's README is
+`packaging/linux/README.md`; the Windows and macOS archives' README is
 `docs/getting-started.md`. The workflow publishes a SHA-256 sidecar alongside
 each archive. [Platform support](extensions.md#platform-support)
 defines which platforms load the client module and records its status.
@@ -203,19 +212,35 @@ macOS 15 and later, the user allows an ad hoc signed app once under
 System Settings > Privacy & Security > Open Anyway after the first blocked
 launch; Control-click Open no longer bypasses Gatekeeper.
 
+### Linux gates
+
+The [Checks workflow](../.github/workflows/ci.yml) gates the Linux package on
+every push and pull request against `develop` or `main`. The
+`Repository checks` job runs `shellcheck` on the Linux install scripts,
+`package-linux-tarball.sh`, and `stage-unix-release.sh`, runs
+`desktop-file-validate` on
+`packaging/linux/bahamut-launcher.desktop`, and runs
+[`test-linux-package.py`](../scripts/test-linux-package.py). The
+`Checks (Linux)` job packages the archive from its placeholder executable,
+runs `install.sh` into a temporary prefix, runs
+`make DESTDIR=... PREFIX=/usr install`, and uninstalls with the installed
+`install.sh --uninstall`.
+
+The Linux leg of the Release Binaries workflow builds on `ubuntu-22.04`,
+packages the real launcher, extracts the archive, and runs
+`bahamut-launcher/bahamut-launcher --version`. When the build carries
+`BAHAMUT_RELEASE_TAG`, the printed version must equal it, or the leg fails.
+This proves the packaged binary loads on the build host; it does not prove
+game launch.
+
 ## Portable updates
 
-Windows checks signed stable launcher metadata quietly at startup. Settings >
-Misc > Install Location offers **Check for Updates** for a manual check. When a
-new release is available, the same button becomes **Update Launcher**. That
-action downloads the verified package and applies it after gameplay, install,
-patch, repair, restore, launch, and backup operations are idle. The separate
-helper process is included in the signed managed inventory and runs from staging
-on the same volume outside the portable directory. It applies managed files after
-normal launcher exit, keeps recoverable prior state, and restarts the updated
-launcher. Startup confirms a complete signed inventory or restores the previous
-release after a failed update. Offline checks or downloads leave the installed
-launcher available.
+The Windows package includes the update helper in its signed managed
+inventory. The helper runs from staging on the same volume outside the
+portable directory, applies managed files after normal launcher exit, keeps
+recoverable prior state, and restarts the updated launcher. Startup confirms a
+complete signed inventory or restores the previous release after a failed
+update. A newer release is installed from its archive.
 
 The portable archive does not contain production update endpoints, trust keys,
 or a signed bootstrap release. The owner must provision the explicit
@@ -228,11 +253,16 @@ The official DAT overlay is part of the signed launcher inventory. Launcher
 updates replace its managed files and preserve custom overlay packages.
 
 Launcher updates and the signed managed inventory cover the Windows package
-only. Files in the Linux archive, and inside the macOS app bundle, change
-only when a newer archive is extracted; the app never writes inside itself,
-keeping its own writable state in `~/.bahamut-launcher` instead. See
+only. The Linux package's files, in the extracted folder or an installed copy,
+and the files inside the macOS app bundle change only when a newer archive is
+extracted or installed. The launcher never writes into either and keeps its
+writable state in `~/.bahamut-launcher` instead. See
 [Getting started](getting-started.md#portable-archives) for where each
-platform keeps that state.
+platform keeps that state. Every Linux archive extracts to the same
+`bahamut-launcher/` folder, so an extracted copy is updated by deleting or
+renaming the old folder before extracting, or by rerunning `./install.sh`
+from the new archive; see
+[Linux first launch](getting-started.md#linux-first-launch).
 
 The Windows package is staged through the archive manifest check, which also
 rejects unexpected package files. Linux and macOS packages are staged by
@@ -244,13 +274,18 @@ macOS, [`package-macos-app.sh`](../scripts/package-macos-app.sh) wraps that
 staged tree into `Bahamut Launcher.app`: the launcher becomes
 `Contents/MacOS/bahamut-launcher`, every other staged file keeps its relative
 path under `Contents/Resources`, and the empty writable skeleton directories
-are dropped, since the app keeps its writable state outside the bundle. The
+are dropped, since the app keeps its writable state outside the bundle. For
+Linux, [`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh)
+stages the same tree into a private directory, drops the empty skeleton
+directories, adds the package marker, install scripts, desktop entry, and
+icons from [`packaging/linux/`](../packaging/linux/), asserts the exact file
+manifest and file modes, and writes the archive and its SHA-256 sidecar. The
 Windows launcher downloads both Microsoft prerequisite installers from pinned
 R2 URLs and checks exact length and SHA-256 before running them. The
 synthetic fixture can inspect package contents without a full build. It does
 not prove installer execution or game launch compatibility.
 
-Game archives and patch objects have a separate
+Game archives have a separate
 [game content delivery reference](content-delivery.md). A release with
 installation enabled needs pinned base metadata and live HTTPS range, full
 download, and fresh installation checks for its production host.

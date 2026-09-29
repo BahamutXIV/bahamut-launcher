@@ -1,13 +1,13 @@
 use std::thread;
 
-use bahamut_launcher::patcher::content;
-use bahamut_launcher::patcher::repair::{self, RepairPhase, RepairShared};
+use bahamut_launcher::content::manifest::{self, BasePackage};
+use bahamut_launcher::content::repair::{self, RepairPhase, RepairShared};
 use serde::Serialize;
 
-use crate::shell_config::{resolve_content_root, resolve_game_dir, resolve_patch_storage_dir};
+use crate::shell_config::{resolve_content_root, resolve_download_cache_dir, resolve_game_dir};
 use crate::state::{
-    BackupIpcState, BackupReservation, GameIpcState, GameRepairRun, GameReservation,
-    PatcherIpcState,
+    BackupIpcState, BackupReservation, ContentIpcState, GameIpcState, GameRepairRun,
+    GameReservation,
 };
 
 const NO_INSTALL_MSG: &str = "Game install not found. Select it on Home first.";
@@ -106,8 +106,8 @@ fn begin_repair_reservations(
     Ok((game_reservation, backup_reservation))
 }
 
-fn repair_package() -> Result<bahamut_launcher::patcher::content::BasePackage, String> {
-    content::shipped_manifest()?
+fn repair_package() -> Result<BasePackage, String> {
+    manifest::shipped_manifest()?
         .base
         .ok_or_else(|| "Game repair is not configured for this build.".to_owned())
 }
@@ -133,7 +133,7 @@ fn clear_terminal_run(guard: &mut Option<GameRepairRun>) -> Result<(), String> {
 /// Start one recover, verify, and repair pass over the complete managed-game inventory.
 #[tauri::command]
 pub(crate) fn start_game_repair(
-    state: tauri::State<'_, PatcherIpcState>,
+    state: tauri::State<'_, ContentIpcState>,
     game: tauri::State<'_, GameIpcState>,
     backups: tauri::State<'_, BackupIpcState>,
 ) -> Result<(), String> {
@@ -150,7 +150,7 @@ pub(crate) fn start_game_repair(
     let game_dir = resolve_game_dir().ok_or_else(|| NO_INSTALL_MSG.to_owned())?;
     let game_root = repair::canonical_game_root(&game_dir)?;
     let content_root = resolve_content_root()?;
-    let cache = resolve_patch_storage_dir()?;
+    let cache = resolve_download_cache_dir()?;
     let package = repair_package()?;
     let shared = RepairShared::new();
     let worker_shared = shared.clone();
@@ -177,7 +177,7 @@ pub(crate) fn start_game_repair(
 
 #[tauri::command]
 pub(crate) fn game_repair_status(
-    state: tauri::State<'_, PatcherIpcState>,
+    state: tauri::State<'_, ContentIpcState>,
 ) -> Result<GameRepairStatusView, String> {
     let guard = state
         .repair
@@ -190,7 +190,7 @@ pub(crate) fn game_repair_status(
 }
 
 #[tauri::command]
-pub(crate) fn pause_game_repair(state: tauri::State<'_, PatcherIpcState>) -> Result<(), String> {
+pub(crate) fn pause_game_repair(state: tauri::State<'_, ContentIpcState>) -> Result<(), String> {
     let guard = state
         .repair
         .lock()
@@ -202,7 +202,7 @@ pub(crate) fn pause_game_repair(state: tauri::State<'_, PatcherIpcState>) -> Res
 }
 
 #[tauri::command]
-pub(crate) fn resume_game_repair(state: tauri::State<'_, PatcherIpcState>) -> Result<(), String> {
+pub(crate) fn resume_game_repair(state: tauri::State<'_, ContentIpcState>) -> Result<(), String> {
     if state.is_closing() {
         return Err(REPAIR_CLOSING_MSG.into());
     }
@@ -217,7 +217,7 @@ pub(crate) fn resume_game_repair(state: tauri::State<'_, PatcherIpcState>) -> Re
 }
 
 #[tauri::command]
-pub(crate) fn cancel_game_repair(state: tauri::State<'_, PatcherIpcState>) -> Result<(), String> {
+pub(crate) fn cancel_game_repair(state: tauri::State<'_, ContentIpcState>) -> Result<(), String> {
     let guard = state
         .repair
         .lock()

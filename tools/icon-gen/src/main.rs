@@ -20,6 +20,8 @@ const MACOS_CANVAS_DENOMINATOR: u32 = 1024;
 /// Tauri uses the first ICO entry for the window; keep the largest first.
 /// https://github.com/tauri-apps/tauri/blob/tauri-codegen-v2.6.2/crates/tauri-codegen/src/image.rs#L57
 const ICO_SIZES: &[u32] = &[256, 16, 24, 32, 48, 64];
+/// Linux hicolor theme sizes, written under `packaging/linux/icons`.
+const LINUX_SIZES: &[u32] = &[48, 128, 256];
 
 fn main() -> Result<()> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -50,6 +52,16 @@ fn main() -> Result<()> {
 
     println!("==> Writing {}", out_ico.display());
     write_ico(&body, &out_ico)?;
+
+    let hicolor = project_dir.join("packaging/linux/icons/hicolor");
+    for &size in LINUX_SIZES {
+        let out = hicolor
+            .join(format!("{size}x{size}"))
+            .join("apps")
+            .join("bahamut-launcher.png");
+        println!("==> Writing {}", out.display());
+        write_linux_png(&body, size, &out)?;
+    }
 
     println!("done.");
     Ok(())
@@ -216,6 +228,14 @@ fn write_icns(body: &RgbaImage, out: &Path) -> Result<()> {
     let file = File::create(out).with_context(|| format!("create {}", out.display()))?;
     family.write(BufWriter::new(file))?;
     Ok(())
+}
+
+fn write_linux_png(body: &RgbaImage, size: u32, out: &Path) -> Result<()> {
+    let dir = out.parent().context("icon path has no parent")?;
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    resize(body, size)
+        .save(out)
+        .with_context(|| format!("write {}", out.display()))
 }
 
 fn write_ico(body: &RgbaImage, out: &Path) -> Result<()> {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>maintainer@example.invalid</email>
+		<name>BahamutXIV</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">BahamutXIV/bahamut-launcher</remote-id>
+	</upstream>
+</pkgmetadata>

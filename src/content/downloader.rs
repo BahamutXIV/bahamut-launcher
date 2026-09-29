@@ -5,13 +5,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Shared progress and cancellation for patch validation and extraction.
+//! Shared download progress and cancellation.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-/// Shared 64 KiB chunk size for streaming CRC32 passes; chunking does not affect CRC32.
-pub(crate) const IO_CHUNK: usize = 64 * 1024;
 
 /// Cloneable atomic counters shared by a streaming worker and its UI observer.
 #[derive(Clone)]

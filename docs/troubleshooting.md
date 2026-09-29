@@ -3,8 +3,9 @@
 [Back to the documentation index](README.md)
 
 For installation steps, see [Getting started](getting-started.md). Use
-[Install failures](#install-failures), [Authentication failures](#authentication-failures),
-or [Game closes after Play](#game-closes-after-play) for the problem you are seeing.
+[Linux startup](#linux-startup), [Install failures](#install-failures),
+[Authentication failures](#authentication-failures), or
+[Game closes after Play](#game-closes-after-play) for the problem you are seeing.
 For further help, [join the Bahamut Discord](https://discord.gg/PxK5RJYQjm).
 Build, test, and package instructions are in [Development](development.md).
 
@@ -12,11 +13,12 @@ Build, test, and package instructions are in [Development](development.md).
 
 The launcher writes its native structured transcript to
 `<state-root>/logs/launcher/bahamut-launcher.log` (see
-[macOS app layout](configuration.md#macos-app-layout) for the state root on
-each platform). Use the Help button in the launcher to view the newest 256
-KiB, copy the displayed snapshot, and see the canonical path. The support view
-contains launcher events only. Wine output and game chat logs remain separate
-sources. See the
+[macOS app layout](configuration.md#macos-app-layout) and
+[Linux package layout](configuration.md#linux-package-layout) for the state
+root on each platform). Use the Help button in the launcher to view the newest
+256 KiB, copy the displayed snapshot, and see the canonical path. The support
+view contains launcher events only. Wine output and game chat logs remain
+separate sources. See the
 [portable launcher tree](configuration.md#portable-launcher-tree) for the chat
 log location.
 
@@ -24,16 +26,135 @@ The active log contains only the current launcher session. At startup, the
 preceding transcript moves to `bahamut-launcher.previous.log`. Help and Copy
 Logs never mix those older events into current support output.
 
-Every launch records a startup banner, configuration phases, portable roots,
-platform and bounded hardware details, disk space, required launcher/runtime
-artifacts, attached displays, and Home lifecycle transitions. The launcher
-keeps these INFO events even when a coarse inherited `RUST_LOG=warn` is set.
+Every launch records a startup banner, configuration phases, install and
+state roots, platform and bounded hardware details, disk space, required
+launcher/runtime artifacts, attached displays, and Home lifecycle transitions.
+The launcher keeps these INFO events even when a coarse inherited
+`RUST_LOG=warn` is set.
 `RUST_LOG` directives for a target can still request additional detail.
 
 Credentials, authorization values, bearer tokens, and launcher session IDs are
 redacted before persistence and again before the Help view receives the log.
 Review copied diagnostics because unrelated paths and environment details can
 still identify the local machine.
+
+## Linux startup
+
+`bahamut-launcher --version` prints the launcher version and exits before it
+opens a window, writes logs, or creates launcher state. A version line proves
+the executable and its libraries load; it does not test the WebView.
+
+A launcher that exits at once with
+`error while loading shared libraries: <library>: cannot open shared object file`
+is missing a desktop library. Run `install-dependencies.sh --check` from the
+extracted folder or from the installed copy, such as
+`~/.local/lib/bahamut-launcher/install-dependencies.sh --check` for a user
+install. It names the missing libraries and prints the package command for the
+detected distribution. `install-dependencies.sh --install` runs that command
+after confirmation. The script is
+[`install-dependencies.sh`](../packaging/linux/install-dependencies.sh):
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Every checked library is satisfied, and so is the Wine requirement when it applies. |
+| 1 | A library or the `tar` or `xz` unpack tool is missing; a Wine selected through `BAHAMUT_WINE`, or on a host that is not x86_64, is missing, older than 7, or lacks 32-bit support; or the package command that `--install` runs failed or was declined. |
+| 2 | The command line is invalid. |
+| 3 | The host cannot be checked: no `ldd` or glibc loader, the launcher file is not an ELF executable, or it is built for another CPU architecture. |
+| 4 | The distribution uses musl. The launcher needs a glibc-based distribution. |
+| 5 | The glibc is older than the launcher requires. |
+
+A loader message naming a `GLIBC_2.xx` version that is not found means the
+distribution's glibc is older than the release build. The release is built on
+Ubuntu 22.04 and needs glibc 2.35 or newer. No package install fixes this; use
+a newer distribution release. A `GLIBCXX_` version error, or a version error
+raised for a library other than the launcher, comes from mismatched system
+packages; the script prints it as a missing library, and updating the
+distribution's packages fixes it.
+
+On an x86_64 host with `BAHAMUT_WINE` unset, the script reports that the
+launcher downloads its own Wine on the first game launch, and reports a system
+`wine` as the fallback when one exists. A missing, old, or 32-bit-less system
+Wine does not change the exit status there. With `BAHAMUT_WINE` set, or on
+another CPU architecture, the script checks that Wine.
+`Wine lacks 32-bit support` means the checked Wine has no 32-bit Windows
+libraries (`i386-windows/ntdll.dll`), which the client needs. Point
+`BAHAMUT_WINE` at a Wine build with 32-bit support. The launcher needs Wine 7
+or newer; the script reports an older Wine by its version.
+
+The script also reports whether a Vulkan loader (`libvulkan.so.1`) and a
+driver are installed. Their absence never changes the exit status; the game
+uses the slower OpenGL renderer until a Vulkan driver is installed.
+
+On an x86_64 host with `BAHAMUT_WINE` unset, the script also reports the
+engine's display and font libraries (`engine libraries:`) and an audio library
+(`audio:`, `libpulse.so.0` or `libasound.so.2`). Missing ones never change the
+exit status; the game has no sound without an audio library. The list is in
+[Linux Wine engine](configuration.md#linux-wine-engine).
+
+The RHEL family is decided by the `ID` in `/etc/os-release`: `rhel`, `centos`,
+`rocky`, `almalinux`, and `ol`. The script prints no package command there.
+On release 10 or newer, WebKitGTK 4.1 is in EPEL: enable EPEL, then install
+`webkit2gtk4.1`, which the script prints as a command to run yourself. On
+release 9 or older the distribution does not package WebKitGTK 4.1 and the
+launcher is not supported. Derivatives such as Nobara resolve to Fedora and
+get its package command. A system with a read-only root, such as SteamOS or
+Bazzite, gets no package command either; install the missing packages with
+the system's own tooling, for example `rpm-ostree` or a distrobox container.
+
+### Hyprland
+
+- `hyprctl clients` lists the launcher window with class `bahamut-launcher`
+  on native Wayland. Under XWayland, when GTK is built without Wayland
+  support or `GDK_BACKEND=x11` is set, the X11 class is `Bahamut-launcher`.
+  A rule that matches both in `hyprland.conf` is
+  `windowrule = match:class ^([Bb]ahamut-launcher)$, float on` for Hyprland
+  0.53 and newer, and `windowrulev2 = float, class:^([Bb]ahamut-launcher)$`
+  for 0.52 and older.
+- If the launcher window stays blank, start it with
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1 bahamut-launcher`, which turns off the
+  WebKitGTK DMA-BUF renderer. To apply it to the menu entry too, add
+  `env = WEBKIT_DISABLE_DMABUF_RENDERER,1` to `hyprland.conf`, which sets it
+  for every application Hyprland starts.
+
+### Moving a beside-the-launcher tree
+
+A Linux launcher tree without `.bahamut-launcher-package` keeps its state
+beside the executable, and the packaged launcher does not import that state.
+Extract the new archive into a new or empty directory, never into the older
+tree: the archive's `bahamut-launcher/` folder replaces an older
+`bahamut-launcher` executable of the same name. To update a packaged tree
+that runs in place, delete or rename the old `bahamut-launcher/` folder
+before extracting, since its state already lives in `~/.bahamut-launcher`,
+or rerun `./install.sh` from the new archive.
+
+To carry the old state over, close the launcher and copy these paths from the
+old tree into `~/.bahamut-launcher`, or `$BAHAMUT_LAUNCHER_HOME` when it holds
+an absolute path, keeping their relative paths:
+
+- `config/`
+- `data/`
+- `backups/`
+- `logs/chat/` for your game chat history from the chatlogs addon
+- `addons/<addon-id>/` for addons you installed yourself
+- `plugins/dats/<package-id>/` for custom DAT packages, not
+  `bahamut-dats-overlay`
+- `scripts/default.txt`
+- `screenshots/`
+
+Shipped addons and the official DAT package stay in the install root. A copied
+package whose ID matches a shipped one is skipped with a warning. The Wine
+prefix, DXVK cache, `wine.log`, and `helper.log` already live in the launcher
+data directory in both layouts. To keep state beside the launcher instead,
+remove the marker from a folder you extracted yourself, as described in
+[Linux package layout](configuration.md#linux-package-layout). Keep the
+marker in a copy that `install.sh` installed: `install.sh` replaces or
+deletes that whole directory, and refuses to when the marker is missing, the
+directory holds entries the package does not ship, or a shipped file is
+changed. After such a refusal, move the entries it names into the state root
+as listed above, copy `.bahamut-launcher-package` back from the matching
+archive when it is missing, and rerun `install.sh`. Once nothing in that
+directory needs keeping, `install.sh --force` replaces it, and
+`install.sh --uninstall --force` removes it, with everything in it.
 
 ## Game closes after Play
 
@@ -157,13 +278,13 @@ directory must contain `ffxivboot.exe`. A ready install also needs
   takes precedence over Windows registry detection. Linux and macOS rely on
   the configured path. Select or replace that path from the install strip on
   Home or the Install Location path row in Settings > Misc.
-- `not-patched` or `needs-patch` means the base install was found, but
-  `game.ver` is not at the target version or `ffxivgame.exe` is absent. Fix
-  the path first. The shipped manifest has no incremental remote retail patch
-  objects.
-  Choose Install Fresh on Home for another empty folder. The configured host
-  must return the pinned final client archive for that download to succeed. See
-  the [game content delivery reference](content-delivery.md) for verification.
+- `outdated-client` (auth) or `outdated-install` (lifecycle state,
+  diagnostics `STATE_OUTDATED_INSTALL`, game `outdated`) means an install was
+  found, but `game.ver` is not at the target version or `ffxivgame.exe` is
+  absent. Choose Install on Home and pick a new, empty folder. The configured
+  host must return the pinned final client archive for that download to
+  succeed. See the [game content delivery reference](content-delivery.md) for
+  verification.
 - A download failure shows its cause in the fixed size recovery strip and
   launcher log. Press Retry Install after correcting the cause.
 - Active download, extraction, and verification expose Pause or Resume beside
@@ -174,7 +295,7 @@ directory must contain `ffxivboot.exe`. A ready install also needs
 - Closing the launcher during installation requests cancellation and waits for
   worker cleanup before exiting. This also applies to Alt-F4 and normal
   application quit. The closing message stays visible until the worker stops.
-  Home shows install, patch, and repair progress.
+  Home shows install and repair progress.
 
 ### Repair Install
 
@@ -197,12 +318,6 @@ changes to those files.
 
 ### Launcher updates
 
-On Windows, the launcher checks signed update metadata quietly at startup.
-Open Settings > Misc > Install Location and choose Check for Updates to check
-again. If a release is available, the same button becomes Update Launcher. That action
-downloads the signed package and restarts through the staged update helper
-when other launcher work is idle.
-
 If a restart is interrupted, startup uses the staged signed helper to confirm a
 complete update or restore the previous signed release. If the helper is still
 finishing, close the extra launcher window and retry after the restart completes.
@@ -220,9 +335,11 @@ client. See the
 [game content delivery reference](content-delivery.md) for cache verification
 and recovery. Existing local payloads are never deleted by launcher startup.
 
-On Linux, the launcher looks for `wine` on `PATH` unless `BAHAMUT_WINE` is
-set, initializes a managed prefix with `wineboot --init` when needed, and
-falls back from an attempted DXVK setup to `wined3d`. On macOS, the managed
+On Linux, the launcher runs the `BAHAMUT_WINE` file when that variable is set,
+otherwise the managed Wine engine on an x86_64 host, and otherwise `wine` on
+`PATH` (see [Linux Wine engine](configuration.md#linux-wine-engine)). It
+initializes a managed prefix with `wineboot --init` when needed, and falls back
+from an attempted DXVK setup to `wined3d`. On macOS, the managed
 Sikarugir Wine engine is downloaded on first launch. Wine output goes to the
 `wine.log` for that launch under the launcher's data directory, and the Wine
 extension launch adds `helper.log` beside it (see
@@ -245,6 +362,22 @@ An archive verification failure leaves installed runtime components unchanged.
 Check the launcher log for the named archive and retry after resolving a
 failed download. Linux retains its `wined3d` fallback when DXVK setup fails.
 Only DXVK caches created from a verified download are reused.
+
+### Wine engine download
+
+The Linux engine downloads on the first game launch and is reused afterwards.
+A failed or interrupted download leaves the previous engine and the prefix
+untouched. When the engine cannot be installed, the launcher uses `wine` on
+`PATH`; when no `wine` is found either, it reports an error naming the engine
+failure. Install Wine 7 or newer with 32-bit support, or set `BAHAMUT_WINE`,
+in that case. To download the engine again, delete
+`~/.bahamut-launcher/runtime/wine-*` and start the game.
+
+Selecting a Wine does not change the prefix rules. A prefix that a different
+Wine created is updated by Wine itself on first use, and a `wineserver` from
+another Wine that still runs on the same prefix must exit first (run
+`wineserver -k` from that Wine). A 32-bit-only prefix that you manage yourself
+needs `BAHAMUT_WINE` pointing at the Wine that owns it.
 
 ## Wine extension launch
 
@@ -278,7 +411,7 @@ path writes two logs under the launcher data directory's `logs/` folder
 ## Authentication failures
 
 Login is gated by the install check, so resolve `no-install` and
-`not-patched` before diagnosing the server. Then check the selected profile on
+`outdated-client` before diagnosing the server. Then check the selected profile on
 Profiles from the Home login card or in `config/bahamut.ini`:
 
 - `host` is a bare hostname or IP and is also the lobby host patched into the

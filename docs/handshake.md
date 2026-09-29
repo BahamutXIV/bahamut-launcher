@@ -129,8 +129,10 @@ recorded identity for the helper and runtime checks.
 
 ## Wine launch
 
-Linux uses system Wine. macOS uses the managed Sikarugir Wine engine. Both
-backends:
+Linux uses the managed Wine engine, `BAHAMUT_WINE` overrides it, and system
+Wine is the fallback when the engine cannot be installed or the host is not
+x86_64 (see [Linux Wine engine](configuration.md#linux-wine-engine)). macOS
+uses the managed Sikarugir Wine engine. Both backends:
 
 - Resolve or initialize a Wine prefix.
 - Derive the launch tick from `CLOCK_BOOTTIME` on Linux and `CLOCK_MONOTONIC`
@@ -151,12 +153,14 @@ macOS backend ignores that preference and uses its default filter.
 
 ### Wine extension launch
 
-When `bahamut-loader.exe` and `bahamut.dll` are present in the
-[install root](configuration.md#macos-app-layout) (beside the binary in a
-portable tree, under `Contents/Resources` in the macOS app) and the launch
-carries extension artifacts, the Wine backends run the helper, under the
-managed engine on macOS and under system Wine on Linux, instead of the launch
-from the working copy above:
+When `bahamut-loader.exe` and `bahamut.dll` are present in the install root
+(beside the binary in a portable tree and in the
+[Linux package](configuration.md#linux-package-layout), under
+`Contents/Resources` in the [macOS app](configuration.md#macos-app-layout))
+and the launch carries extension artifacts, the Wine backends run the helper,
+under the managed engine on macOS and on Linux, or the Wine that
+`BAHAMUT_WINE` or the Linux fallback selects, instead of
+the launch from the working copy above:
 
 - The launcher checks the [client identity](extensions.md#client-compatibility)
   before planning the helper. A mismatch stops the launch.

@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import stat
 import sys
 import zipfile
@@ -303,8 +302,6 @@ def build_manifest(
     output_dir: Path,
     base_files: list[FileIdentity],
     final_files: list[FileIdentity],
-    baseline_version: str,
-    transition: str,
     staging_bytes: int,
     max_archive_bytes: int,
 ) -> dict[str, object]:
@@ -314,12 +311,12 @@ def build_manifest(
         raise PackageError(
             "Peak staging bytes must cover both the base and final inventories."
         )
-    if transition == "none" and [file.manifest_value() for file in base_files] != [
+    if [file.manifest_value() for file in base_files] != [
         file.manifest_value()
         for file in final_files
         if file.path.casefold() not in {"boot.ver", "game.ver"}
     ]:
-        raise PackageError("A no-patch transition requires identical base and final payloads.")
+        raise PackageError("Base and final payloads must be identical apart from boot.ver and game.ver.")
 
     archives: list[dict[str, object]] = []
     for index, partition in enumerate(zip_partitions(base_files, max_archive_bytes), 1):
@@ -330,7 +327,7 @@ def build_manifest(
         archives.append(
             {
                 "object": {
-                    "object_key": f"game/{baseline_version}/{archive_hash}/{archive_name}",
+                    "object_key": f"game/{archive_hash}/{archive_name}",
                     "length": archive_length,
                     "sha256": archive_hash,
                 },
@@ -339,12 +336,10 @@ def build_manifest(
         )
 
     return {
-        "schema_version": 1,
+        "schema_version": 3,
         "content_root": None,
         "base": {
-            "baseline_version": baseline_version,
             "target_version": TARGET_VERSION,
-            "transition": transition,
             "archives": archives,
             "final_files": [file.manifest_value() for file in final_files],
             "staging_bytes": staging_bytes,
@@ -379,26 +374,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--final-root", required=True, type=Path)
     parser.add_argument("--final-allowlist", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--baseline-version", required=True)
-    parser.add_argument("--transition", required=True, choices=("none", "full-chain"))
     parser.add_argument("--staging-bytes", required=True, type=int)
     parser.add_argument("--max-archive-uncompressed-bytes", required=True, type=int)
     return parser.parse_args(argv)
 
 
 def run(args: argparse.Namespace) -> Path:
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.baseline_version) or args.baseline_version.endswith((".", " ")):
-        raise PackageError("Baseline version must be a safe ASCII path segment.")
     if args.staging_bytes <= 0:
         raise PackageError("Peak staging bytes must be positive.")
-    if args.transition == "none" and args.baseline_version != TARGET_VERSION:
-        raise PackageError("A no-patch transition requires baseline and target versions to match.")
 
     base_root = inspect_tree(args.input_root)
     final_root = inspect_tree(args.final_root)
-    if paths_overlap(base_root, final_root) and not (
-        args.transition == "none" and same_tree(base_root, final_root)
-    ):
+    if paths_overlap(base_root, final_root) and not same_tree(base_root, final_root):
         raise PackageError("Base and final inputs must be separate directory trees.")
     base_files = inventory(base_root, args.base_allowlist)
     final_files = inventory(final_root, args.final_allowlist)
@@ -427,8 +414,6 @@ def run(args: argparse.Namespace) -> Path:
         output_dir,
         base_files,
         final_files,
-        args.baseline_version,
-        args.transition,
         args.staging_bytes,
         args.max_archive_uncompressed_bytes,
     )

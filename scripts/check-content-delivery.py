@@ -27,9 +27,7 @@ class HttpsRedirect(urllib.request.HTTPRedirectHandler):
 
 def pinned_objects(repository):
     delivery = json.loads((repository / "manifests/game-delivery.json").read_text())
-    patches = json.loads((repository / "manifests/patches-1.23b.json").read_text())
-    objects = {"patches/1.23b/" + item["runtimePath"]:
-               (item["size"], item["sha256"]) for item in patches["files"]}
+    objects = {}
     for archive in (delivery.get("base") or {}).get("archives", []):
         item = archive["object"]
         if item["object_key"] in objects:
@@ -76,12 +74,12 @@ def check(opener, url, length, digest):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--content-root", help="Defaults to the checked-in delivery host.")
-    parser.add_argument("--object-key", required=True, help="Exact key from the checked-in manifests.")
+    parser.add_argument("--object-key", required=True, help="Exact archive object key from manifests/game-delivery.json.")
     args = parser.parse_args()
     try:
         delivery, objects = pinned_objects(Path(__file__).resolve().parent.parent)
         if args.object_key not in objects:
-            raise ValueError("Object key is absent from the checked-in manifests.")
+            raise ValueError("Object key is absent from the checked-in delivery manifest.")
         root = args.content_root or delivery.get("content_root")
         if not root:
             raise ValueError("Set --content-root to the owner-controlled production HTTPS host.")

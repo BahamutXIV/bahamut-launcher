@@ -3,7 +3,6 @@ pub(crate) mod extensions;
 pub(crate) mod home;
 pub(crate) mod install;
 pub(crate) mod launcher_updates;
-pub(crate) mod patch;
 pub(crate) mod repair;
 pub(crate) mod settings;
 pub(crate) mod support;
@@ -17,14 +16,13 @@ pub(crate) use extensions::{
     set_screenshot_enabled,
 };
 pub(crate) use home::{get_home_status, launcher_version, list_news};
-pub(crate) use install::{detect_game_install_command, pick_directory, pick_install_dir};
+pub(crate) use install::{
+    cancel_install, detect_game_install_command, install_game, install_quote, install_status,
+    pause_install, pick_directory, pick_install_dir, reset_install, resume_install,
+};
 pub(crate) use launcher_updates::{
     apply_launcher_update, check_launcher_update, get_launcher_update_status,
     launcher_update_restart_available,
-};
-pub(crate) use patch::{
-    cancel_patch, get_patch_settings, install_game, install_quote, patch_status, pause_patch,
-    reset_patch, resume_patch, start_local_patch, start_patch_download,
 };
 pub(crate) use repair::{
     cancel_game_repair, game_repair_status, pause_game_repair, resume_game_repair,

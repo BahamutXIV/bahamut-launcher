@@ -12,15 +12,20 @@ use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::config::preferences::{
     DisplayMode, GameSettings, Multisampling, SUPPORTED_RESOLUTIONS,
 };
+use bahamut_launcher::content::http::ObjectSpec;
+use bahamut_launcher::content::manifest::{ArchiveLayout, BaseArchive, BasePackage, InstallFile};
+use bahamut_launcher::content::worker::InstallRequest;
+use bahamut_launcher::content::{InstallShared, Phase};
 use bahamut_launcher::install_check::InstallState;
-use bahamut_launcher::patcher::{PatchSource, PatcherShared, Phase};
 use bahamut_launcher::platform::LaunchedGame;
+use bahamut_launcher::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
+use sha2::{Digest, Sha256};
 
 use crate::commands::auth::translate_client_error;
 use crate::commands::extensions::{extension_folder_path, extension_inventory_view_with_overlays};
 use crate::commands::home::home_state_diagnostics;
-use crate::commands::patch::{
-    PATCHER_BUSY_MSG, PATCHER_CLOSING_MSG, PATCHER_STATE_POISONED_MSG, spawn_patcher,
+use crate::commands::install::{
+    CONTENT_CLOSING_MSG, CONTENT_STATE_POISONED_MSG, INSTALL_BUSY_MSG, spawn_installer,
 };
 use crate::commands::support::{EXTERNAL_LINKS, open_external};
 use crate::commands::window::{
@@ -31,7 +36,7 @@ use crate::presentation::{
     GraphicsSettingsPayload, HomeLifecycleState, game_settings_view, home_presentation,
     replace_game_settings, resolve_home_lifecycle,
 };
-use crate::state::{BackupIpcState, GameIpcState, PatcherIpcState, PatcherRun};
+use crate::state::{BackupIpcState, ContentIpcState, GameIpcState, InstallRun};
 
 #[test]
 fn game_state_reserves_one_launch_and_releases_on_exit() {
@@ -198,8 +203,8 @@ fn backup_worker_failure_releases_ownership_and_exit_wait() {
 }
 
 #[test]
-fn shutdown_retains_the_exit_gate_for_non_patch_work() {
-    let state = PatcherIpcState::default();
+fn shutdown_retains_the_exit_gate_for_non_content_work() {
+    let state = ContentIpcState::default();
     let request = state.request_shutdown(true);
     assert!(request.first_request);
     assert!(request.waiting);
@@ -363,11 +368,11 @@ fn home_lifecycle_resolves_exactly_four_distinct_states() {
             HomeLifecycleState::NoValidInstall,
         ),
         (
-            InstallState::FoundNeedsPatch {
+            InstallState::FoundOutdated {
                 game_version: Some("2012.01.01.0000.0000".into()),
             },
             false,
-            HomeLifecycleState::PatchRequired,
+            HomeLifecycleState::OutdatedInstall,
         ),
         (InstallState::Ready, false, HomeLifecycleState::LoggedOut),
         (InstallState::Ready, true, HomeLifecycleState::Ready),
@@ -386,12 +391,12 @@ fn home_lifecycle_diagnostics_are_stable_and_support_facing() {
         ("STATE_READY", "ready", "ready", "launch")
     );
     assert_eq!(
-        home_state_diagnostics(HomeLifecycleState::PatchRequired),
+        home_state_diagnostics(HomeLifecycleState::OutdatedInstall),
         (
-            "STATE_PATCH_REQUIRED",
-            "patch-required",
-            "needs-patch",
-            "update-client"
+            "STATE_OUTDATED_INSTALL",
+            "outdated-install",
+            "outdated",
+            "install-fresh"
         )
     );
 }
@@ -400,7 +405,7 @@ fn home_lifecycle_diagnostics_are_stable_and_support_facing() {
 fn home_presentations_keep_the_account_card_stable() {
     for state in [
         HomeLifecycleState::NoValidInstall,
-        HomeLifecycleState::PatchRequired,
+        HomeLifecycleState::OutdatedInstall,
         HomeLifecycleState::LoggedOut,
         HomeLifecycleState::Ready,
     ] {
@@ -408,8 +413,7 @@ fn home_presentations_keep_the_account_card_stable() {
         assert_eq!(presentation.title, "Account Login");
         assert_eq!(presentation.eyebrow, "");
         let expected_action = match state {
-            HomeLifecycleState::NoValidInstall => "Install",
-            HomeLifecycleState::PatchRequired => "Update",
+            HomeLifecycleState::NoValidInstall | HomeLifecycleState::OutdatedInstall => "Install",
             HomeLifecycleState::LoggedOut | HomeLifecycleState::Ready => "Play",
         };
         assert_eq!(presentation.primary_action, expected_action);
@@ -593,8 +597,6 @@ fn settings_frontend_matches_flat_backend_contract() {
     assert!(frontend.contains("config_tool_supported"));
     assert!(frontend.contains("launch_config_tool"));
     assert!(!frontend.contains("data-extension-folder=\"logs\""));
-    assert!(!frontend.contains("data-settings-action=\"reset-patch-storage\""));
-    assert!(!frontend.contains("invoke('set_patch_settings', { storageDir:'' })"));
     assert!(!frontend.contains("get_extension_runtime_status"));
     assert!(!frontend.contains("run_extension_diagnostics"));
     assert!(!frontend.contains("Overlay packages"));
@@ -796,32 +798,86 @@ fn registration_server_error_uses_stable_create_failure_kind() {
     assert_eq!(mismatched.kind, "server");
 }
 
+fn fixture_file(path: &str, contents: &[u8]) -> InstallFile {
+    InstallFile {
+        path: path.into(),
+        length: contents.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(contents)),
+    }
+}
+
+/// Minimal valid package whose archive is tiny, so the disk-space preflight passes on any host.
+fn fixture_package() -> BasePackage {
+    let executables = vec![
+        fixture_file("ffxivboot.exe", b"boot"),
+        fixture_file("ffxivgame.exe", b"game"),
+    ];
+    let mut final_files = executables.clone();
+    final_files.push(fixture_file("boot.ver", FFXIV_BOOT_VERSION.as_bytes()));
+    final_files.push(fixture_file("game.ver", FFXIV_GAME_VERSION.as_bytes()));
+    let archive_bytes = b"fixture archive";
+    let archive_sha256 = format!("{:x}", Sha256::digest(archive_bytes));
+    let package = BasePackage {
+        target_version: FFXIV_GAME_VERSION.into(),
+        archives: vec![BaseArchive {
+            object: ObjectSpec {
+                object_key: format!("game/{archive_sha256}/fixture.zip"),
+                length: archive_bytes.len() as u64,
+                sha256: archive_sha256,
+            },
+            files: executables,
+            layout: ArchiveLayout::Flat,
+            excluded_files: Vec::new(),
+            empty_directories: Vec::new(),
+            apple_metadata_files: 0,
+        }],
+        final_files,
+        staging_bytes: 4096,
+    };
+    package.validate().expect("fixture package is valid");
+    package
+}
+
+fn install_request(destination: PathBuf, content_root: &str, cache_dir: PathBuf) -> InstallRequest {
+    InstallRequest {
+        destination,
+        content_root: content_root.into(),
+        cache_dir,
+        package: fixture_package(),
+    }
+}
+
+/// Request for tests that stop at the admission gate before the worker reads it.
+fn gate_request() -> InstallRequest {
+    install_request(
+        PathBuf::from("game-location"),
+        "http://127.0.0.1:9",
+        PathBuf::from("cache"),
+    )
+}
+
 #[test]
-fn patcher_start_rejects_a_second_nonterminal_worker() {
-    let state = PatcherIpcState::default();
+fn install_start_rejects_a_second_nonterminal_worker() {
+    let state = ContentIpcState::default();
     let (release_tx, wait_rx) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || wait_rx.recv().unwrap());
-    *state.patcher.lock().unwrap() = Some(PatcherRun {
-        shared: bahamut_launcher::patcher::PatcherShared::new(),
+    *state.install.lock().unwrap() = Some(InstallRun {
+        shared: InstallShared::with_totals(0, 0),
         worker: Some(worker),
-        installing: false,
     });
-    let err = match spawn_patcher(
+    let err = match spawn_installer(
         &state,
         &GameIpcState::default(),
         &BackupIpcState::default(),
-        PathBuf::from("game-location"),
-        PatchSource::Local {
-            source_dir: PathBuf::from("patch-source"),
-        },
+        gate_request(),
     ) {
         Ok(_) => panic!("second reservation unexpectedly succeeded"),
         Err(err) => err,
     };
-    assert_eq!(err.message.as_deref(), Some(PATCHER_BUSY_MSG));
+    assert_eq!(err.message.as_deref(), Some(INSTALL_BUSY_MSG));
     release_tx.send(()).unwrap();
     state
-        .patcher
+        .install
         .lock()
         .unwrap()
         .take()
@@ -833,28 +889,25 @@ fn patcher_start_rejects_a_second_nonterminal_worker() {
 }
 
 #[test]
-fn poisoned_patcher_state_returns_error() {
-    let state = std::sync::Arc::new(PatcherIpcState::default());
+fn poisoned_install_state_returns_error() {
+    let state = std::sync::Arc::new(ContentIpcState::default());
     let poisoned = std::sync::Arc::clone(&state);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _guard = poisoned.patcher.lock().unwrap();
-        panic!("poison patcher state fixture");
+        let _guard = poisoned.install.lock().unwrap();
+        panic!("poison install state fixture");
     }));
 
-    let error = match spawn_patcher(
+    let error = match spawn_installer(
         &state,
         &GameIpcState::default(),
         &BackupIpcState::default(),
-        PathBuf::from("game-location"),
-        PatchSource::Local {
-            source_dir: PathBuf::from("patch-source"),
-        },
+        gate_request(),
     ) {
         Ok(_) => panic!("poisoned state unexpectedly accepted"),
         Err(error) => error,
     };
     assert_eq!(error.kind, "server");
-    assert_eq!(error.message.as_deref(), Some(PATCHER_STATE_POISONED_MSG));
+    assert_eq!(error.message.as_deref(), Some(CONTENT_STATE_POISONED_MSG));
 }
 
 #[test]
@@ -862,8 +915,8 @@ fn content_worker_reserves_game_and_backups_until_download_stops() {
     use std::io::Read;
     use std::net::TcpListener;
     let temp = crate::test_support::tempdir().unwrap();
-    let game_dir = temp.path().join("game");
-    std::fs::create_dir(&game_dir).unwrap();
+    let destination = temp.path().join("game-install");
+    let cache_dir = temp.path().join("cache");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}", listener.local_addr().unwrap());
     let (requested, request) = std::sync::mpsc::channel();
@@ -881,18 +934,14 @@ fn content_worker_reserves_game_and_backups_until_download_stops() {
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .unwrap();
     });
-    let patcher = PatcherIpcState::default();
+    let content = ContentIpcState::default();
     let game = GameIpcState::default();
     let backups = BackupIpcState::default();
-    spawn_patcher(
-        &patcher,
+    spawn_installer(
+        &content,
         &game,
         &backups,
-        game_dir.clone(),
-        PatchSource::Remote {
-            content_root: root,
-            cache_dir: temp.path().join("cache"),
-        },
+        install_request(destination.clone(), &root, cache_dir.clone()),
     )
     .unwrap();
     request.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -900,20 +949,17 @@ fn content_worker_reserves_game_and_backups_until_download_stops() {
     assert!(game.begin_restore().is_none());
     assert!(backups.begin().is_err());
     assert!(
-        spawn_patcher(
-            &patcher,
+        spawn_installer(
+            &content,
             &game,
             &backups,
-            game_dir,
-            PatchSource::Local {
-                source_dir: temp.path().join("unused")
-            }
+            install_request(destination, &root, cache_dir)
         )
         .is_err()
     );
     release.send(()).unwrap();
-    let worker = patcher
-        .patcher
+    let worker = content
+        .install
         .lock()
         .unwrap()
         .as_mut()
@@ -924,8 +970,8 @@ fn content_worker_reserves_game_and_backups_until_download_stops() {
     worker.join().unwrap();
     server.join().unwrap();
     assert_eq!(
-        patcher
-            .patcher
+        content
+            .install
             .lock()
             .unwrap()
             .as_ref()
@@ -940,28 +986,25 @@ fn content_worker_reserves_game_and_backups_until_download_stops() {
 
 #[test]
 fn active_game_or_backup_rejects_content_before_worker_dispatch() {
-    let patcher = PatcherIpcState::default();
+    let content = ContentIpcState::default();
     let game = GameIpcState::default();
     let backups = BackupIpcState::default();
     let launch = game.begin_launch().unwrap();
-    let source = || PatchSource::Local {
-        source_dir: PathBuf::from("unused"),
-    };
-    assert!(spawn_patcher(&patcher, &game, &backups, PathBuf::from("unused"), source()).is_err());
+    assert!(spawn_installer(&content, &game, &backups, gate_request()).is_err());
     drop(launch);
     let backup = backups.begin().unwrap();
-    assert!(spawn_patcher(&patcher, &game, &backups, PathBuf::from("unused"), source()).is_err());
-    assert!(patcher.patcher.lock().unwrap().is_none());
+    assert!(spawn_installer(&content, &game, &backups, gate_request()).is_err());
+    assert!(content.install.lock().unwrap().is_none());
     assert!(game.begin_launch().is_some());
     drop(backup);
 }
 
 #[test]
 fn shutdown_joins_slow_writer_before_allowing_a_new_start() {
-    let state = PatcherIpcState::default();
-    let shared = bahamut_launcher::patcher::PatcherShared::new();
+    let state = ContentIpcState::default();
+    let shared = InstallShared::with_totals(0, 0);
     let temp = crate::test_support::tempdir().unwrap();
-    let output = temp.path().join("patch-output.tmp");
+    let output = temp.path().join("install-output.tmp");
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let worker_gate = Arc::clone(&gate);
@@ -983,29 +1026,25 @@ fn shutdown_joins_slow_writer_before_allowing_a_new_start() {
         file.write_all(b" and completed suffix").unwrap();
         file.sync_all().unwrap();
     });
-    *state.patcher.lock().unwrap() = Some(PatcherRun {
+    *state.install.lock().unwrap() = Some(InstallRun {
         shared,
         worker: Some(worker),
-        installing: false,
     });
 
     ready_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     let request = state.request_shutdown(false);
     assert!(request.first_request);
     assert!(request.waiting);
-    let error = match spawn_patcher(
+    let error = match spawn_installer(
         &state,
         &GameIpcState::default(),
         &BackupIpcState::default(),
-        PathBuf::from("game-location"),
-        PatchSource::Local {
-            source_dir: PathBuf::from("patch-source"),
-        },
+        gate_request(),
     ) {
         Ok(_) => panic!("reservation unexpectedly succeeded during shutdown"),
         Err(error) => error,
     };
-    assert_eq!(error.message.as_deref(), Some(PATCHER_CLOSING_MSG));
+    assert_eq!(error.message.as_deref(), Some(CONTENT_CLOSING_MSG));
     let repeated = state.request_shutdown(false);
     assert!(!repeated.first_request);
     assert!(repeated.waiting);
@@ -1034,20 +1073,19 @@ fn shutdown_joins_slow_writer_before_allowing_a_new_start() {
 
 #[test]
 fn idle_shutdown_is_immediate_and_paused_shutdown_cancels() {
-    let idle = PatcherIpcState::default();
+    let idle = ContentIpcState::default();
     let request = idle.request_shutdown(false);
     assert!(request.first_request);
     assert!(!request.waiting);
     assert!(!idle.request_shutdown(false).waiting);
 
-    let paused = PatcherIpcState::default();
-    let shared = bahamut_launcher::patcher::PatcherShared::new();
+    let paused = ContentIpcState::default();
+    let shared = InstallShared::with_totals(0, 0);
     shared.request_pause();
     let observed = Arc::clone(&shared);
-    *paused.patcher.lock().unwrap() = Some(PatcherRun {
+    *paused.install.lock().unwrap() = Some(InstallRun {
         shared,
         worker: None,
-        installing: false,
     });
     let request = paused.request_shutdown(false);
     assert!(request.first_request);
@@ -1057,23 +1095,23 @@ fn idle_shutdown_is_immediate_and_paused_shutdown_cancels() {
 }
 
 #[test]
-fn shutdown_cancels_and_joins_a_real_paused_patcher_worker() {
-    let state = PatcherIpcState::default();
+fn shutdown_cancels_and_joins_a_real_paused_install_worker() {
+    let state = ContentIpcState::default();
     let temp = crate::test_support::tempdir().unwrap();
-    let shared = PatcherShared::new();
+    let shared = InstallShared::with_totals(0, 0);
     shared.request_pause();
     let worker_shared = Arc::clone(&shared);
-    let game_dir = temp.path().join("game");
-    let source = PatchSource::Local {
-        source_dir: temp.path().join("patches"),
-    };
+    let request = install_request(
+        temp.path().join("game"),
+        "http://127.0.0.1:9",
+        temp.path().join("cache"),
+    );
     let worker = std::thread::spawn(move || {
-        bahamut_launcher::patcher::worker::drive(worker_shared, game_dir, source)
+        bahamut_launcher::content::worker::drive(worker_shared, request)
     });
-    *state.patcher.lock().unwrap() = Some(PatcherRun {
+    *state.install.lock().unwrap() = Some(InstallRun {
         shared: Arc::clone(&shared),
         worker: Some(worker),
-        installing: false,
     });
 
     let request = state.request_shutdown(false);
@@ -1085,4 +1123,61 @@ fn shutdown_cancels_and_joins_a_real_paused_patcher_worker() {
     // is settled only after the join.
     assert!(!shared.is_paused());
     assert_eq!(shared.phase(), Phase::Cancelled);
+}
+
+fn cli_args(args: &[&str]) -> impl Iterator<Item = std::ffi::OsString> {
+    args.iter()
+        .map(std::ffi::OsString::from)
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+#[test]
+fn cli_request_recognises_the_version_flags() {
+    for flag in ["--version", "-V"] {
+        assert_eq!(
+            crate::cli_request(cli_args(&["bahamut-launcher", flag])),
+            Some(crate::CliRequest::Version),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn cli_request_recognises_the_help_flags() {
+    for flag in ["--help", "-h"] {
+        assert_eq!(
+            crate::cli_request(cli_args(&["bahamut-launcher", flag])),
+            Some(crate::CliRequest::Help),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn cli_request_ignores_a_bare_launch() {
+    assert_eq!(crate::cli_request(cli_args(&["bahamut-launcher"])), None);
+    assert_eq!(crate::cli_request(cli_args(&[])), None);
+}
+
+#[test]
+fn cli_request_ignores_an_unrelated_argument() {
+    for arg in ["--update-transaction", "--versions", "-v", "version", ""] {
+        assert_eq!(
+            crate::cli_request(cli_args(&["bahamut-launcher", arg])),
+            None,
+            "{arg}"
+        );
+    }
+}
+
+#[test]
+fn cli_request_ignores_a_flag_with_another_argument() {
+    for args in [
+        ["bahamut-launcher", "--version", "--help"],
+        ["bahamut-launcher", "--version", "extra"],
+        ["bahamut-launcher", "--update-recovered", "--version"],
+    ] {
+        assert_eq!(crate::cli_request(cli_args(&args)), None, "{args:?}");
+    }
 }

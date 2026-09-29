@@ -11,14 +11,13 @@ use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use super::INSTALL_RECEIPT_FILE as RECEIPT_NAME;
-use super::content::{
-    ArchiveLayout, BaseArchive, BasePackage, InstallFile, PatchTransition, patch_objects,
-    validate_hash, validate_relative_path,
-};
 use super::http::{ObjectSpec, download_object};
-use super::manifest::total_bytes as patch_download_bytes;
-use super::process::write_version_files;
-use super::worker::{PatcherShared, Phase, apply_plan, download_checkpoint, download_patches};
+use super::manifest::{
+    ArchiveLayout, BaseArchive, BasePackage, InstallFile, validate_hash, validate_relative_path,
+};
+use super::require_space;
+use super::version_files::write_version_files;
+use super::worker::{InstallShared, Phase, download_checkpoint};
 use crate::diagnostics::free_disk_bytes;
 use crate::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
 
@@ -64,7 +63,7 @@ pub fn quote(
     let stage_path = stage_path_for(&destination_path.path)?;
     reject_overlapping_paths(&destination_path.path, &cache_path.path, &stage_path)?;
 
-    let download_bytes = total_download_bytes(package)?;
+    let download_bytes = package.download_bytes()?;
     let destination_bytes = inventory_bytes(&package.final_files)?;
     Ok(InstallQuote {
         download_bytes,
@@ -77,7 +76,7 @@ pub fn quote(
 
 /// Download, stage, validate, and publish a new base installation.
 pub fn install(
-    shared: &Arc<PatcherShared>,
+    shared: &Arc<InstallShared>,
     destination: &Path,
     root: &str,
     cache: &Path,
@@ -91,7 +90,7 @@ pub fn install(
         if read_receipt(&destination_path.path)? != identity {
             return Err("The selected destination belongs to another package.".into());
         }
-        shared.total_patches.store(
+        shared.total_files.store(
             package.final_files.len(),
             std::sync::atomic::Ordering::Release,
         );
@@ -101,7 +100,7 @@ pub fn install(
         return Ok(());
     }
     if destination_path.exists {
-        shared.total_patches.store(
+        shared.total_files.store(
             package.final_files.len(),
             std::sync::atomic::Ordering::Release,
         );
@@ -187,33 +186,27 @@ pub fn install(
         .map(|archive| archive.files.len())
         .sum();
     shared
-        .total_patches
+        .total_files
         .store(extracted_file_count, std::sync::atomic::Ordering::Release);
     shared
-        .patch_idx
+        .file_idx
         .store(0, std::sync::atomic::Ordering::Release);
     for (archive, path) in package.archives.iter().zip(&archives) {
         extract_archive(shared, path, archive, package, &stage_path)?;
     }
 
-    match package.transition {
-        PatchTransition::None => write_version_files(&stage_path)
-            .map_err(|error| format!("Could not write staged version files: {error}"))?,
-        PatchTransition::FullChain => {
-            let plan = download_patches(shared, root, &cache_path)?;
-            apply_plan(shared, &stage_path, &plan)?;
-        }
-    }
+    write_version_files(&stage_path)
+        .map_err(|error| format!("Could not write staged version files: {error}"))?;
 
     if shared.wait_if_paused() {
         return Err("Installation was cancelled.".into());
     }
-    shared.total_patches.store(
+    shared.total_files.store(
         package.final_files.len(),
         std::sync::atomic::Ordering::Release,
     );
     shared
-        .patch_idx
+        .file_idx
         .store(0, std::sync::atomic::Ordering::Release);
     shared.set_phase(Phase::ValidatingFiles);
     validate_final_tree(&stage_path, package, &identity, shared, true)?;
@@ -239,26 +232,13 @@ pub fn install(
     Ok(())
 }
 
-fn total_download_bytes(package: &BasePackage) -> Result<u64, String> {
-    let base = package.download_bytes()?;
-    match package.transition {
-        PatchTransition::None => Ok(base),
-        PatchTransition::FullChain => base
-            .checked_add(patch_download_bytes())
-            .ok_or_else(|| "Install download length overflow.".into()),
-    }
-}
-
 fn cache_space_requirement(package: &BasePackage, cache: &Path) -> Result<u64, String> {
     let unit = allocation_unit(cache)?;
-    let mut objects: Vec<ObjectSpec> = package
+    let objects: Vec<ObjectSpec> = package
         .archives
         .iter()
         .map(|archive| archive.object.clone())
         .collect();
-    if package.transition == PatchTransition::FullChain {
-        objects.extend(patch_objects());
-    }
 
     let mut seen = HashSet::new();
     objects.into_iter().try_fold(0_u64, |required, object| {
@@ -611,15 +591,6 @@ fn same_volume(left: &Path, right: &Path) -> bool {
     }
 }
 
-fn require_space(available: Option<u64>, required: u64, volume: &str) -> Result<(), String> {
-    if let Some(available) = available.filter(|available| *available < required) {
-        return Err(format!(
-            "Insufficient free space on the {volume}: need {required} bytes, {available} bytes available."
-        ));
-    }
-    Ok(())
-}
-
 fn stage_path_for(destination: &Path) -> Result<PathBuf, String> {
     let leaf = destination
         .file_name()
@@ -953,7 +924,7 @@ fn validate_tree_has_no_reparse_points(root: &Path) -> Result<(), String> {
 }
 
 fn extract_archive(
-    shared: &Arc<PatcherShared>,
+    shared: &Arc<InstallShared>,
     archive_path: &Path,
     archive_spec: &BaseArchive,
     package: &BasePackage,
@@ -1021,7 +992,7 @@ fn extract_archive(
             .checked_add(spec.length)
             .ok_or_else(|| "Extracted base size overflow.".to_string())?;
         shared
-            .patch_idx
+            .file_idx
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
     let expected_bytes = inventory_bytes(&archive_spec.files)?;
@@ -1302,7 +1273,7 @@ fn create_stage_parents(stage: &Path, directory: &Path) -> Result<(), String> {
 }
 
 fn copy_and_hash(
-    shared: &PatcherShared,
+    shared: &InstallShared,
     reader: &mut impl Read,
     writer: &mut impl Write,
     label: &str,
@@ -1351,7 +1322,7 @@ fn validate_final_tree(
     root: &Path,
     package: &BasePackage,
     identity: &str,
-    shared: &PatcherShared,
+    shared: &InstallShared,
     receipt_required: bool,
 ) -> Result<(), String> {
     validate_tree_has_no_reparse_points(root)?;
@@ -1425,7 +1396,7 @@ fn validate_final_tree(
                     ));
                 }
                 shared
-                    .patch_idx
+                    .file_idx
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             } else {
                 return Err(format!("Unexpected special file in installation: {child}"));
@@ -1447,7 +1418,7 @@ fn validate_final_tree(
 }
 
 fn hash_file(
-    shared: &PatcherShared,
+    shared: &InstallShared,
     path: &Path,
     label: &str,
     expected_length: u64,
@@ -1496,9 +1467,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::patcher::content::{BaseArchive, InstallFile};
-    use crate::patcher::test_support::tempdir;
-    use crate::patcher::worker::PatchSource;
+    use crate::content::manifest::{BaseArchive, InstallFile};
+    use crate::content::test_support::tempdir;
     use zip::write::{SimpleFileOptions, ZipWriter};
 
     struct Entry<'a> {
@@ -1596,9 +1566,7 @@ mod tests {
         }
         let total = archive_files.iter().map(|file| file.length).sum::<u64>();
         let package = BasePackage {
-            baseline_version: FFXIV_GAME_VERSION.to_owned(),
             target_version: FFXIV_GAME_VERSION.to_owned(),
-            transition: PatchTransition::None,
             archives: vec![BaseArchive {
                 object: super::super::http::ObjectSpec {
                     object_key: "game/test/archive.zip".to_owned(),
@@ -1706,7 +1674,7 @@ mod tests {
         archive.excluded_files = vec![file(".DS_Store", b"finder")];
         archive.empty_directories = vec!["empty".to_owned()];
         archive.apple_metadata_files = 1;
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1761,7 +1729,7 @@ mod tests {
             None,
         );
         package.archives[0].layout = ArchiveLayout::FinalFantasyXivWrapper;
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1773,7 +1741,7 @@ mod tests {
     }
 
     fn run_install(
-        shared: &Arc<PatcherShared>,
+        shared: &Arc<InstallShared>,
         destination: &Path,
         cache: &Path,
         package: BasePackage,
@@ -1782,10 +1750,10 @@ mod tests {
         let destination = destination.to_path_buf();
         let cache = cache.to_path_buf();
         thread::spawn(move || {
-            super::super::worker::drive(
+            crate::content::worker::drive(
                 shared,
-                destination,
-                PatchSource::Install {
+                crate::content::worker::InstallRequest {
+                    destination,
                     content_root: "http://127.0.0.1:9".to_owned(),
                     cache_dir: cache,
                     package,
@@ -1798,7 +1766,7 @@ mod tests {
     fn empty_destination_reaches_ready_after_inventory_and_version_checks() {
         let temporary = tempdir().unwrap();
         let (package, cache, destination) = valid_fixture(temporary.path());
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1831,7 +1799,7 @@ mod tests {
         write_receipt(&stage, &package_identity(&package)).unwrap();
         fs::write(stage.join("partial.bin"), b"unfinished extraction").unwrap();
 
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1854,7 +1822,7 @@ mod tests {
         fs::create_dir(&stage).unwrap();
         write_receipt(&stage, &identity).unwrap();
         fs::write(stage.join("partial.bin"), b"unfinished extraction").unwrap();
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1880,7 +1848,7 @@ mod tests {
         let (package, cache, destination) = valid_fixture(temporary.path());
         fs::create_dir(&destination).unwrap();
         fs::write(destination.join("notes.txt"), b"owner data").unwrap();
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1901,7 +1869,7 @@ mod tests {
         let temporary = tempdir().unwrap();
         let (package, cache, destination) = valid_fixture(temporary.path());
         fs::create_dir(&destination).unwrap();
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -1953,7 +1921,7 @@ mod tests {
         ];
         let (package, cache, destination) = fixture(temporary.path(), &entries, &expected, None);
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -1994,7 +1962,7 @@ mod tests {
         let path = cache.join(format!("{digest}-{}.object", bytes.len()));
         fs::write(&path, &bytes).unwrap();
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2030,7 +1998,7 @@ mod tests {
             None,
         );
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2063,7 +2031,7 @@ mod tests {
         package.archives[0].files[0].length += 1;
         package.staging_bytes += 1;
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2085,7 +2053,7 @@ mod tests {
         let mut package = package;
         package.archives[0].files[0].sha256 = wrong_hash;
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2109,7 +2077,7 @@ mod tests {
             .push(file("sqpack/missing.bin", b"missing"));
         package.staging_bytes += b"missing".len() as u64;
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2128,7 +2096,7 @@ mod tests {
         let mut package = package;
         package.final_files[0].sha256 = wrong_hash;
         let error = install(
-            &PatcherShared::with_totals(1, 1),
+            &InstallShared::with_totals(1, 1),
             &destination,
             "http://127.0.0.1:9",
             &cache,
@@ -2277,7 +2245,7 @@ mod tests {
 
     #[test]
     fn extraction_and_hashing_bound_length_and_propagate_write_errors() {
-        let shared = PatcherShared::with_totals(0, 0);
+        let shared = InstallShared::with_totals(0, 0);
         let mut output = Vec::new();
         let error = copy_and_hash(&shared, &mut Cursor::new(b"x"), &mut output, "short.bin", 2)
             .unwrap_err();
@@ -2346,7 +2314,7 @@ mod tests {
 
     #[test]
     fn full_client_staging_bound_accounts_for_filesystem_allocation_units() {
-        let package = crate::patcher::content::shipped_manifest()
+        let package = crate::content::manifest::shipped_manifest()
             .unwrap()
             .base
             .unwrap();
@@ -2365,7 +2333,7 @@ mod tests {
         assert!(!destination.parent().unwrap().exists());
         quote(&destination, &cache, &package).unwrap();
         assert!(!destination.parent().unwrap().exists());
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -2379,7 +2347,7 @@ mod tests {
     fn quote_and_install_recover_a_receipt_owned_published_tree() {
         let temporary = tempdir().unwrap();
         let (package, cache, destination) = valid_fixture(temporary.path());
-        let shared = PatcherShared::with_totals(
+        let shared = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );
@@ -2393,7 +2361,7 @@ mod tests {
             quote.destination_bytes,
             inventory_bytes(&package.final_files).unwrap()
         );
-        let second = PatcherShared::with_totals(
+        let second = InstallShared::with_totals(
             package.download_bytes().unwrap(),
             package.final_files.len(),
         );

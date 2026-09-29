@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 use super::http::ObjectSpec;
-use super::manifest::{PATCH_MANIFEST, expected_sha256};
 use crate::version::FFXIV_GAME_VERSION;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -14,32 +13,17 @@ use crate::version::FFXIV_GAME_VERSION;
 pub struct DeliveryManifest {
     pub schema_version: u32,
     pub content_root: Option<String>,
-    #[serde(default = "default_hosted_patches")]
-    pub hosted_patches: bool,
     pub base: Option<BasePackage>,
-}
-
-fn default_hosted_patches() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BasePackage {
-    pub baseline_version: String,
     pub target_version: String,
-    pub transition: PatchTransition,
     pub archives: Vec<BaseArchive>,
     pub final_files: Vec<InstallFile>,
-    /// Peak staged bytes including patch growth, measured by the publisher.
+    /// Peak staged bytes, measured by the publisher.
     pub staging_bytes: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PatchTransition {
-    None,
-    FullChain,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -79,10 +63,6 @@ pub fn shipped_manifest() -> Result<DeliveryManifest, String> {
     shipped_manifest_ref().cloned()
 }
 
-pub fn hosted_patches() -> Result<bool, String> {
-    Ok(shipped_manifest_ref()?.hosted_patches)
-}
-
 fn shipped_manifest_ref() -> Result<&'static DeliveryManifest, String> {
     SHIPPED_MANIFEST
         .get_or_init(parse_shipped_manifest)
@@ -94,11 +74,8 @@ fn parse_shipped_manifest() -> Result<DeliveryManifest, String> {
     let manifest: DeliveryManifest =
         serde_json::from_str(include_str!("../../manifests/game-delivery.json"))
             .map_err(|error| format!("Invalid shipped delivery manifest: {error}"))?;
-    if !matches!(manifest.schema_version, 1 | 2) {
+    if manifest.schema_version != 3 {
         return Err("Unsupported delivery manifest version.".into());
-    }
-    if manifest.schema_version == 1 && !manifest.hosted_patches {
-        return Err("Hosted patch availability requires delivery schema 2.".into());
     }
     if let Some(base) = &manifest.base {
         base.validate()?;
@@ -106,28 +83,10 @@ fn parse_shipped_manifest() -> Result<DeliveryManifest, String> {
     Ok(manifest)
 }
 
-pub fn patch_objects() -> Vec<ObjectSpec> {
-    PATCH_MANIFEST
-        .iter()
-        .map(|entry| ObjectSpec {
-            object_key: format!("patches/1.23b/{}", entry.path),
-            length: entry.size,
-            sha256: expected_sha256(entry.path)
-                .expect("every public patch has a SHA-256 identity")
-                .to_owned(),
-        })
-        .collect()
-}
-
 impl BasePackage {
     pub fn validate(&self) -> Result<(), String> {
-        if self.baseline_version.is_empty()
-            || self.target_version != FFXIV_GAME_VERSION
-            || (self.transition == PatchTransition::None
-                && self.baseline_version != self.target_version)
-            || self.archives.is_empty()
-        {
-            return Err("Unsupported base package version or patch transition.".into());
+        if self.target_version != FFXIV_GAME_VERSION || self.archives.is_empty() {
+            return Err("Unsupported base package version.".into());
         }
         let mut names = HashSet::new();
         let mut excluded_names = HashSet::new();
@@ -149,15 +108,12 @@ impl BasePackage {
                     .checked_add(file.length)
                     .ok_or("Base inventory length overflow.")?;
             }
-            if archive.layout == ArchiveLayout::Flat {
-                if !archive.excluded_files.is_empty()
+            if archive.layout == ArchiveLayout::Flat
+                && (!archive.excluded_files.is_empty()
                     || !archive.empty_directories.is_empty()
-                    || archive.apple_metadata_files != 0
-                {
-                    return Err("Flat archives cannot declare wrapped-source exclusions.".into());
-                }
-            } else if self.transition != PatchTransition::None {
-                return Err("The wrapped final client requires a no-patch transition.".into());
+                    || archive.apple_metadata_files != 0)
+            {
+                return Err("Flat archives cannot declare wrapped-source exclusions.".into());
             }
             if archive.layout == ArchiveLayout::FinalFantasyXivWrapper && self.archives.len() != 1 {
                 return Err("The wrapped final client requires one archive.".into());
@@ -292,13 +248,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shipped_manifest_and_derived_patches_are_consistent() {
+    fn shipped_manifest_is_valid() {
         shipped_manifest().unwrap();
-        for (object, patch) in patch_objects().iter().zip(PATCH_MANIFEST) {
-            assert_eq!(object.length, patch.size);
-            assert_eq!(object.sha256, expected_sha256(patch.path).unwrap());
-            assert!(object.object_key.ends_with(patch.path));
-        }
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub(crate) async fn apply_launcher_update(
     let install_root = dirs::install_root()
         .map_err(|error| format!("Could not resolve the launcher install directory: {error}"))?;
     let reservation = game.begin_restore().ok_or_else(|| {
-        "A game, patch, install, launch, or restore operation is active. Wait for it to finish before updating the launcher.".to_owned()
+        "A game, install, launch, or restore operation is active. Wait for it to finish before updating the launcher.".to_owned()
     })?;
     let backup_operation = backups.begin()?;
     let (result, reservation, backup_operation) = tauri::async_runtime::spawn_blocking(move || {

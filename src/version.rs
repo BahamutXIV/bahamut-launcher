@@ -5,16 +5,16 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! [`FFXIV_BOOT_VERSION`] and [`FFXIV_GAME_VERSION`] are the last-known-good 1.23b stamps written to `boot.ver` and `game.ver` after [`crate::patcher::manifest::PATCH_MANIFEST`] is applied.
+//! [`FFXIV_BOOT_VERSION`] and [`FFXIV_GAME_VERSION`] are the last-known-good 1.23b stamps the installer writes to `boot.ver` and `game.ver`.
 //! Do not advance them past 1.23b without re-validating PE-patch RVAs; encryption-time and lobby-host slots move between client builds.
 
-/// Clean-patch value for `<game>/boot.ver`: 1.x boot baseline `2010.09.18.0000`.
-pub(crate) const FFXIV_BOOT_VERSION: &str = "2010.09.18.0000";
+/// Final-build value for `<game>/boot.ver`: 1.x boot baseline `2010.09.18.0000`.
+pub const FFXIV_BOOT_VERSION: &str = "2010.09.18.0000";
 
-/// Clean-patch value for `<game>/game.ver`: final 1.23b build `2012.09.19.0001`.
-pub(crate) const FFXIV_GAME_VERSION: &str = "2012.09.19.0001";
+/// Final-build value for `<game>/game.ver`: final 1.23b build `2012.09.19.0001`.
+pub const FFXIV_GAME_VERSION: &str = "2012.09.19.0001";
 
-/// The selected release tag, local `git describe` identity, or "unknown" outside Git.
+/// The release tag, the local `<tag>-<hash>` identity, or "unknown" outside Git.
 pub const LAUNCHER_VERSION: &str = env!("BAHAMUT_GIT_DESCRIBE");
 
 #[cfg(test)]

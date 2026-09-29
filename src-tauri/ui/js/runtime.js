@@ -12,25 +12,22 @@ const home = {
   gameRunning: false,
   gameLaunchPending: false,
   gameStatusRevision: 0,
-  downloadStartPending: false,
-  patchTerminal: null,
-  patchSnapshot: null,
-  patchSnapshotRevision: 0,
-  patchDoneHandled: false,
-  patchStartFailure: null,
-  patchRetryLocal: localStorage.getItem('bahamut-patch-retry-local') === 'true',
+  installTerminal: null,
+  installSnapshot: null,
+  installSnapshotRevision: 0,
+  installDoneHandled: false,
   installStartPending: false,
   installDestination: localStorage.getItem('bahamut-install-destination') || '',
   retryTimer: null,
 };
-const settingsState = { patchSettings:null, serverSettings:null, gameSettings:null, launcherBehavior:null, objectDistanceSelection:undefined, cameraZoomSelection:undefined };
+const settingsState = { serverSettings:null, gameSettings:null, launcherBehavior:null, objectDistanceSelection:undefined, cameraZoomSelection:undefined };
 const extensionState = { inventory:null, selectedKey:null, query:'' };
 const AUTH_ERROR_KINDS = Object.freeze({
   invalidCredentials: 'invalid-credentials',
   rateLimited: 'rate-limited',
   network: 'network',
   noInstall: 'no-install',
-  notPatched: 'not-patched',
+  outdatedClient: 'outdated-client',
 });
 
 function invoke(command, args) {
