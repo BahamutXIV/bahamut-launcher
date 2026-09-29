@@ -12,7 +12,6 @@ In the portable layout, backend configuration lives beside the executable:
   plugins/screenshot.dll                <- packaged Screenshot implementation
   plugins/discord-rpc.dll               <- packaged DiscordRPC implementation
   backups/                              <- bounded manual backup archives
-  cache/                                <- downloaded launcher update packages (Windows)
   data/                                 <- portable WebView profile root and local storage
   config/
     bahamut.ini                         <- launcher, game, and server settings

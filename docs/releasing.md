@@ -205,17 +205,12 @@ launch; Control-click Open no longer bypasses Gatekeeper.
 
 ## Portable updates
 
-Windows checks signed stable launcher metadata quietly at startup. Settings >
-Misc > Install Location offers **Check for Updates** for a manual check. When a
-new release is available, the same button becomes **Update Launcher**. That
-action downloads the verified package and applies it after gameplay, install,
-repair, restore, launch, and backup operations are idle. The separate
-helper process is included in the signed managed inventory and runs from staging
-on the same volume outside the portable directory. It applies managed files after
-normal launcher exit, keeps recoverable prior state, and restarts the updated
-launcher. Startup confirms a complete signed inventory or restores the previous
-release after a failed update. Offline checks or downloads leave the installed
-launcher available.
+The Windows package includes the update helper in its signed managed
+inventory. The helper runs from staging on the same volume outside the
+portable directory, applies managed files after normal launcher exit, keeps
+recoverable prior state, and restarts the updated launcher. Startup confirms a
+complete signed inventory or restores the previous release after a failed
+update. A newer release is installed from its archive.
 
 The portable archive does not contain production update endpoints, trust keys,
 or a signed bootstrap release. The owner must provision the explicit

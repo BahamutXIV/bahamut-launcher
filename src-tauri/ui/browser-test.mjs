@@ -28,7 +28,6 @@ const UI_FILES = new Map([
   ['/js/settings.js', [new URL('./js/settings.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/extensions.js', [new URL('./js/extensions.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/game-repair.js', [new URL('./js/game-repair.js', import.meta.url), 'text/javascript; charset=utf-8']],
-  ['/js/launcher-updates.js', [new URL('./js/launcher-updates.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/home.js', [new URL('./js/home.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/main.js', [new URL('./js/main.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/assets/theme-day.png', [DAY_THEME_ICON_PATH, 'image/png']],
@@ -221,18 +220,6 @@ function evaluateScript() {
         ],
       },
       failAddonWrite: false,
-      launcherUpdateStatus: {
-        state:'blocked', message:'Launcher updates need an explicit signed source.', installedVersion:null, offeredVersion:null,
-      },
-      launcherUpdateCheckResult: {
-        state:'current', message:'Bahamut Launcher version 1.0.0 is installed.', installedVersion:'1.0.0', offeredVersion:null,
-      },
-      launcherUpdateRestartAvailable: true,
-      launcherUpdateChecks: 0,
-      launcherUpdateApplyResult: {
-        state:'handoff', message:'Launcher update to version 1.1.0 is ready. The launcher will close and restart.',
-      },
-      failLauncherUpdateAction: null,
       gameRepairStatus: {
         phase:'idle', is_running:false, is_terminal:false, is_paused:false,
         pause_requested:false, cancel_requested:false, can_cancel:false,
@@ -510,18 +497,6 @@ function evaluateScript() {
       if (command === 'get_extension_inventory') {
         return structuredClone(state.extensionInventory);
       }
-      if (command === 'get_launcher_update_status') return structuredClone(state.launcherUpdateStatus);
-      if (command === 'launcher_update_restart_available') return state.launcherUpdateRestartAvailable;
-      if (command === 'check_launcher_update') {
-        state.launcherUpdateChecks += 1;
-        if (state.failLauncherUpdateAction === 'check') throw new Error('fixture launcher update check failure');
-        state.launcherUpdateStatus = structuredClone(state.launcherUpdateCheckResult);
-        return structuredClone(state.launcherUpdateStatus);
-      }
-      if (command === 'apply_launcher_update') {
-        if (state.failLauncherUpdateAction === 'apply') throw new Error('fixture launcher update apply failure');
-        return structuredClone(state.launcherUpdateApplyResult);
-      }
       if (command === 'game_repair_status') return structuredClone(state.gameRepairStatus);
       if (command === 'start_game_repair') {
         if (state.gameRepairStartError) throw new Error(state.gameRepairStartError);
@@ -677,16 +652,15 @@ async function evaluate(devtools, expression) {
 
 async function exposeFrontendModules(devtools) {
   await evaluate(devtools, `(async () => {
-    const [settings, homeModule, main, runtime, extensions, launcherUpdates, gameRepair] = await Promise.all([
+    const [settings, homeModule, main, runtime, extensions, gameRepair] = await Promise.all([
       import('/js/settings.js'),
       import('/js/home.js'),
       import('/js/main.js'),
       import('/js/runtime.js'),
       import('/js/extensions.js'),
-      import('/js/launcher-updates.js'),
       import('/js/game-repair.js'),
     ]);
-    window.__launcherModules = { main, homeModule, extensions, launcherUpdates, gameRepair };
+    window.__launcherModules = { main, homeModule, extensions, gameRepair };
     window.__launcherHome = runtime.home;
     window.__launcherSettings = runtime.settingsState;
     Object.assign(window, {
@@ -703,10 +677,6 @@ async function exposeFrontendModules(devtools) {
       chooseInstallFolder:homeModule.chooseInstallFolder,
       startInstall:homeModule.startInstall,
       hydrateExtensions:extensions.hydrateExtensions,
-      hydrateLauncherUpdates:launcherUpdates.hydrateLauncherUpdates,
-      handleLauncherUpdateAction:launcherUpdates.handleLauncherUpdateAction,
-      refreshLauncherUpdateAvailability:launcherUpdates.refreshLauncherUpdateAvailability,
-      startBackgroundLauncherUpdateCheck:launcherUpdates.startBackgroundLauncherUpdateCheck,
       refreshGameRepairStatus:gameRepair.refreshGameRepairStatus,
       startGameRepair:gameRepair.startGameRepair,
       controlGameRepair:gameRepair.controlGameRepair,
@@ -1723,9 +1693,9 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (miscCards.length !== 2 || [...miscCards[0].querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'Install Location' || [...miscCards[1].querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || miscCards[0].dataset.gamepadRegionOrder !== '1' || miscCards[1].dataset.gamepadRegionOrder !== '2') throw new Error('Misc did not keep its two original cards');
     const existingMiscContent = miscCards.slice(0, 2);
     if (existingMiscContent.some(card => card.querySelector('.settings-label'))) throw new Error('Misc contains an unexpected setting label');
-    if (existingMiscContent.flatMap(card => [...card.querySelectorAll('.settings-action')]).map(button => button.textContent).join(',') !== 'Path,Check for Updates,Repair Install,Backup,Restore,Backup,Restore,Open Backup Folder,Open Install Folder,Open Screenshots Folder') throw new Error('Misc action labels or order drifted');
+    if (existingMiscContent.flatMap(card => [...card.querySelectorAll('.settings-action')]).map(button => button.textContent).join(',') !== 'Path,Repair Install,Backup,Restore,Backup,Restore,Open Backup Folder,Open Install Folder,Open Screenshots Folder') throw new Error('Misc action labels or order drifted');
     const accentActionLabels = [...document.querySelectorAll('.accent-action')].map(button => button.textContent.trim()).join(',');
-    if (accentActionLabels !== 'PATH,Pause,Cancel,Open Plugins Folder,Open Addons Folder,Path,Check for Updates,Repair Install,Backup,Backup,Open Backup Folder,Open Screenshots Folder,XIV Config,Apply Steam Deck Defaults,Confirm') throw new Error('accent action mapping drifted: ' + accentActionLabels);
+    if (accentActionLabels !== 'PATH,Pause,Cancel,Open Plugins Folder,Open Addons Folder,Path,Repair Install,Backup,Backup,Open Backup Folder,Open Screenshots Folder,XIV Config,Apply Steam Deck Defaults,Confirm') throw new Error('accent action mapping drifted: ' + accentActionLabels);
     const prominentActions = [...document.querySelectorAll('.primary-action,.login-action,.accent-action,.help-action.primary,.choice-option[aria-pressed="true"]')].filter(button => !button.disabled);
     const actionEdges = { dark: 'rgb(240, 154, 145)', light: 'rgb(188, 238, 255)' };
     for (const theme of ['dark','light']) {
@@ -2025,39 +1995,8 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (getComputedStyle(narrowGamepadGrid).gridTemplateColumns.split(' ').length !== 1 || getComputedStyle(narrowGamepadPage).overflowY !== 'auto' || narrowGamepadPage.scrollHeight <= narrowGamepadPage.clientHeight || narrowGamepadPage.scrollWidth > narrowGamepadPage.clientWidth || [...narrowGamepadGrid.querySelectorAll('.gamepad-card')].some(card => card.scrollWidth > card.clientWidth)) throw new Error('narrow Gamepad cards did not collapse into one scrolling page');
     document.querySelector('[data-route="settings"]').click();
     const installCard = document.querySelector('.settings-card--locations');
-    const updateButton = installCard?.querySelector('[data-launcher-update-action]');
     const repairButton = installCard?.querySelector('[data-game-files-action="repair"]');
-    if (!installCard || !updateButton || !repairButton || document.querySelector('.settings-card--launcher-updates,.settings-card--game-files,[data-launcher-repair-action],#game-files-search')) throw new Error('Misc did not keep one update and one repair button in Install Location');
-    if (state.launcherUpdateChecks < 1) throw new Error('launcher did not start a quiet metadata check at startup');
-    state.calls.length = 0;
-    state.launcherUpdateStatus = { state:'ready', message:'Ready to check.', installedVersion:'1.0.0', offeredVersion:null };
-    state.launcherUpdateCheckResult = { state:'update_available', message:'Version 1.1.0 available.', installedVersion:'1.0.0', offeredVersion:'1.1.0' };
-    await window.hydrateLauncherUpdates();
-    if (updateButton.textContent !== 'Check for Updates' || updateButton.dataset.launcherUpdateAction !== 'check' || updateButton.disabled) throw new Error('launcher update button did not start as a check');
-    state.calls.length = 0;
-    await window.handleLauncherUpdateAction({ target:updateButton });
-    if (!state.calls.some(call => call.command === 'check_launcher_update') || state.calls.some(call => call.command === 'apply_launcher_update') || updateButton.textContent !== 'Update Launcher' || updateButton.dataset.launcherUpdateAction !== 'apply' || !document.querySelector('#launcher-update-status').textContent.includes('1.1.0')) throw new Error('metadata check did not reveal the second-click update action');
-    state.launcherUpdateRestartAvailable = false;
-    await window.refreshLauncherUpdateAvailability();
-    if (!updateButton.disabled) throw new Error('launcher update remained enabled while another operation was active');
-    state.launcherUpdateRestartAvailable = true;
-    await window.refreshLauncherUpdateAvailability();
-    if (updateButton.disabled) throw new Error('launcher update did not become available again');
-    const updateNotice = installCard.querySelector('#launcher-update-status');
-    const cardHeightBeforeError = installCard.getBoundingClientRect().height;
-    const repairTopBeforeError = repairButton.getBoundingClientRect().top;
-    state.calls.length = 0;
-    state.failLauncherUpdateAction = 'apply';
-    await window.handleLauncherUpdateAction({ target:updateButton });
-    if (!state.calls.some(call => call.command === 'apply_launcher_update') || state.calls.some(call => call.command === 'control_window') || !document.querySelector('#launcher-update-status').textContent.includes('fixture launcher update apply failure')) throw new Error('failed launcher update closed the launcher or hid its error');
-    if (updateNotice.parentElement !== installCard || Math.abs(installCard.getBoundingClientRect().height - cardHeightBeforeError) > 1 || Math.abs(repairButton.getBoundingClientRect().top - repairTopBeforeError) > 1 || Math.abs(updateNotice.getBoundingClientRect().bottom - (installCard.getBoundingClientRect().bottom - 14)) > 2) throw new Error('launcher update error moved card controls instead of staying at the bottom');
-    const shortError = updateNotice.textContent;
-    updateNotice.textContent = shortError.repeat(20);
-    if (Math.abs(installCard.getBoundingClientRect().height - cardHeightBeforeError) > 1 || Math.abs(repairButton.getBoundingClientRect().top - repairTopBeforeError) > 1 || getComputedStyle(updateNotice).overflowY !== 'hidden') throw new Error('long launcher update error grew the card or added scrolling');
-    updateNotice.textContent = shortError;
-    state.calls.length = 0;
-    state.failLauncherUpdateAction = null;
-
+    if (!installCard || !repairButton || document.querySelector('.settings-card--launcher-updates,.settings-card--game-files,[data-launcher-repair-action],[data-launcher-update-action],#launcher-update-status,#game-files-search')) throw new Error('Misc did not keep one repair button in Install Location');
     state.calls.length = 0;
     repairButton.click();
     const dialog = document.querySelector('#settings-confirmation-dialog');
@@ -2721,7 +2660,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (document.activeElement !== miscRightCard) throw new Error('RB did not select the next Misc card');
     runControllerAction('down');
     if (document.activeElement !== miscRightRows[0]) throw new Error('D-pad did not select the first right Misc row');
-    if (miscLeftRows.map(row => row.querySelector('.settings-action')?.textContent || row.querySelector('.settings-label')?.textContent).join(',') !== 'Path,Update Launcher,Repair Install') throw new Error('Misc install actions did not expose the requested gamepad order');
+    if (miscLeftRows.map(row => row.querySelector('.settings-action')?.textContent || row.querySelector('.settings-label')?.textContent).join(',') !== 'Path,Repair Install') throw new Error('Misc install actions did not expose the requested gamepad order');
     if (miscRightRows.map(row => [...row.querySelectorAll('.settings-action')].map(button => button.textContent).join('/')).join(',') !== 'Backup/Restore,Backup/Restore,Open Backup Folder/Open Install Folder,Open Screenshots Folder') throw new Error('Right Misc rows did not expose the requested gamepad order');
     for (const row of miscRightRows.slice(1)) {
       runControllerAction('down');

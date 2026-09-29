@@ -2,7 +2,6 @@ import { body, launcherShell, tauriInvoke, home, settingsState, extensionState, 
 import { renderChoice, setNestedValue, queueGameSettingsUpdate, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, hydrateSettings, renderServerSettings, renderGameSettingProgress } from './settings.js';
 import { hydrateExtensions, renderExtensionLibrary } from './extensions.js';
 import { repairState, refreshGameRepairStatus, startGameRepair, controlGameRepair } from './game-repair.js';
-import { hydrateLauncherUpdates, handleLauncherUpdateAction, refreshLauncherUpdateAvailability, startBackgroundLauncherUpdateCheck } from './launcher-updates.js';
 import { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshInstallSnapshot, refreshHomeStatus, restoreSession, chooseInstallFolder, startInstall, launchGame, handleSettingsAction } from './home.js';
 
 let activePrimaryRoute = 'home';
@@ -238,9 +237,6 @@ function activateSettingsTab(name, focus = false) {
   });
   document.querySelectorAll('[data-settings-pane]').forEach(pane => pane.toggleAttribute('data-active', pane.dataset.settingsPane === name));
   hydrateSettings();
-  if (name === 'misc') {
-    hydrateLauncherUpdates();
-  }
 }
 function syncThemeToggle() {
   const night = body.dataset.theme === 'dark';
@@ -333,8 +329,6 @@ document.addEventListener('click', event => {
   if (settingsAction) handleSettingsAction(settingsAction.dataset.settingsAction);
   const gameFilesAction = event.target.closest('[data-game-files-action]');
   if (gameFilesAction?.dataset.gameFilesAction === 'repair') void runRepairInstall();
-  const launcherUpdateAction = event.target.closest('[data-launcher-update-action]');
-  if (launcherUpdateAction) handleLauncherUpdateAction(event);
   const backupAction = event.target.closest('[data-backup-action]');
   if (backupAction) runBackupAction(backupAction);
   const helpAction = event.target.closest('[data-help-action]');
@@ -1248,7 +1242,6 @@ async function boot() {
     console.error('Launcher backend is unavailable.');
     return;
   }
-  startBackgroundLauncherUpdateCheck();
   try {
     await invoke('fit_window_to_work_area', { availableWidth:window.screen.availWidth, availableHeight:window.screen.availHeight });
   } catch (error) {
@@ -1274,9 +1267,6 @@ setInterval(() => {
     void refreshGameRepairStatus().then(renderLifecycleStrip);
   }
   if (home.status && home.status.state === 'ready' && home.gameRunning) refreshGameStatus();
-  if (document.querySelector('[data-settings-pane="misc"]')?.hasAttribute('data-active')) {
-    refreshLauncherUpdateAvailability();
-  }
 }, 1000);
 pollGamepads();
 boot();

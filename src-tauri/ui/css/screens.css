@@ -351,8 +351,6 @@
     .settings-status { margin-top:10px; color:var(--danger); font-size:11px; }
     .settings-status:empty { display:none; }
     .settings-status[data-tone="success"] { color:var(--success); }
-    .settings-card--locations .settings-update-status { display:block; flex:none; height:48px; margin:auto 12px 0; overflow:hidden; overflow-wrap:anywhere; color:var(--muted); line-height:1.4; }
-    .settings-card--locations .settings-update-status[data-tone="error"] { color:var(--danger); }
     .confirmation-dialog {
       width:min(460px,calc(100% - 32px));
       padding:24px;

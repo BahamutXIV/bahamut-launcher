@@ -197,12 +197,6 @@ changes to those files.
 
 ### Launcher updates
 
-On Windows, the launcher checks signed update metadata quietly at startup.
-Open Settings > Misc > Install Location and choose Check for Updates to check
-again. If a release is available, the same button becomes Update Launcher. That action
-downloads the signed package and restarts through the staged update helper
-when other launcher work is idle.
-
 If a restart is interrupted, startup uses the staged signed helper to confirm a
 complete update or restore the previous signed release. If the helper is still
 finishing, close the extra launcher window and retry after the restart completes.
