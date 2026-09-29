@@ -24,6 +24,11 @@ hosted workflows unless a section names a platform-specific check.
   its tests requires Wine.
 - Linux Tauri work requires the packages listed in
   [Tauri and WebView](#tauri-and-webview).
+- Packaging and checking the Linux archive
+  ([`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh),
+  [`test-linux-package.py`](../scripts/test-linux-package.py)) requires a
+  Linux host with GNU tar, gzip, Python 3, and `make`. `shellcheck` and
+  `desktop-file-validate` run the matching repository checks.
 - Packaging and checking the macOS app bundle
   ([`package-macos-app.sh`](../scripts/package-macos-app.sh),
   [`check-macos-app-zip.sh`](../scripts/check-macos-app-zip.sh)) requires
@@ -101,6 +106,13 @@ sudo apt-get install --no-install-recommends -y \
   librsvg2-dev
 ```
 
+That list is for building. A built launcher needs only WebKitGTK 4.1 and
+GTK 3 at runtime, with their GLib, libsoup, GStreamer, cairo, pango, Wayland,
+and X11 dependencies; its dynamic closure includes neither
+libayatana-appindicator nor librsvg.
+[`install-dependencies.sh`](../packaging/linux/install-dependencies.sh)
+checks a built launcher with `--check --launcher <path>`.
+
 The install-strip preview opens the real frontend in nine isolated Chrome or
 Edge tabs. It uses mocked launcher commands and cannot change configuration,
 client files, or the download cache:
@@ -156,6 +168,11 @@ separate optional production download check.
 
 The Windows workflow also checks synthetic release archives and package updates.
 The fixture checks package contents, not game launch.
+The Linux CI job packages the Linux archive from a placeholder executable,
+installs it with `install.sh` and with `make DESTDIR=... PREFIX=/usr install`,
+and uninstalls it again. The repository job runs `shellcheck` on the Linux
+packaging scripts, `desktop-file-validate` on the desktop entry, and
+`python scripts/test-linux-package.py`.
 The macOS CI job cross-compiles the loader, `bahamut.dll`, and both plugins
 with llvm-mingw, stages the app bundle from a placeholder universal
 executable, and runs `python3 scripts/test-macos-app-package.py`, but does
@@ -224,7 +241,50 @@ cargo build --release --locked -p bahamut-launcher-shell
 Run `bahamut-launcher` from the staged folder. On macOS and Linux the tree
 carries the loader, `bahamut.dll`, and the plugins and addons maintained in this
 repository, so Play takes the extension launch. The bare Cargo shell has none
-of them.
+of them. The staged tree has no package marker, so it keeps the
+[portable layout](configuration.md#portable-launcher-tree).
+
+## Linux archive
+
+[`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh) builds the
+release archive from a launcher binary and a client build. It stages through
+`stage-unix-release.sh`, adds the package marker, install scripts, desktop
+entry, and icons, asserts the exact file manifest and modes, and writes the
+archive with GNU tar:
+
+```bash
+cargo build --release --locked -p bahamut-launcher-shell
+./scripts/package-linux-tarball.sh \
+  --launcher target/release/bahamut-launcher-shell \
+  --client-build out/client-mingw \
+  --label bahamut-launcher-dev-linux-x86_64 \
+  --output out/linux-dist
+```
+
+The script writes `<output>/<label>.tar.gz` and its `.sha256` sidecar. File
+times come from `SOURCE_DATE_EPOCH`, or from the last commit when it is unset.
+The script is the canonical record of the archive manifest.
+
+[`test-linux-package.py`](../scripts/test-linux-package.py) builds an archive
+from a placeholder executable and synthetic client artifacts, installs it
+into a temporary prefix and a `DESTDIR` staging root, and uninstalls it:
+
+```bash
+python3 scripts/test-linux-package.py
+```
+
+Both run directly on a Linux host without a container, and the test needs no
+Cargo build. The test is skipped on other platforms. It checks package
+contents and the install scripts, not the launcher binary or game launch.
+
+[`install.sh`](../packaging/linux/install.sh) takes `--prefix`, `--pkgdir`,
+and `--destdir`, and also reads `PREFIX` and `DESTDIR` from the environment.
+The payload directory comes only from `--pkgdir`, so an exported `PKGDIR`,
+such as the one Portage sets, does not redirect it. The archive's
+[`Makefile`](../packaging/linux/Makefile) runs `./install.sh` from its own
+directory, so run it as `make -C <extracted dir> install`; for example
+`make -C bahamut-launcher DESTDIR=<root> PREFIX=/usr install` stages a
+package root, and a command-line `PKGDIR=<dir>` sets the payload directory.
 
 ## Staged macOS app
 
@@ -281,9 +341,12 @@ replacing the source artwork, run:
 cargo run --release --manifest-path tools/icon-gen/Cargo.toml
 ```
 
-This regenerates PNG, the six-size Windows ICO, and the macOS ICNS with its
-transparent icon-grid padding. The macOS app bundle consumes
-`src-tauri/icons/icon.icns` as `Contents/Resources/icon.icns`.
+This regenerates PNG, the six-size Windows ICO, the macOS ICNS with its
+transparent icon-grid padding, and the Linux hicolor icons at
+`packaging/linux/icons/hicolor/{48x48,128x128,256x256}/apps/bahamut-launcher.png`.
+The macOS app bundle consumes `src-tauri/icons/icon.icns` as
+`Contents/Resources/icon.icns`. The Linux archive ships the hicolor icons
+under `share/icons/hicolor/`.
 
 ## What the checks cover
 

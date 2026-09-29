@@ -74,6 +74,16 @@ cannot own those paths. The ZIP may carry directory entries for ancestors of
 inventory files. The verifier rejects any other directory, AppleDouble `._`
 entries, `__MACOSX/` entries, symlinks, and every path outside the bundle.
 
+Signed launcher metadata drives package replacement for the Windows package
+only; see [Portable updates](releasing.md#portable-updates). The published
+Linux archive does not satisfy the Linux launcher inventory rules in
+[`release.rs`](../src/release.rs), so no signed Linux release exists for it.
+Those rules accept only `bahamut-launcher`, `LICENSE.md`, `README.md`, and
+the notices under `licenses/` other than the MinGW-w64 runtime notice, as
+paths at the archive root. The archive nests its files under a
+`bahamut-launcher/` directory, whose entry collides with the
+`bahamut-launcher` inventory path.
+
 ## Offline publisher and verifier
 
 Prepare and review the metadata JSON, artifact and inventory before signing.

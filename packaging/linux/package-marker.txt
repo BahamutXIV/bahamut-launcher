@@ -1,0 +1,6 @@
+This directory is a packaged Bahamut Launcher tree.
+The launcher keeps its configuration, logs, and other writable state in
+~/.bahamut-launcher (or $BAHAMUT_LAUNCHER_HOME when that is an absolute
+path). In a folder you extracted yourself, removing this file keeps that
+state beside the launcher instead. Do not remove it from a copy that
+install.sh installed: install.sh replaces or deletes that whole directory.

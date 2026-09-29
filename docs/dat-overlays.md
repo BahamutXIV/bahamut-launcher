@@ -16,15 +16,16 @@ lists the launches that apply packages.
 
 On Windows, official package files are part of the signed launcher release
 inventory. A launcher update replaces listed official files and preserves
-custom overlay packages and unrelated player files. In a portable Linux or
-macOS tree they change only when a newer archive is extracted. The macOS app
-reads them from `Contents/Resources/plugins/dats/` and changes them only with a
-newer app. Its custom packages live under the state root's `plugins/dats/`, and
-a custom package cannot replace the official one. If the official package is
-missing or its manifest is malformed, the launcher ignores that package and can
-still start Play and load valid custom packages. Replacing official files uses the
-launcher release verification rules. There is no separate overlay update,
-verification, or repair operation.
+custom overlay packages and unrelated player files. In the Linux package or
+a portable Linux or macOS tree they change only when a newer archive is
+extracted or installed. The macOS app reads them from
+`Contents/Resources/plugins/dats/` and changes them only with a newer app. In
+the macOS app and the Linux package, custom packages live under the state
+root's `plugins/dats/`, and a custom package cannot replace the official one.
+If the official package is missing or its manifest is malformed, the launcher
+ignores that package and can still start Play and load valid custom packages.
+Replacing official files uses the launcher release verification rules. There
+is no separate overlay update, verification, or repair operation.
 
 ## Example: package a DAT replacement
 
@@ -40,8 +41,10 @@ Preparing or encoding textures is separate from installing an overlay.
 
 1. Under the launcher's state root, create
    `plugins/dats/dat-replacement-example/data/1C/59/00/`: beside the
-   executable on Windows and Linux, or `~/.bahamut-launcher/plugins/dats/`
-   (or `$BAHAMUT_LAUNCHER_HOME`) for the macOS app. See
+   executable in the portable layout (Windows, or a tree without the package
+   marker), or under `~/.bahamut-launcher/` (or `$BAHAMUT_LAUNCHER_HOME` when
+   it holds an absolute path) for the Linux package and the macOS app. See
+   [Linux package layout](configuration.md#linux-package-layout) and
    [macOS app layout](configuration.md#macos-app-layout).
 2. Copy the DAT you verified for this resource into that folder and name the
    copy `CB.DAT`. Do not change the file in the game installation.
@@ -110,7 +113,8 @@ payload tree.
 
 - Check the package under the state root of the exact launcher installation
   you started. In the portable layout, a second launcher folder has its own
-  packages and settings.
+  packages and settings. Every Linux package and macOS app a user runs shares
+  one state root.
 - If the package is missing from Dats-Overlay, check the manifest, matching
   directory ID, and extra nesting. See [DAT troubleshooting](troubleshooting.md#dat-overlays).
 - If the package appears, check its enabled state, conflicting packages, and

@@ -2,7 +2,9 @@
 
 [Back to the documentation index](README.md)
 
-In the portable layout, backend configuration lives beside the executable:
+In the portable layout, backend configuration lives beside the executable.
+The Windows package uses this layout, as does any Linux or macOS launcher tree
+without the Linux package marker:
 
 ```text
 <launcher-dir>/
@@ -24,7 +26,8 @@ In the portable layout, backend configuration lives beside the executable:
 
 In a portable Linux or macOS tree the executable is `bahamut-launcher`. The
 rest of the layout is the same. The macOS app splits this tree, as described in
-[macOS app layout](#macos-app-layout).
+[macOS app layout](#macos-app-layout), and so does the Linux package, as
+described in [Linux package layout](#linux-package-layout).
 [Platform support](extensions.md#platform-support) defines which platforms load
 the packaged loader and DLLs.
 
@@ -75,8 +78,55 @@ WebKit keeps the WebView's session, theme, and gamepad storage under
 Load order comes from `extensions.ini` and `dats.ini`. A player package that
 reuses a shipped addon or DAT package ID is skipped with a warning, and the
 shipped package wins that id collision. The official DAT package loads only
-from `Contents/Resources/`. A launcher binary outside an app bundle keeps the
-portable layout.
+from `Contents/Resources/`. A launcher binary outside an app bundle follows
+the [Linux package layout](#linux-package-layout) when the package marker sits
+beside it, and the portable layout otherwise.
+
+## Linux package layout
+
+The Linux archive ships the marker file `.bahamut-launcher-package` beside
+`bahamut-launcher`. When that regular file sits beside the running executable,
+the launcher splits its roots like the macOS app. The executable's directory
+is the install root, which holds the loader, the client module, native
+plugins, shipped addons, the official DAT package, and the
+`scripts/default.txt` seed. The launcher never writes there, so the install
+root can be a read-only system directory. The state root is the launcher data
+directory above. The launcher resolves symbolic links to its executable
+first, so the `bahamut-launcher` command that
+[`install.sh`](../packaging/linux/install.sh) links into `<prefix>/bin` finds
+the payload in `<prefix>/lib/bahamut-launcher`.
+
+The state tree matches the macOS app's, without the managed Wine engine:
+
+```text
+~/.bahamut-launcher/
+  config/                               <- every settings file listed above
+  backups/  data/                       <- as in the portable layout
+  logs/                                 <- launcher, chat, and packet logs, wine.log, helper.log
+  addons/<addon-id>/                    <- player-installed addons
+  plugins/dats/<package-id>/            <- player-installed DAT packages
+  screenshots/
+  scripts/default.txt                   <- copied from the shipped seed when missing
+  prefix/                               <- managed Wine prefix
+  runtime/                              <- verified DXVK cache
+```
+
+A player package that reuses a shipped addon or DAT package ID is skipped with
+a warning, and the official DAT package loads only from the install root, as
+in the macOS app.
+
+In a folder you extracted yourself, removing `.bahamut-launcher-package`
+restores the portable layout for that tree: configuration, backups, logs,
+WebView data, screenshots, scripts, and player packages live beside the
+launcher again. The Wine prefix, the DXVK cache, `wine.log`, and `helper.log`
+stay in the launcher data directory in both layouts. The launcher does not
+move files between the two layouts; see
+[Moving a beside-the-launcher tree](troubleshooting.md#moving-a-beside-the-launcher-tree).
+
+Keep the marker in a copy that `install.sh` installed. `install.sh` replaces
+that whole directory on the next install and deletes it on `--uninstall`. It
+refuses to do either when the marker is missing, the directory holds entries
+the package does not ship, or a shipped file is changed.
 
 ## `bahamut.ini`
 
@@ -171,10 +221,10 @@ the active installation lifecycle: download, cancellation, progress, and
 terminal recovery. The `download_cache_dir` configuration value remains an
 optional override for the verified complete client download cache. Misc keeps the
 Install Location path row, manual User Settings and Macros, Extensions backups,
-portable folder actions, and the action for the screenshots folder. Launcher gamepad
-options remain on the dedicated Gamepad page. On Windows, its XIV Config action
-opens the installed retail configuration utility for settings outside the
-launcher's mapped surface.
+the backup and state folder actions, and the action for the screenshots
+folder. Launcher gamepad options remain on the dedicated Gamepad page. On
+Windows, its XIV Config action opens the installed retail configuration
+utility for settings outside the launcher's mapped surface.
 Display mode accepts `windowed`, `borderless`, or `fullscreen`. Multisampling
 accepts `none`, `2x`, `4x`, or `8x`. On Windows, Borderless uses the retail
 client's windowed configuration value and enables the packaged runtime's
@@ -217,10 +267,11 @@ defaults. The launcher writes its mapped settings directly. Opening
 
 Misc creates compressed `UserSettings_` and `Extensions_` backups under
 `backups/` in the state root: `<launcher-dir>/backups/` in the portable layout
-and `~/.bahamut-launcher/backups/` in the macOS app. Names include a sortable
-local timestamp. The launcher keeps the newest five of each kind.
+and `~/.bahamut-launcher/backups/` in the macOS app and the Linux package.
+Names include a sortable local timestamp. The launcher keeps the newest five
+of each kind.
 `Open Backup Folder` opens that directory. `Open Install Folder` opens the state
-root, not the selected game directory or the app bundle.
+root, not the selected game directory or the install root.
 
 User Settings and Macros backups contain only these known FFXIV 1.x files from
 `<Documents>/My Games/FINAL FANTASY XIV`:
@@ -248,10 +299,11 @@ Extensions backups read the state root. They contain installed Lua addons under
 `config/extensions.ini`, `config/dats.ini`, and writable settings below
 `config/addons/` and `config/plugins/`. They exclude native DLLs, `bahamut.ini`,
 credentials, logs, screenshots, download and cache data, WebView state, and the
-shipped packages inside the macOS app bundle. Extensions restore treats
-each included directory as a snapshot: packages or settings added below one of
-those owned directories after the backup are removed when that archive is
-restored. Excluded runtime files remain untouched.
+shipped packages in the install root of the macOS app or the Linux package.
+Extensions restore treats each included directory as a snapshot: packages or
+settings added below one of those owned directories after the backup are
+removed when that archive is restored. Excluded runtime files remain
+untouched.
 
 Restore selects the newest archive of the requested kind and requires
 confirmation. It is blocked while this launcher owns a starting or running
@@ -384,7 +436,7 @@ overlay content is omitted from the captured frame. `hotkey` accepts
 launcher UI does not edit the key. Put `/bind <key> /screenshot [hide]` in
 `scripts/default.txt` to select the key for a game session. On Windows, the
 active key requests one capture from the final D3D9 backbuffer and writes it
-under the portable `screenshots/` directory. Capture is unavailable when
+under the state root's `screenshots/` directory. Capture is unavailable when
 Screenshot is disabled in `extensions.ini` or the Bahamut client module is
 missing, and a failed write does not terminate the game. Apple keyboards have
 no Print Screen or Insert key, so on macOS choose one of `f1` through `f9` in
@@ -475,8 +527,10 @@ registration, session validation, and Play all resolve the same profile.
 In the portable layout, extension packages, writable state, logs, scripts, and
 screenshots live beside the executable. The whole launcher directory can move
 without changing paths. The macOS app keeps the shipped files of this tree in
-`Contents/Resources/` and the writable files under the state root, as described
-in [macOS app layout](#macos-app-layout):
+`Contents/Resources/` and the Linux package keeps them beside
+`bahamut-launcher`. Both keep the writable files under the state root, as
+described in [macOS app layout](#macos-app-layout) and
+[Linux package layout](#linux-package-layout):
 
 ```text
 bahamut-launcher.exe

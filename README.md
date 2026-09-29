@@ -24,7 +24,9 @@ installation, and first launch steps.
 
 - Windows x86_64. The launcher installs missing WebView2 and x86 Visual C++
   runtimes when needed.
-- Linux x86_64 with system Wine and the required desktop libraries.
+- Linux x86_64 with glibc 2.35 or newer, WebKitGTK 4.1, GTK 3, and system
+  Wine 7 or newer with 32-bit support. The archive runs in place or installs
+  with an application menu entry.
 - macOS on Apple Silicon or Intel as a universal app, with managed Wine
   downloaded on first game launch. Apple Silicon needs Rosetta 2 for the
   Wine engine.

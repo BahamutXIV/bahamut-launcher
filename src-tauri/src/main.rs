@@ -14,6 +14,8 @@ mod presentation;
 mod shell_config;
 mod state;
 
+use std::ffi::OsString;
+use std::io::Write;
 use std::time::Instant;
 
 use bahamut_launcher::config::dirs;
@@ -40,6 +42,37 @@ use commands::{
 use shell_config::{load_dats_config, load_extensions_config, load_screenshot_config};
 use state::{BackupIpcState, ContentIpcState, GameIpcState};
 use tauri::{Emitter, Manager};
+
+/// A command-line request answered before update recovery, state-root creation, or logging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CliRequest {
+    Version,
+    Help,
+}
+
+const CLI_USAGE: &str = "\
+Usage: bahamut-launcher [--version | --help]
+
+  -V, --version  Print the launcher version and exit.
+  -h, --help     Print this help and exit.
+
+Without arguments the launcher opens its window. Configuration, logs, and other
+writable state live in the launcher state directory.
+";
+
+/// Match `<program> <flag>` for exactly one recognised flag; anything else starts the launcher.
+pub(crate) fn cli_request(mut args: impl Iterator<Item = OsString>) -> Option<CliRequest> {
+    args.next()?;
+    let flag = args.next()?;
+    if args.next().is_some() {
+        return None;
+    }
+    match flag.to_str()? {
+        "--version" | "-V" => Some(CliRequest::Version),
+        "--help" | "-h" => Some(CliRequest::Help),
+        _ => None,
+    }
+}
 
 fn continue_shutdown(app: tauri::AppHandle, state: &ContentIpcState, exit_code: i32) -> bool {
     let game_pending = app.state::<GameIpcState>().request_shutdown();
@@ -87,6 +120,17 @@ fn request_pending_update_recovery_for(
 }
 
 fn main() {
+    if let Some(request) = cli_request(std::env::args_os()) {
+        // A closed stdout must not turn a flag query into a panic.
+        let mut stdout = std::io::stdout();
+        let _ = match request {
+            CliRequest::Version => {
+                writeln!(stdout, "{}", bahamut_launcher::version::LAUNCHER_VERSION)
+            }
+            CliRequest::Help => stdout.write_all(CLI_USAGE.as_bytes()),
+        };
+        return;
+    }
     if launcher_updates::has_recovered_update_argument() {
         let root = match dirs::state_root() {
             Ok(root) => root,

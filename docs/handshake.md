@@ -151,12 +151,13 @@ macOS backend ignores that preference and uses its default filter.
 
 ### Wine extension launch
 
-When `bahamut-loader.exe` and `bahamut.dll` are present in the
-[install root](configuration.md#macos-app-layout) (beside the binary in a
-portable tree, under `Contents/Resources` in the macOS app) and the launch
-carries extension artifacts, the Wine backends run the helper, under the
-managed engine on macOS and under system Wine on Linux, instead of the launch
-from the working copy above:
+When `bahamut-loader.exe` and `bahamut.dll` are present in the install root
+(beside the binary in a portable tree and in the
+[Linux package](configuration.md#linux-package-layout), under
+`Contents/Resources` in the [macOS app](configuration.md#macos-app-layout))
+and the launch carries extension artifacts, the Wine backends run the helper,
+under the managed engine on macOS and under system Wine on Linux, instead of
+the launch from the working copy above:
 
 - The launcher checks the [client identity](extensions.md#client-compatibility)
   before planning the helper. A mismatch stops the launch.

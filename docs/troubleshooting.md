@@ -3,8 +3,9 @@
 [Back to the documentation index](README.md)
 
 For installation steps, see [Getting started](getting-started.md). Use
-[Install failures](#install-failures), [Authentication failures](#authentication-failures),
-or [Game closes after Play](#game-closes-after-play) for the problem you are seeing.
+[Linux startup](#linux-startup), [Install failures](#install-failures),
+[Authentication failures](#authentication-failures), or
+[Game closes after Play](#game-closes-after-play) for the problem you are seeing.
 For further help, [join the Bahamut Discord](https://discord.gg/PxK5RJYQjm).
 Build, test, and package instructions are in [Development](development.md).
 
@@ -12,11 +13,12 @@ Build, test, and package instructions are in [Development](development.md).
 
 The launcher writes its native structured transcript to
 `<state-root>/logs/launcher/bahamut-launcher.log` (see
-[macOS app layout](configuration.md#macos-app-layout) for the state root on
-each platform). Use the Help button in the launcher to view the newest 256
-KiB, copy the displayed snapshot, and see the canonical path. The support view
-contains launcher events only. Wine output and game chat logs remain separate
-sources. See the
+[macOS app layout](configuration.md#macos-app-layout) and
+[Linux package layout](configuration.md#linux-package-layout) for the state
+root on each platform). Use the Help button in the launcher to view the newest
+256 KiB, copy the displayed snapshot, and see the canonical path. The support
+view contains launcher events only. Wine output and game chat logs remain
+separate sources. See the
 [portable launcher tree](configuration.md#portable-launcher-tree) for the chat
 log location.
 
@@ -24,16 +26,114 @@ The active log contains only the current launcher session. At startup, the
 preceding transcript moves to `bahamut-launcher.previous.log`. Help and Copy
 Logs never mix those older events into current support output.
 
-Every launch records a startup banner, configuration phases, portable roots,
-platform and bounded hardware details, disk space, required launcher/runtime
-artifacts, attached displays, and Home lifecycle transitions. The launcher
-keeps these INFO events even when a coarse inherited `RUST_LOG=warn` is set.
+Every launch records a startup banner, configuration phases, install and
+state roots, platform and bounded hardware details, disk space, required
+launcher/runtime artifacts, attached displays, and Home lifecycle transitions.
+The launcher keeps these INFO events even when a coarse inherited
+`RUST_LOG=warn` is set.
 `RUST_LOG` directives for a target can still request additional detail.
 
 Credentials, authorization values, bearer tokens, and launcher session IDs are
 redacted before persistence and again before the Help view receives the log.
 Review copied diagnostics because unrelated paths and environment details can
 still identify the local machine.
+
+## Linux startup
+
+`bahamut-launcher --version` prints the launcher version and exits before it
+opens a window, writes logs, or creates launcher state. A version line proves
+the executable and its libraries load; it does not test the WebView.
+
+A launcher that exits at once with
+`error while loading shared libraries: <library>: cannot open shared object file`
+is missing a desktop library. Run `install-dependencies.sh --check` from the
+extracted folder or from the installed copy, such as
+`~/.local/lib/bahamut-launcher/install-dependencies.sh --check` for a user
+install. It names the missing libraries and prints the package command for the
+detected distribution. `install-dependencies.sh --install` runs that command
+after confirmation. The script is
+[`install-dependencies.sh`](../packaging/linux/install-dependencies.sh):
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Every checked library and Wine requirement is satisfied. |
+| 1 | A library is missing; Wine is missing, older than 7, or lacks 32-bit support; or the package command that `--install` runs failed or was declined. |
+| 2 | The command line is invalid. |
+| 3 | The host cannot be checked: no `ldd` or glibc loader, the launcher file is not an ELF executable, or it is built for another CPU architecture. |
+| 4 | The distribution uses musl. The launcher needs a glibc-based distribution. |
+| 5 | The glibc is older than the launcher requires. |
+
+A loader message naming a `GLIBC_2.xx` version that is not found means the
+distribution's glibc is older than the release build. The release is built on
+Ubuntu 22.04 and needs glibc 2.35 or newer. No package install fixes this; use
+a newer distribution release. A `GLIBCXX_` version error, or a version error
+raised for a library other than the launcher, comes from mismatched system
+packages; the script prints it as a missing library, and updating the
+distribution's packages fixes it.
+
+`Wine lacks 32-bit support` means the Wine found through `BAHAMUT_WINE` or
+`PATH` has no 32-bit Windows libraries (`i386-windows/ntdll.dll`), which the
+client needs. Install a Wine build with 32-bit support. The launcher needs
+Wine 7 or newer; the script reports an older Wine by its version. On Debian
+and Ubuntu, the WineHQ packages provide a current Wine. On Gentoo, build Wine
+with the `abi_x86_32` USE flag or use a `wow64` build, list the installed
+Wine slots with `eselect wine list`, and select one with
+`eselect wine set <n>`.
+
+### Hyprland
+
+- `hyprctl clients` lists the launcher window with class `bahamut-launcher`
+  on native Wayland. Under XWayland, when GTK is built without Wayland
+  support or `GDK_BACKEND=x11` is set, the X11 class is `Bahamut-launcher`.
+  A rule that matches both in `hyprland.conf` is
+  `windowrule = match:class ^([Bb]ahamut-launcher)$, float on` for Hyprland
+  0.53 and newer, and `windowrulev2 = float, class:^([Bb]ahamut-launcher)$`
+  for 0.52 and older.
+- If the launcher window stays blank, start it with
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1 bahamut-launcher`, which turns off the
+  WebKitGTK DMA-BUF renderer. To apply it to the menu entry too, add
+  `env = WEBKIT_DISABLE_DMABUF_RENDERER,1` to `hyprland.conf`, which sets it
+  for every application Hyprland starts.
+
+### Moving a beside-the-launcher tree
+
+A Linux launcher tree without `.bahamut-launcher-package` keeps its state
+beside the executable, and the packaged launcher does not import that state.
+Extract the new archive into a new or empty directory, never into the older
+tree: the archive's `bahamut-launcher/` folder replaces an older
+`bahamut-launcher` executable of the same name. To update a packaged tree
+that runs in place, delete or rename the old `bahamut-launcher/` folder
+before extracting, since its state already lives in `~/.bahamut-launcher`,
+or rerun `./install.sh` from the new archive.
+
+To carry the old state over, close the launcher and copy these paths from the
+old tree into `~/.bahamut-launcher`, or `$BAHAMUT_LAUNCHER_HOME` when it holds
+an absolute path, keeping their relative paths:
+
+- `config/`
+- `data/`
+- `backups/`
+- `logs/chat/` for your game chat history from the chatlogs addon
+- `addons/<addon-id>/` for addons you installed yourself
+- `plugins/dats/<package-id>/` for custom DAT packages, not
+  `bahamut-dats-overlay`
+- `scripts/default.txt`
+- `screenshots/`
+
+Shipped addons and the official DAT package stay in the install root. A copied
+package whose ID matches a shipped one is skipped with a warning. The Wine
+prefix, DXVK cache, `wine.log`, and `helper.log` already live in the launcher
+data directory in both layouts. To keep state beside the launcher instead,
+remove the marker from a folder you extracted yourself, as described in
+[Linux package layout](configuration.md#linux-package-layout). Keep the
+marker in a copy that `install.sh` installed: `install.sh` replaces or
+deletes that whole directory, and refuses to when the marker is missing, the
+directory holds entries the package does not ship, or a shipped file is
+changed. After such a refusal, move the entries it names into the state root
+as listed above, copy `.bahamut-launcher-package` back from the matching
+archive when it is missing, and rerun `install.sh`. Once nothing in that
+directory needs keeping, `install.sh --force` replaces it, and
+`install.sh --uninstall --force` removes it, with everything in it.
 
 ## Game closes after Play
 
