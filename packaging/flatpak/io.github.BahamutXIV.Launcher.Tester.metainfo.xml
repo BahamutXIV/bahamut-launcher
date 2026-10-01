@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.BahamutXIV.Launcher.Tester</id>
+  <name>Bahamut Launcher S0 Tester</name>
+  <summary>BahamutXIV launcher Flatpak runtime tester</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <launchable type="desktop-id">io.github.BahamutXIV.Launcher.Tester.desktop</launchable>
+  <developer id="io.github.BahamutXIV">
+    <name>BahamutXIV</name>
+  </developer>
+  <description>
+    <p>Test package for the native BahamutXIV launcher on a GNOME Flatpak runtime.</p>
+  </description>
+  <categories>
+    <category>Game</category>
+  </categories>
+</component>
