@@ -119,6 +119,38 @@ No host filesystem, broad home directory, i386, or GL32 permission is part of
 this tester manifest. If a test requires one, record the concrete failure
 before proposing a manifest change.
 
+### Game directory selection
+
+The default game destination is
+`~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher/game`. On a
+fresh profile, test this destination with Home's Install action before using
+Path to choose another folder.
+
+A selected path under `/run/user/<uid>/doc/` or `/run/flatpak/doc/` refers to
+the [document portal](https://flatpak.github.io/xdg-desktop-portal/docs/documents-and-fuse.html).
+This installer requires a directly accessible destination and parent: it
+rejects symbolic-link ancestors and stages the game in a sibling directory
+before publishing it. A portal export of the selected game folder does not
+provide the required sibling access. Restarting retains the selected
+destination; it does not restore the default path.
+
+To test a custom internal-storage directory, close the launcher, create an
+empty game folder, and grant its parent using a
+[Flatpak override](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-override):
+
+```bash
+mkdir -p "$HOME/Games/Bahamut"
+flatpak override --user --filesystem="$HOME/Games" io.github.BahamutXIV.Launcher.Tester
+flatpak run io.github.BahamutXIV.Launcher.Tester
+```
+
+Use Home's Path action to select `~/Games/Bahamut` again. Check that the
+displayed destination is its ordinary absolute filesystem path before
+pressing Install. If it still points into the document portal, record that
+path and the launcher log; the override has not resolved the picker problem.
+Record any override alongside the device results. An SD-card or external-drive
+test needs its actual mounted parent granted and the same path check.
+
 ## Deck evidence template
 
 Leave each value blank or mark it `unverified` until it is observed on the
