@@ -12,8 +12,7 @@ finish-args:
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri
-  # The WoW64 Wine engine needs the modify_ldt and personality syscalls to run
-  # the PE32 game and helper; without this the prefix is created 64-bit only.
+  # Without multiarch the WoW64 Wine engine creates a 64-bit-only prefix and PE32 executables do not start.
   - --allow=multiarch
 
 modules:
@@ -87,7 +86,11 @@ modules:
       - env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS cmake -S client -B out/client-mingw -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" -DCMAKE_BUILD_TYPE=Release -DLLVM_MINGW_ROOT=/app/libexec/llvm-mingw
       - cmake --build out/client-mingw --parallel 4
       # The archived source has no Git metadata; the launcher reports the identity prepare-flatpak.py recorded.
-      - BAHAMUT_RELEASE_TAG="$(python3 -c 'import json; print(json.load(open("packaging/flatpak/build-identity.json"))["source"]["launcher_version"])')" cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
+      - install -d out
+      - python3 -c 'import json; print(json.load(open("packaging/flatpak/build-identity.json"))["source"]["launcher_version"])' > out/launcher-version.txt
+      - test -s out/launcher-version.txt
+      - BAHAMUT_RELEASE_TAG="$(cat out/launcher-version.txt)" cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
+      - test "$(target/release/bahamut-launcher-shell --version)" = "$(cat out/launcher-version.txt)"
       # Each build command gets a fresh /tmp; stage inside the build directory.
       - rm -rf out/unix-release
       - scripts/stage-unix-release.sh --launcher target/release/bahamut-launcher-shell --client-build out/client-mingw --destination out/unix-release
