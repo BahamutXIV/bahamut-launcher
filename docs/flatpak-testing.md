@@ -111,6 +111,7 @@ The tester grants only these runtime permissions:
 | `--socket=wayland` | Wayland display |
 | `--socket=pulseaudio` | game audio |
 | `--device=dri` | runtime graphics device access |
+| `--allow=multiarch` | 32-bit PE execution by the WoW64 Wine engine; without it Wine initializes a 64-bit-only prefix and cannot start the x86 game or helper |
 
 No host filesystem, broad home directory, i386, or GL32 permission is part of
 this tester manifest. If a test requires one, record the concrete failure
