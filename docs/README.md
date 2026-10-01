@@ -46,6 +46,8 @@ used by the launcher and its boundaries. Players can usually skip them.
   ebuild for the Linux release archive.
 - [Linux archive README](../packaging/linux/README.md) - the `README.md` that
   ships inside the Linux release archive.
+- [Flatpak tester](flatpak-testing.md) - package build, runtime requirements,
+  sandbox checks, and Steam Deck evidence template.
 
 ## Public documentation policy
 

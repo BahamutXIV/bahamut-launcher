@@ -1,0 +1,107 @@
+app-id: io.github.BahamutXIV.Launcher.Tester
+branch: s0
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: bahamut-launcher
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  # Without multiarch the WoW64 Wine engine creates a 64-bit-only prefix and PE32 executables do not start.
+  - --allow=multiarch
+
+modules:
+  - name: rustc
+    buildsystem: simple
+    build-options:
+      no-debuginfo: true
+    build-commands:
+      - ./install.sh --prefix=/app/libexec/rust --disable-ldconfig
+    sources:
+      - type: archive
+        url: https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz
+        sha256: 8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15
+        strip-components: 1
+
+  - name: cargo
+    buildsystem: simple
+    build-options:
+      no-debuginfo: true
+    build-commands:
+      - ./install.sh --prefix=/app/libexec/rust --disable-ldconfig
+    sources:
+      - type: archive
+        url: https://static.rust-lang.org/dist/2026-04-16/cargo-1.95.0-x86_64-unknown-linux-gnu.tar.xz
+        sha256: e74edd2cf7d0f1f1383b4f00eb90c843750bc489e2ccf7214e6476678a907425
+        strip-components: 1
+
+  - name: rust-std
+    buildsystem: simple
+    build-options:
+      no-debuginfo: true
+    build-commands:
+      - ./install.sh --prefix=/app/libexec/rust --disable-ldconfig
+      - test "$(/app/libexec/rust/bin/rustc --version | awk '{print $2}')" = "1.95.0"
+      - test "$(/app/libexec/rust/bin/cargo --version | awk '{print $2}')" = "1.95.0"
+    sources:
+      - type: archive
+        url: https://static.rust-lang.org/dist/2026-04-16/rust-std-1.95.0-x86_64-unknown-linux-gnu.tar.xz
+        sha256: 047ea7098803d3500fa1072e9cee5392697e21525559e4458128a2bf874aa382
+        strip-components: 1
+
+  - name: llvm-mingw
+    buildsystem: simple
+    build-options:
+      no-debuginfo: true
+    build-commands:
+      - install -d /app/libexec/llvm-mingw
+      - cp -a ./. /app/libexec/llvm-mingw/
+      - test -x /app/libexec/llvm-mingw/bin/i686-w64-mingw32-clang++
+    sources:
+      - type: archive
+        url: https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+        sha256: bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21
+        strip-components: 1
+
+  - name: bahamut-launcher
+    buildsystem: simple
+    build-options:
+      append-path: /app/libexec/rust/bin
+      env:
+        CARGO_NET_OFFLINE: "true"
+        LLVM_MINGW_ROOT: /app/libexec/llvm-mingw
+    sources:
+      - type: dir
+        path: source
+    build-commands:
+      - test "$(rustc --version | awk '{print $2}')" = "1.95.0"
+      - test "$(cargo --version | awk '{print $2}')" = "1.95.0"
+      - printf 'rustc=%s\ncargo=%s\ncmake=%s\n' "$(rustc --version)" "$(cargo --version)" "$(cmake --version | head -n 1)" > packaging/flatpak/s0-build-toolchain.txt
+      # The SDK flags target ELF; the existing client toolchain targets PE32.
+      - env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS cmake -S client -B out/client-mingw -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" -DCMAKE_BUILD_TYPE=Release -DLLVM_MINGW_ROOT=/app/libexec/llvm-mingw
+      - cmake --build out/client-mingw --parallel 4
+      # The archived source has no Git metadata; the launcher reports the identity prepare-flatpak.py recorded.
+      - install -d out
+      - python3 -c 'import json; print(json.load(open("packaging/flatpak/build-identity.json"))["source"]["launcher_version"])' > out/launcher-version.txt
+      - test -s out/launcher-version.txt
+      - BAHAMUT_RELEASE_TAG="$(cat out/launcher-version.txt)" cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
+      - test "$(target/release/bahamut-launcher-shell --version)" = "$(cat out/launcher-version.txt)"
+      # Each build command gets a fresh /tmp; stage inside the build directory.
+      - rm -rf out/unix-release
+      - scripts/stage-unix-release.sh --launcher target/release/bahamut-launcher-shell --client-build out/client-mingw --destination out/unix-release
+      - install -d /app/lib/bahamut-launcher
+      - cp -a out/unix-release/. /app/lib/bahamut-launcher/
+      - install -Dm755 packaging/flatpak/bahamut-launcher-wrapper /app/bin/bahamut-launcher
+      - install -Dm644 packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.desktop /app/share/applications/io.github.BahamutXIV.Launcher.Tester.desktop
+      - install -Dm644 packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.metainfo.xml /app/share/metainfo/io.github.BahamutXIV.Launcher.Tester.metainfo.xml
+      - install -Dm644 packaging/linux/icons/hicolor/256x256/apps/bahamut-launcher.png /app/share/icons/hicolor/256x256/apps/io.github.BahamutXIV.Launcher.Tester.png
+      - install -Dm644 packaging/flatpak/build-identity.json /app/share/bahamut-launcher/s0-build-identity.json
+      - install -Dm644 packaging/flatpak/s0-build-toolchain.txt /app/share/bahamut-launcher/s0-build-toolchain.txt
+      - install -Dm644 packaging/linux/package-marker.txt /app/lib/bahamut-launcher/.bahamut-launcher-package
+      - rm -rf /app/libexec/rust
+      - rm -rf /app/libexec/llvm-mingw

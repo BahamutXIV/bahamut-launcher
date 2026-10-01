@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${XDG_DATA_HOME:?Flatpak did not set XDG_DATA_HOME}"
+launcher_home="$XDG_DATA_HOME/launcher"
+documents_home="$XDG_DATA_HOME/Documents"
+xdg_config_home="$XDG_DATA_HOME/xdg-config"
+mkdir -p "$launcher_home" "$documents_home" "$xdg_config_home"
+printf 'XDG_DOCUMENTS_DIR="%s"\n' "$documents_home" > "$xdg_config_home/user-dirs.dirs"
+
+export BAHAMUT_LAUNCHER_HOME="$launcher_home"
+export XDG_CONFIG_HOME="$xdg_config_home"
+# The native S0 client and helper do not use Mono or Gecko; suppress their
+# optional Wine installers so a fresh prefix can reach the real launcher.
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}mscoree,mshtml="
+exec /app/lib/bahamut-launcher/bahamut-launcher "$@"

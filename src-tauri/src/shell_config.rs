@@ -72,6 +72,9 @@ pub(crate) fn default_game_dir_hint() -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
+        if std::env::var_os("FLATPAK_ID").is_some() {
+            return dirs::data_dir().ok().map(|root| root.join("game"));
+        }
         directories::BaseDirs::new()
             .map(|dirs| dirs.home_dir().join("Games").join("FINAL FANTASY XIV"))
     }
@@ -113,8 +116,12 @@ mod tests {
         #[cfg(not(windows))]
         assert_eq!(
             default_game_dir_hint(),
-            directories::BaseDirs::new()
-                .map(|dirs| dirs.home_dir().join("Games").join("FINAL FANTASY XIV"))
+            if std::env::var_os("FLATPAK_ID").is_some() {
+                dirs::data_dir().ok().map(|root| root.join("game"))
+            } else {
+                directories::BaseDirs::new()
+                    .map(|dirs| dirs.home_dir().join("Games").join("FINAL FANTASY XIV"))
+            }
         );
     }
 
