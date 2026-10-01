@@ -84,10 +84,11 @@ modules:
       - env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS cmake -S client -B out/client-mingw -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" -DCMAKE_BUILD_TYPE=Release -DLLVM_MINGW_ROOT=/app/libexec/llvm-mingw
       - cmake --build out/client-mingw --parallel 4
       - cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
-      - rm -rf /tmp/bahamut-unix-release
-      - scripts/stage-unix-release.sh --launcher target/release/bahamut-launcher-shell --client-build out/client-mingw --destination /tmp/bahamut-unix-release
+      # Each build command gets a fresh /tmp; stage inside the build directory.
+      - rm -rf out/unix-release
+      - scripts/stage-unix-release.sh --launcher target/release/bahamut-launcher-shell --client-build out/client-mingw --destination out/unix-release
       - install -d /app/lib/bahamut-launcher
-      - cp -a /tmp/bahamut-unix-release/. /app/lib/bahamut-launcher/
+      - cp -a out/unix-release/. /app/lib/bahamut-launcher/
       - install -Dm755 packaging/flatpak/bahamut-launcher-wrapper /app/bin/bahamut-launcher
       - install -Dm644 packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.desktop /app/share/applications/io.github.BahamutXIV.Launcher.Tester.desktop
       - install -Dm644 packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.metainfo.xml /app/share/metainfo/io.github.BahamutXIV.Launcher.Tester.metainfo.xml
