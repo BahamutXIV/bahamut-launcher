@@ -12,6 +12,9 @@ finish-args:
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri
+  # The WoW64 Wine engine needs the modify_ldt and personality syscalls to run
+  # the PE32 game and helper; without this the prefix is created 64-bit only.
+  - --allow=multiarch
 
 modules:
   - name: rustc
