@@ -73,6 +73,22 @@ def read_workspace_version(cargo_toml: Path) -> str:
     return match.group(1)
 
 
+def launcher_version_identity(repo: Path, commit: str) -> str:
+    """The `<latest tag>-<short hash>` or bare-hash identity the root build.rs derives from Git."""
+    short_hash = run_git(repo, "rev-parse", "--short=7", commit)
+    describe = subprocess.run(
+        ["git", "-C", str(repo), "describe", "--tags", "--abbrev=0", commit],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    tag = describe.stdout.strip()
+    if describe.returncode == 0 and tag:
+        return f"{tag}-{short_hash}"
+    return short_hash
+
+
 def extract_archive(repo: Path, commit: str, destination: Path) -> None:
     archive = subprocess.run(
         ["git", "-C", str(repo), "archive", "--format=tar", "--prefix=source/", commit],
@@ -110,6 +126,7 @@ def prepare(args: argparse.Namespace) -> None:
 
     commit = run_git(repo, "rev-parse", "--verify", f"{args.source_ref}^{{commit}}")
     tree = run_git(repo, "rev-parse", "--verify", f"{commit}^{{tree}}")
+    launcher_version = launcher_version_identity(repo, commit)
     source = work / "source"
     extract_archive(repo, commit, work)
 
@@ -151,6 +168,7 @@ def prepare(args: argparse.Namespace) -> None:
         "version": version,
         "source": {
             "commit": commit,
+            "launcher_version": launcher_version,
             "tree": tree,
             "worktree_changes_excluded": True,
         },
@@ -188,6 +206,7 @@ def prepare(args: argparse.Namespace) -> None:
                 "app_id": APP_ID,
                 "branch": BRANCH,
                 "commit": commit,
+                "launcher_version": launcher_version,
                 "tree": tree,
                 "version": version,
                 "manifest": str(work / manifest.name),

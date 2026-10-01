@@ -83,7 +83,8 @@ modules:
       # The SDK flags target ELF; the existing client toolchain targets PE32.
       - env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS cmake -S client -B out/client-mingw -DCMAKE_TOOLCHAIN_FILE="$PWD/client/cmake/llvm-mingw-i686.cmake" -DCMAKE_BUILD_TYPE=Release -DLLVM_MINGW_ROOT=/app/libexec/llvm-mingw
       - cmake --build out/client-mingw --parallel 4
-      - cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
+      # The archived source has no Git metadata; the launcher reports the identity prepare-flatpak.py recorded.
+      - BAHAMUT_RELEASE_TAG="$(python3 -c 'import json; print(json.load(open("packaging/flatpak/build-identity.json"))["source"]["launcher_version"])')" cargo build --manifest-path src-tauri/Cargo.toml --release --locked --offline
       # Each build command gets a fresh /tmp; stage inside the build directory.
       - rm -rf out/unix-release
       - scripts/stage-unix-release.sh --launcher target/release/bahamut-launcher-shell --client-build out/client-mingw --destination out/unix-release

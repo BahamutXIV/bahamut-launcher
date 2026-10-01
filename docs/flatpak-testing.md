@@ -53,7 +53,9 @@ The default output is `out/flatpak-s0/`. It contains a versioned
 `bahamut-launcher-tester-s0-<version>.flatpak`, its `.sha256` sidecar, and a
 `.identity.json` file containing the source commit and tree, Cargo and Rust
 inputs, llvm-mingw digest, runtime and SDK commits, and the SDK toolchain
-receipt. The bundle does not include the GNOME runtime or SDK; install those
+receipt. The archived source carries no Git metadata, so the packaged
+launcher reports the `source.launcher_version` value from that file for
+`--version`, the launcher log and its HTTP user agent. The bundle does not include the GNOME runtime or SDK; install those
 from the configured Flatpak remote before installing the bundle.
 
 Use an empty absolute `--work-dir` below the selected scratch root when build
@@ -93,6 +95,11 @@ opens, launcher state is written below
 Documents directory is present. A second run should retain the launcher state.
 Record failures with the bundle digest and the identity file beside the test
 notes.
+
+If the window opens but stays blank, WebKitGTK's DMA-BUF renderer has failed
+on the host graphics driver. Rerun with
+`flatpak run --env=WEBKIT_DISABLE_DMABUF_RENDERER=1 io.github.BahamutXIV.Launcher.Tester`
+and record that the override was needed.
 
 The tester grants only these runtime permissions:
 
