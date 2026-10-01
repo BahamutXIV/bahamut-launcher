@@ -549,6 +549,14 @@ bool AddonHost::IsLoaded(std::string_view addonId) const
                        });
 }
 
+bool AddonHost::TargetlinesEnabled() const
+{
+    return std::any_of(addons_.begin(), addons_.end(), [](const auto& addon)
+                       {
+                           return addon->id == "targetlines" && !addon->faulted && addon->state != nullptr;
+                       });
+}
+
 bool AddonHost::HasCommandAddons() const
 {
     return IsLoaded("pos") || IsLoaded("fps") || IsLoaded("wiki") ||
@@ -1158,6 +1166,10 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
         registerFunction("combat_events", &LuaCombatEvents);
         registerFunction("combat_meter", &LuaCombatMeter);
     }
+    if (addon->id == "targetlines")
+    {
+        registerFunction("targetlines", &LuaTargetlines);
+    }
     if (addon->id == "wiki")
     {
         registerFunction("open_url", &LuaOpenUrl);
@@ -1528,6 +1540,18 @@ int AddonHost::LuaCombatEvents(lua_State* state)
     lua_pushnumber(state, static_cast<lua_Number>(dropped));
     lua_pushinteger(state, player ? static_cast<lua_Integer>(player->actorId) : 0);
     return 3;
+}
+
+int AddonHost::LuaTargetlines(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->id != "targetlines" || addon->drawSink == nullptr ||
+        addon->drawSink->targetlines == nullptr || lua_gettop(state) != 0)
+    {
+        return 0;
+    }
+    addon->drawSink->targetlines(addon->drawSink->context, addon->id.c_str());
+    return 0;
 }
 
 int AddonHost::LuaChatLogWrite(lua_State* state)

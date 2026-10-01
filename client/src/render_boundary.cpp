@@ -10,6 +10,7 @@
 #include "overlay.h"
 #include "packet_observer.h"
 #include "player_state.h"
+#include "targetlines_probe.h"
 
 #include <MinHook.h>
 #include <d3d9.h>
@@ -383,6 +384,8 @@ bool IsD3d9CodeAddress(void* address, LONG* failureStage = nullptr, BahamutRunti
 // the original Present.
 void ObservePresent(IDirect3DDevice9* device)
 {
+    bahamut_client::SetTargetlinesRendererActive(gAddonHost != nullptr && gAddonHost->TargetlinesEnabled());
+    bahamut_client::PresentTargetlinesRenderer();
     bool hideOverlayForCapture = false;
     gNativePluginHost->OnPresentBegin(device, hideOverlayForCapture);
     if (gTelemetry != nullptr)
@@ -506,6 +509,7 @@ HRESULT STDMETHODCALLTYPE HookedReset(IDirect3DDevice9*      device,
         return gOriginalReset(device, parameters);
     }
     PrepareOverlayReset();
+    bahamut_client::ResetTargetlinesRenderer();
     const bool    wireframeEnabled = IsWireframeEnabled();
     const HRESULT result           = gOriginalReset(device, parameters);
     if (SUCCEEDED(result))
@@ -609,6 +613,12 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
             if (hooksReady)
             {
                 EnableOverlay();
+                // DrawIndexedPrimitive is IDirect3DDevice9 slot 82 in the SDK.
+                void* drawIndexedPrimitive = methods[82];
+                if (IsD3d9CodeAddress(drawIndexedPrimitive))
+                {
+                    bahamut_client::BindTargetlinesRendererDevice(*device, drawIndexedPrimitive);
+                }
                 OutputDebugStringA(
                     "Bahamut runtime: D3D9 Present/reset and Win32 input boundaries acquired\n");
             }
@@ -762,7 +772,8 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
     const bool packetObserverRequired   = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr &&
                                           (addonHost->IsLoaded("distance") || addonHost->IsLoaded("targethp") ||
                                            addonHost->IsLoaded("zonename") || addonHost->IsLoaded("packetlogger") ||
-                                           addonHost->IsLoaded("combatparser"));
+                                           addonHost->IsLoaded("combatparser") || addonHost->TargetlinesEnabled() ||
+                                           bahamut_client::TargetlinesProbeRequested());
     if (packetObserverRequired && (packetObserver == nullptr || !packetObserver->InstallHook()))
     {
         const bool packetRemoved = packetObserver == nullptr || packetObserver->Shutdown();

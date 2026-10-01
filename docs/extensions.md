@@ -211,6 +211,21 @@ miss, evade, parry, and block text IDs, plus positive results without a text
 ID from Bahamut's spell path. Unknown effects are ignored. The current feed
 does not provide complete in-game coverage.
 
+### Targetlines
+
+Targetlines is disabled by default. Enable it in Addons for the next game
+launch. It draws a raised glowing red curve to the selected recognized
+mob and a green curve during a supported local heal or buff cast on another
+ally. Self and ordinary friendly selection draw no curve. The green curve
+keeps the accepted cast target when selection changes, fades on completion,
+and disappears on interruption.
+
+Targetlines supports reviewed Bahamut mob spawn profiles and known healing
+or buff commands with a cast time. Unknown profiles and instant abilities
+are outside its coverage. It uses the shared overlay visibility control
+and has no slash commands or adjustable visual settings. See the
+[native Targetlines contract](../client/README.md#targetlines) for projection and testing limits.
+
 ## DiscordRPC presence
 
 DiscordRPC is a launcher plugin configured in `extensions.ini`. A bounded
@@ -456,6 +471,10 @@ These functions submit content during `draw`:
   supplies a player name, metric total, rate, accuracy label, and `#RRGGBB`
   bar color. Empty rows show the selected mode heading. Position and
   Shift-drag locking use the same overlay layout as other addon windows.
+- `bahamut.targetlines()` submits the current native arcs. It takes no
+  arguments and is available only to the `targetlines` addon during `draw`.
+  It does not expose actor positions, camera matrices, or arbitrary world
+  drawing.
 - `bahamut.window(title, text, locked)` submits one host-owned text window.
   An empty title selects the compact headerless style. Combatparser initially
   anchors at mid-left; other compact windows start at the lower left edge.

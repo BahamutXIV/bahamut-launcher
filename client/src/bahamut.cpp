@@ -14,6 +14,8 @@
 #include "runtime_api.h"
 #include "startup_script.h"
 #include "target_distance.h"
+#include "targetlines.h"
+#include "targetlines_probe.h"
 
 #include <algorithm>
 #include <cstring>
@@ -287,6 +289,7 @@ public:
                                     addonHost_.QueueAreaTransition(message);
                                     actorNames_.Observe(message);
                                     targetDistance_.Observe(message);
+                                    targetlines_.Observe(message);
                                     addonHost_.QueueCombatResult(message);
                                 });
         packetObserver_.SetFrameSink([this](packet_observer::Direction    direction,
@@ -299,6 +302,7 @@ public:
             ReleaseHandles();
             return 12;
         }
+        bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled());
         if (!datOverlay_.Install(PathList(kDatPackageRootsEnvironment),
                                  !HasValue(kTestStubEnvironment)))
         {
@@ -514,6 +518,7 @@ private:
     bahamut_client::PlayerStateService    playerState_;
     bahamut_client::ActorNameService      actorNames_{ &playerState_ };
     bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
+    bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
     packet_observer::PacketObserver       packetObserver_;
     bahamut_client::ObjectDistanceService objectDistance_;
     bahamut_client::CameraZoomService     cameraZoom_;

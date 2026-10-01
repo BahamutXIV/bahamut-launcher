@@ -39,6 +39,7 @@ struct AddonWindowSink
     void (*window)(void* context, const char* addonId, const char* title, const char* text, bool locked)                                                           = nullptr;
     void (*rawText)(void* context, const char* addonId, const char* text, float red, float green, float blue, float alpha, bool locked, float fontSize)            = nullptr;
     void (*combatMeter)(void* context, const char* addonId, const char* mode, const AddonCombatMeterRow* rows, std::size_t rowCount, bool locked, bool incomplete) = nullptr;
+    void (*targetlines)(void* context, const char* addonId)                                                                                                        = nullptr;
 };
 
 struct AddonClipboardSink
@@ -86,6 +87,7 @@ public:
     bool Reload(std::string_view addonId);
     bool Disable(std::string_view addonId);
     bool IsLoaded(std::string_view addonId) const;
+    bool TargetlinesEnabled() const;
     bool HasCommandAddons() const;
     bool DispatchCommand(std::string_view command);
     void QueueChat(std::string_view source, std::string_view message);
@@ -118,6 +120,7 @@ private:
     static int LuaPacketLogStatus(lua_State* state);
     static int LuaCombatEvents(lua_State* state);
     static int LuaCombatMeter(lua_State* state);
+    static int LuaTargetlines(lua_State* state);
     static int LuaOpenUrl(lua_State* state);
 
     static std::unique_ptr<Instance> LoadOne(
