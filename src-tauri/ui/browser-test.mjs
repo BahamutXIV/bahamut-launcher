@@ -11,7 +11,7 @@ const TAURI_CONFIG_PATH = new URL('../tauri.conf.json', import.meta.url);
 const DAY_BRAND_LOGO_PATH = new URL('./assets/brand-logo-day.png', import.meta.url);
 const NIGHT_BRAND_LOGO_PATH = new URL('./assets/brand-logo-night.png', import.meta.url);
 const DAY_BACKGROUND_PATH = new URL('./assets/background-day.png', import.meta.url);
-const NIGHT_BACKGROUND_PATH = new URL('./assets/background-night.jpg', import.meta.url);
+const NIGHT_BACKGROUND_PATH = new URL('./assets/background-night.png', import.meta.url);
 const DAY_THEME_ICON_PATH = new URL('./assets/theme-day.png', import.meta.url);
 const NIGHT_THEME_ICON_PATH = new URL('./assets/theme-night.png', import.meta.url);
 const NEWS_PLACEHOLDER_PATH = new URL('./assets/news-placeholder.jpg', import.meta.url);
@@ -113,8 +113,8 @@ function serveUiFixture(request, response) {
     : null;
   const asset = request.url === '/assets/background-day.png'
     ? [DAY_BACKGROUND_PATH, 'image/png']
-    : request.url === '/assets/background-night.jpg'
-      ? [NIGHT_BACKGROUND_PATH, 'image/jpeg']
+    : request.url === '/assets/background-night.png'
+      ? [NIGHT_BACKGROUND_PATH, 'image/png']
       : request.url === '/assets/fonts/fonts.css'
         ? [FONT_CSS_PATH, 'text/css; charset=utf-8']
         : request.url === '/assets/fonts/inter-opsz-wght.ttf'
@@ -1140,10 +1140,6 @@ test('home_auth_and_terminal_install_states', async t => {
       if (!channels) throw new Error('could not parse computed color: ' + JSON.stringify(value));
       return channels.map(Number);
     };
-    const compositeOverWhite = value => {
-      const [red, green, blue, alpha = 1] = parseColor(value);
-      return [red, green, blue].map(channel => channel * alpha + 255 * (1 - alpha));
-    };
     const luminance = channels => channels
       .map(channel => channel / 255)
       .map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4)
@@ -1164,6 +1160,15 @@ test('home_auth_and_terminal_install_states', async t => {
     const assertThemeTokensResolve = (style, themeName) => {
       const missing = requiredThemeTokens.filter(token => !style.getPropertyValue(token).trim());
       if (missing.length) throw new Error(themeName + ' semantic tokens are missing: ' + missing.join(','));
+    };
+    const assertMainCardSurfaces = themeName => {
+      const panelColor = resolveTokenColor('--panel');
+      if (parseColor(panelColor)[3] !== .8) throw new Error(themeName + ' main cards do not share the accepted opacity');
+      const inconsistent = [...document.querySelectorAll('.glass-panel:not(dialog)')].find(panel => {
+        const style = getComputedStyle(panel);
+        return style.backgroundColor !== panelColor || style.backdropFilter !== 'blur(4px)' || style.opacity !== '1';
+      });
+      if (inconsistent) throw new Error(themeName + ' main card transparency or blur differs: ' + inconsistent.className);
     };
     const near = (actual, expected) => Math.abs(actual - expected) < .1;
     if (!near(topbar.height, 77)) throw new Error('topbar is not 77px tall');
@@ -1192,27 +1197,28 @@ test('home_auth_and_terminal_install_states', async t => {
     const brandLogo = document.querySelector('.brand img');
     const darkStyle = getComputedStyle(document.body);
     assertThemeTokensResolve(darkStyle, 'night');
+    assertMainCardSurfaces('night');
     if ([...document.querySelectorAll('.glass-panel')].some(panel => hasOuterShadow(getComputedStyle(panel).boxShadow))) throw new Error('night glass panels retained unintended outer elevation');
     const darkDisabledChoice = getComputedStyle(document.querySelector('.gamepad-card--stub .choice-option'));
     if (darkDisabledChoice.backgroundColor !== resolveTokenColor('--disabled-bg') || darkDisabledChoice.borderColor !== resolveTokenColor('--disabled-border') || darkDisabledChoice.color !== resolveTokenColor('--disabled-text')) throw new Error('night disabled controls bypassed semantic tokens');
     const hero = document.querySelector('.launcher-shell');
     const heroStyle = getComputedStyle(hero, '::before');
-    const imageDimensions = await Promise.all(['assets/background-day.png', 'assets/background-night.jpg'].map(source => new Promise((resolve, reject) => {
+    const imageDimensions = await Promise.all(['assets/background-day.png', 'assets/background-night.png'].map(source => new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve([image.naturalWidth, image.naturalHeight]);
       image.onerror = () => reject(new Error('failed to decode ' + source));
       image.src = source;
     })));
-    if (imageDimensions[0].join('x') !== '1920x1080' || imageDimensions[1].join('x') !== '800x450') throw new Error('theme background dimensions drifted: ' + JSON.stringify(imageDimensions));
+    if (imageDimensions.some(dimensions => dimensions.join('x') !== '2560x1440')) throw new Error('theme background dimensions drifted: ' + JSON.stringify(imageDimensions));
     if (darkStyle.getPropertyValue('--accent').trim() !== '#c52a32' || darkStyle.getPropertyValue('--accent-text').trim() !== '#f6d89a' || darkStyle.getPropertyValue('--bg').trim() !== '#190a0d') throw new Error('night palette drifted');
     if (resolveTokenColor('--text') !== 'rgb(223, 195, 191)' || resolveTokenColor('--control-text') !== 'rgb(223, 195, 191)' || resolveTokenColor('--on-accent') !== 'rgb(25, 10, 13)') throw new Error('night text or button ink bypassed the softened palette');
     const nightActionInk = parseColor(resolveTokenColor('--on-accent')).slice(0, 3);
     if (['--action-fill-start','--action-fill-end'].some(token => contrast(nightActionInk, parseColor(resolveTokenColor(token)).slice(0, 3)) < 4.5)) throw new Error('night filled-action labels fail normal-text contrast');
     const nightCopyLogsStyle = getComputedStyle(document.querySelector('[data-help-action="copy"]'));
     if (!nightCopyLogsStyle.backgroundImage.includes('rgb(232, 109, 103)') || !nightCopyLogsStyle.backgroundImage.includes('rgb(217, 81, 80)') || nightCopyLogsStyle.color !== 'rgb(25, 10, 13)') throw new Error('Copy Logs bypassed the night filled-action tokens');
-    if (!heroStyle.backgroundImage.includes('background-night.jpg')) throw new Error('night mode did not load the supplied night background');
+    if (!heroStyle.backgroundImage.includes('background-night.png')) throw new Error('night mode did not load the supplied night background');
     if (heroStyle.filter !== 'none' || heroStyle.transform !== 'none') throw new Error('theme background source pixels have a direct CSS filter or transform');
-    if (getComputedStyle(hero, '::after').backgroundColor !== 'rgba(25, 10, 13, 0.48)') throw new Error('night mode did not apply its scene filter');
+    if (getComputedStyle(hero, '::after').backgroundColor !== 'rgba(25, 10, 13, 0.64)') throw new Error('night mode did not apply its scene filter');
     if (!brandLogo.src.endsWith('/assets/brand-logo-night.png') || getComputedStyle(brandLogo).filter.includes('hue-rotate')) throw new Error('night mode did not load its accepted brand logo directly');
     const legacyPalette = {
       bodyAttribute: document.body.getAttribute('data-palette'),
@@ -1228,6 +1234,7 @@ test('home_auth_and_terminal_install_states', async t => {
     theme.click();
     const lightStyle = getComputedStyle(document.body);
     assertThemeTokensResolve(lightStyle, 'day');
+    assertMainCardSurfaces('day');
     if (document.body.dataset.theme !== 'light' || theme.getAttribute('aria-label') !== 'Use night theme' || getComputedStyle(theme.querySelector('.theme-icon-day')).display !== 'none' || getComputedStyle(theme.querySelector('.theme-icon-night')).display === 'none') throw new Error('day theme did not show the night-theme icon');
     if (lightStyle.getPropertyValue('--accent').trim() !== '#39c8f0' || lightStyle.getPropertyValue('--accent-text').trim() !== '#bceeff' || lightStyle.getPropertyValue('--bg').trim() !== '#087faf') throw new Error('day palette drifted');
     if (resolveTokenColor('--text') !== 'rgb(237, 248, 251)') throw new Error('day primary text returned to pure white');
@@ -1235,9 +1242,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (['--action-fill-start','--action-fill-end'].some(token => contrast(dayActionInk, parseColor(resolveTokenColor(token)).slice(0, 3)) < 4.5)) throw new Error('day filled-action labels fail normal-text contrast');
     const dayCopyLogsStyle = getComputedStyle(document.querySelector('[data-help-action="copy"]'));
     if (!dayCopyLogsStyle.backgroundImage.includes('rgb(120, 221, 248)') || !dayCopyLogsStyle.backgroundImage.includes('rgb(57, 200, 240)') || dayCopyLogsStyle.color !== 'rgb(5, 48, 66)') throw new Error('Copy Logs bypassed the day filled-action tokens');
-    const dayPanel = compositeOverWhite(lightStyle.getPropertyValue('--panel'));
-    const lowContrastToken = ['--text','--muted','--muted-2','--accent-text'].find(token => contrast(parseColor(resolveTokenColor(token)).slice(0, 3), dayPanel) < 4.5);
-    if (lowContrastToken) throw new Error('day panel text loses contrast over a bright scene: ' + lowContrastToken);
+    if (resolveTokenColor('--panel') !== 'rgba(5, 78, 110, 0.8)' || resolveTokenColor('--muted') !== 'rgb(215, 239, 247)' || resolveTokenColor('--muted-2') !== 'rgb(169, 210, 224)') throw new Error('day cards or text lost the accepted cerulean palette');
     const lightLoginInput = getComputedStyle(document.querySelector('#login-username'));
     const lightLoginPlaceholder = getComputedStyle(document.querySelector('#login-username'), '::placeholder');
     if (lightLoginInput.backgroundColor !== 'rgba(244, 252, 255, 0.94)' || lightLoginInput.color !== 'rgb(24, 54, 69)' || lightLoginPlaceholder.color !== 'rgb(96, 119, 132)') throw new Error('day Login controls are not using the readable semantic control palette');
@@ -1246,7 +1251,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (lightDisabledChoice.backgroundColor !== resolveTokenColor('--disabled-bg') || lightDisabledChoice.borderColor !== resolveTokenColor('--disabled-border') || lightDisabledChoice.color !== resolveTokenColor('--disabled-text')) throw new Error('day disabled controls bypassed semantic tokens');
     if (getComputedStyle(document.querySelector('.glass-panel')).borderColor !== 'rgba(57, 200, 240, 0.42)') throw new Error('day panels retained the night crimson border');
     if (!getComputedStyle(hero, '::before').backgroundImage.includes('background-day.png')) throw new Error('day mode did not load the supplied day background');
-    if (getComputedStyle(hero, '::after').backgroundColor !== 'rgba(8, 127, 175, 0.3)') throw new Error('day mode did not apply the blue scene filter');
+    if (getComputedStyle(hero, '::after').backgroundColor !== 'rgba(8, 127, 175, 0.32)') throw new Error('day mode did not apply the blue scene filter');
     if (!brandLogo.src.endsWith('/assets/brand-logo-day.png') || getComputedStyle(brandLogo).filter.includes('hue-rotate')) throw new Error('day mode did not load its accepted brand logo directly');
     theme.click();
     if (!brandLogo.src.endsWith('/assets/brand-logo-night.png')) throw new Error('night theme return did not restore its accepted brand logo');

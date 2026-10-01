@@ -14,7 +14,8 @@
       --action-border: #f09a91;
       --bg: #190a0d;
       --topbar: rgba(25, 10, 13, .96);
-      --panel: rgba(53, 16, 21, .78);
+      --panel-opacity: .8;
+      --panel: rgba(53, 16, 21, var(--panel-opacity));
       --panel-compact: rgba(62, 18, 26, .86);
       --panel-sunk: rgba(16, 7, 9, .7);
       --border: rgba(225, 75, 69, .24);
@@ -59,8 +60,8 @@
       --help-log-bg: rgba(10,8,14,.96);
       --help-log-text: #dce6e1;
       --focus: 0 0 0 1px #100709, 0 0 0 3px #f09a91;
-      --hero-image: url("../assets/background-night.jpg");
-      --hero-filter: rgba(25, 10, 13, .48);
+      --hero-image: url("../assets/background-night.png");
+      --hero-filter: rgba(25, 10, 13, .64);
     }
     body[data-theme="light"] {
       color-scheme: light;
@@ -74,7 +75,7 @@
       --action-border: #bceeff;
       --bg: #087faf;
       --topbar: rgba(5, 59, 89, .98);
-      --panel: rgba(5, 78, 110, .94);
+      --panel: rgba(5, 78, 110, var(--panel-opacity));
       --panel-compact: rgba(6, 90, 122, .95);
       --panel-sunk: rgba(3, 43, 64, .9);
       --border: rgba(188, 238, 255, .22);
@@ -110,5 +111,5 @@
       --help-log-bg: rgba(5,9,10,.96);
       --focus: 0 0 0 1px #053b59, 0 0 0 3px var(--accent-strong);
       --hero-image: url("../assets/background-day.png");
-      --hero-filter: rgba(8, 127, 175, .3);
+      --hero-filter: rgba(8, 127, 175, .32);
     }

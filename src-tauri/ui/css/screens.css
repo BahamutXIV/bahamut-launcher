@@ -243,7 +243,7 @@
     .settings-pane[data-active] { display:block; }
     .game-settings-card .settings-field { padding:8px 12px; border-bottom:0; border-radius:var(--card-radius); }
     .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; align-content:start; gap:12px; height:auto; min-height:0; }
-    .settings-card { min-width:0; min-height:0; padding:12px 14px 14px; overflow:visible; backdrop-filter:none; }
+    .settings-card { min-width:0; min-height:0; padding:12px 14px 14px; overflow:visible; }
     .settings-card h2 { margin:4px 0; color:var(--accent-text); font:700 22px/1.25 var(--font-display); letter-spacing:.05em; }
     .settings-pane[data-settings-pane="misc"] .settings-card h2 { margin:2px 0 16px; color:var(--text); font:700 15px/1.4 var(--font-body); letter-spacing:0; }
     .settings-pane[data-settings-pane="misc"] .settings-card h2:not(:first-child) { margin-top:18px; }
