@@ -55,8 +55,9 @@ The default output is `out/flatpak-s0/`. It contains a versioned
 inputs, llvm-mingw digest, runtime and SDK commits, and the SDK toolchain
 receipt. The archived source carries no Git metadata, so the packaged
 launcher reports the `source.launcher_version` value from that file for
-`--version`, the launcher log and its HTTP user agent. The bundle does not include the GNOME runtime or SDK; install those
-from the configured Flatpak remote before installing the bundle.
+`--version`, the launcher log and its HTTP user agent. The bundle does not
+include the GNOME runtime or SDK; install those from the configured Flatpak
+remote before installing the bundle.
 
 Use an empty absolute `--work-dir` below the selected scratch root when build
 files or CTest results must be inspected after the build. `--keep-work` keeps
@@ -96,10 +97,11 @@ Documents directory is present. A second run should retain the launcher state.
 Record failures with the bundle digest and the identity file beside the test
 notes.
 
-If the window opens but stays blank, WebKitGTK's DMA-BUF renderer has failed
-on the host graphics driver. Rerun with
+A window that opens but stays blank is covered in
+[Troubleshooting](troubleshooting.md). Inside the tester, pass the WebKitGTK
+override as
 `flatpak run --env=WEBKIT_DISABLE_DMABUF_RENDERER=1 io.github.BahamutXIV.Launcher.Tester`
-and record that the override was needed.
+and record that it was needed.
 
 The tester grants only these runtime permissions:
 
@@ -111,7 +113,7 @@ The tester grants only these runtime permissions:
 | `--socket=wayland` | Wayland display |
 | `--socket=pulseaudio` | game audio |
 | `--device=dri` | runtime graphics device access |
-| `--allow=multiarch` | 32-bit PE execution by the WoW64 Wine engine; without it Wine initializes a 64-bit-only prefix and cannot start the x86 game or helper |
+| `--allow=multiarch` | 32-bit PE execution (game and `bahamut-loader.exe`) under the WoW64 Wine engine; without it the Wine prefix is 64-bit only |
 
 No host filesystem, broad home directory, i386, or GL32 permission is part of
 this tester manifest. If a test requires one, record the concrete failure
