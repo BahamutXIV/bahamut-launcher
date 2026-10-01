@@ -39,6 +39,19 @@ pub(crate) fn get_launcher_log() -> Result<LauncherLogView, String> {
     })
 }
 
+/// Persist a frontend failure with the displayed text and diagnostic context.
+#[tauri::command]
+pub(crate) fn record_ui_failure(
+    page: String,
+    action: String,
+    message: String,
+    diagnostic: String,
+    context: String,
+) -> Result<(), String> {
+    logging::record_ui_failure(&page, &action, &message, &diagnostic, &context);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn open_launcher_log() -> Result<(), String> {
     let path = dirs::launcher_log_path().map_err(|error| error.to_string())?;

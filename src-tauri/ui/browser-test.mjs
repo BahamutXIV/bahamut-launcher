@@ -24,6 +24,7 @@ const UI_FILES = new Map([
   ['/css/shell.css', [new URL('./css/shell.css', import.meta.url), 'text/css; charset=utf-8']],
   ['/css/screens.css', [new URL('./css/screens.css', import.meta.url), 'text/css; charset=utf-8']],
   ['/css/components.css', [new URL('./css/components.css', import.meta.url), 'text/css; charset=utf-8']],
+  ['/js/feedback.js', [new URL('./js/feedback.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/runtime.js', [new URL('./js/runtime.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/settings.js', [new URL('./js/settings.js', import.meta.url), 'text/javascript; charset=utf-8']],
   ['/js/extensions.js', [new URL('./js/extensions.js', import.meta.url), 'text/javascript; charset=utf-8']],
@@ -269,7 +270,6 @@ function evaluateScript() {
           description:'Higher-detail world replacement DATs.', homepage:null,
           enabled:true,
         }],
-        overlay_conflicts: [{ relative_path:'data/2A/08.DAT', package_ids:['base-world', 'detail-world'] }],
         plugins: [{
           id:'screenshot', name:'Screenshot', author:'Aeshur', version:'1.0',
           description:'Captures the game to the portable screenshots folder.',
@@ -317,6 +317,7 @@ function evaluateScript() {
       calls: [],
     };
     window.__launcherBrowserState = state;
+    if (location.search === '?boot-late-fail') state.commandPlan = { command:'get_server_settings', delayMs:500, error:'late boot diagnostic' };
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -332,6 +333,11 @@ function evaluateScript() {
     });
     window.__TAURI__ = { event: { listen: async (name, handler) => { state.eventHandlers[name] = handler; } }, core: { invoke: async (command, args = {}) => {
       state.calls.push({ command, args });
+      if (state.commandPlan?.command === command) {
+        const plan = state.commandPlan; state.commandPlan = null;
+        if (plan.delayMs) await new Promise(resolve => setTimeout(resolve, plan.delayMs));
+        if (plan.error) throw new Error(plan.error);
+      }
       if (state.settingsHydrationPlan?.command === command) {
         const plan = state.settingsHydrationPlan;
         state.settingsHydrationPlan = null;
@@ -371,6 +377,7 @@ function evaluateScript() {
       }
       if (command === 'validate_session') return state.sessionValidation;
       if (command === 'game_status') {
+        if (state.gameStatusError) throw new Error(state.gameStatusError);
         const running = state.gameRunning;
         if (state.gameStatusDelayMs) await new Promise(resolve => setTimeout(resolve, state.gameStatusDelayMs));
         return running;
@@ -439,7 +446,7 @@ function evaluateScript() {
         return state.nextInstallDir;
       }
       if (command === 'detect_game_install_command') return { detected: state.installPath || 'C:/game', source: 'preferences' };
-      if (command === 'config_tool_supported') return true;
+      if (command === 'config_tool_supported') return state.configToolSupported !== false;
       if (command === 'get_launcher_behavior') return { ...state.launcherBehavior };
       if (command === 'get_borderless_monitors') return structuredClone(state.borderlessMonitors);
       if (command === 'set_borderless_monitor') {
@@ -545,8 +552,6 @@ function evaluateScript() {
         const packageItem = state.extensionInventory.overlays.find(candidate => candidate.id === args.id);
         if (!packageItem) throw new Error('DAT package is not installed');
         packageItem.enabled = args.enabled;
-        const enabledPackages = state.extensionInventory.overlays.filter(candidate => candidate.enabled && candidate.id !== 'bahamut-dats-overlay');
-        state.extensionInventory.overlay_conflicts = enabledPackages.length > 1 ? [{ relative_path:'data/2A/08.DAT', package_ids:enabledPackages.map(candidate => candidate.id) }] : [];
         return structuredClone(state.extensionInventory);
       }
       if (command === 'reorder_dat_package') {
@@ -556,6 +561,11 @@ function evaluateScript() {
         const [packageItem] = packages.splice(index, 1);
         packages.splice(args.position, 0, packageItem);
         return structuredClone(state.extensionInventory);
+      }
+      if (command === 'record_ui_failure') {
+        if (state.failureLogDelayMs) await new Promise(resolve => setTimeout(resolve, state.failureLogDelayMs));
+        state.supportLog.content += '\\n' + args.page + '/' + args.action + ': ' + args.message + ' diagnostic=' + args.diagnostic;
+        return null;
       }
       if (command === 'get_launcher_log') return { ...state.supportLog };
       if (command === 'create_backup') {
@@ -695,6 +705,366 @@ async function exposeFrontendModules(devtools) {
   })()`);
 }
 
+test('failure_feedback_stays_in_cards_and_logs_after_navigation', async t => {
+  const server = createServer(serveUiFixture);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const debugPort = await freePort();
+  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
+  const browser = spawn(browserPath(), ['--headless=new', '--disable-gpu', '--no-sandbox',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`, 'about:blank'], { stdio:'ignore' });
+  const devtools = await connectDevTools(debugPort);
+  t.after(async () => {
+    await devtools.send('Browser.close').catch(() => {});
+    devtools.socket.close();
+    await stopChild(browser);
+    await delay(1000);
+    await new Promise(resolve => server.close(resolve));
+    removeTempRoot(profileDir);
+  });
+  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source:evaluateScript() });
+  await devtools.send('Page.enable');
+  await devtools.send('Runtime.enable');
+  await devtools.send('Emulation.setDeviceMetricsOverride', { width:1280, height:900, screenWidth:1280, screenHeight:900, deviceScaleFactor:1, mobile:false });
+  await devtools.send('Page.navigate', { url:`http://127.0.0.1:${port}/index.html` });
+  await evaluate(devtools, `new Promise(resolve => { const check = () => document.querySelector('#launcher-version')?.textContent === 'browser-test' ? resolve() : setTimeout(check, 10); check(); })`);
+  await evaluate(devtools, `document.fonts.ready.then(() => true)`);
+  await exposeFrontendModules(devtools);
+  const assertUi = expression => evaluate(devtools, `(async () => { ${expression} })()`);
+  for (const width of [1280, 840]) {
+    await devtools.send('Emulation.setDeviceMetricsOverride', { width, height:900, screenWidth:width, screenHeight:900, deviceScaleFactor:1, mobile:false });
+    for (const theme of ['dark', 'light']) {
+      await assertUi(`
+        const state = window.__launcherBrowserState;
+        document.body.dataset.theme = '${theme}';
+        const loginCard = document.querySelector('#session-card');
+        const accountSlot = document.querySelector('#account-feedback');
+        const remember = document.querySelector('.check-line');
+        const submit = document.querySelector('#login-submit');
+        const loginRects = () => JSON.stringify([loginCard, remember, accountSlot, submit].map(element => {
+          const r = element.getBoundingClientRect(); return [r.x,r.y,r.width,r.height];
+        }));
+        if (remember.getBoundingClientRect().bottom > accountSlot.getBoundingClientRect().top || accountSlot.getBoundingClientRect().bottom > submit.getBoundingClientRect().top) throw new Error('login feedback did not stay between Remember Login and Login');
+        document.querySelector('#login-username').value = 'preview-player';
+        document.querySelector('#login-password').value = 'fixture-password';
+        const loginBefore = loginRects();
+        state.commandPlan = { command:'login', error:'login placement diagnostic' };
+        document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        if (!accountSlot.textContent.includes("Couldn't log in.") || loginBefore !== loginRects()) throw new Error('login feedback moved controls or missed its reserved gap: ' + JSON.stringify({before:loginBefore,after:loginRects(),message:accountSlot.textContent,width:innerWidth,theme:document.body.dataset.theme}));
+        document.querySelector('[data-route="settings"]').click();
+        activateSettingsTab('general');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const stable = surface => JSON.stringify([...surface.querySelectorAll('.glass-panel,.help-log-window,button,input,select')].map(element => {
+          const r = element.getBoundingClientRect();
+          return [r.x,r.y,r.width,r.height].map(value => Math.round(value * 10) / 10);
+        }));
+        const check = async (target, command, message, surface) => {
+          const cards = [...surface.querySelectorAll('.glass-panel')];
+          const affected = target.closest('.glass-panel');
+          const expected = ${width} <= 900 ? affected : cards[0];
+          target.focus();
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          const before = stable(surface);
+          state.commandPlan = { command, error:'underlying fixture diagnostic for ' + command };
+          if (target.matches('input[type="range"]')) {
+            target.value = target.value === '0' ? '1' : '0';
+            target.dispatchEvent(new Event('change', { bubbles:true }));
+          } else target.click();
+          await new Promise(resolve => setTimeout(resolve, 60));
+          const slot = surface.matches('.extensions-page') ? surface.querySelector('#extension-feedback') : expected.querySelector(surface.matches('.help-page') ? '#help-feedback' : '[data-feedback]');
+          if (slot.textContent !== message || slot.dataset.tone !== 'error') throw new Error('wrong card or copy: ' + JSON.stringify({command,message:slot.textContent,width:innerWidth,theme:document.body.dataset.theme,slots:[...surface.querySelectorAll('[data-feedback]')].map(slot=>slot.textContent)}));
+          const messageRange = document.createRange(); messageRange.selectNodeContents(slot);
+          if (messageRange.getClientRects().length > 2 || slot.getBoundingClientRect().height !== 36 || slot.scrollHeight > slot.clientHeight || slot.textContent.includes('fixture diagnostic')) throw new Error('ordinary feedback leaked diagnostics or exceeded reserved lines');
+          if (before !== stable(surface)) throw new Error('failure moved cards or controls for ' + command + ': ' + before + ' -> ' + stable(surface));
+          if (document.activeElement !== target && (target.isConnected || JSON.stringify(document.activeElement.dataset) !== JSON.stringify(target.dataset))) throw new Error('feedback stole keyboard/gamepad focus');
+          if (!state.calls.some(call => call.command === 'record_ui_failure' && call.args.message === message && call.args.diagnostic.includes(command))) throw new Error('failure did not persist displayed copy and full diagnostic');
+          if ([...surface.querySelectorAll('[data-feedback]')].filter(slot => slot.textContent).length !== 1) throw new Error('feedback was duplicated across the page');
+        };
+        document.body.dataset.inputMode = '${theme === 'dark' ? 'keyboard' : 'gamepad'}';
+        await check(document.querySelector('[data-launcher-setting-choice="native_resolution_override"][data-launcher-setting-value="true"]'), 'set_native_resolution_override', "Couldn't save Native Resolution Override. Copy logs from the Help page for support.", document.querySelector('[data-settings-pane="general"]'));
+        activateSettingsTab('graphics');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        if (document.querySelector('[data-settings-pane="general"] [data-feedback]').textContent) throw new Error('leaving Settings tab retained its error');
+        const graphicsCards = [...document.querySelectorAll('[data-settings-pane="graphics"] .settings-card')];
+        if (graphicsCards[0].querySelector('[data-game-setting-choice="graphics.cutscene_effects"]') || !graphicsCards[1].querySelector('[data-game-setting-choice="graphics.cutscene_effects"]')) throw new Error('Cutscene Effects did not move to the right card');
+        if (innerWidth > 900) {
+          const height = graphicsCards[0].getBoundingClientRect().height;
+          graphicsCards[0].querySelector('[data-feedback]').style.display = 'none';
+          if (height !== graphicsCards[0].getBoundingClientRect().height) throw new Error('Graphics feedback extended the cards');
+          graphicsCards[0].querySelector('[data-feedback]').style.display = '';
+        }
+        await check(document.querySelector('#camera-zoom-range'), 'set_camera_zoom_selection', "Couldn't save Extended Camera Zoom. Copy logs from the Help page for support.", document.querySelector('[data-settings-pane="graphics"]'));
+        activateSettingsTab('misc');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const miscLeft = document.querySelector('[data-settings-pane="misc"] .settings-card');
+        const miscConfig = document.querySelector('#settings-config-tool-button');
+        const configStyle = button => {
+          const style = getComputedStyle(button);
+          return ['minHeight','backgroundImage','borderColor','borderRadius','color','fontFamily','fontSize','fontWeight'].map(key => style[key]).join('|');
+        };
+        const repair = miscLeft.querySelector('[data-game-files-action="repair"]');
+        if (configStyle(miscConfig) !== configStyle(repair) || miscConfig.getBoundingClientRect().width !== repair.getBoundingClientRect().width || miscConfig.getBoundingClientRect().height !== repair.getBoundingClientRect().height) throw new Error('Misc XIV Config does not match Repair Install');
+        if (miscLeft.querySelector('[data-backup-target="user-settings"]') || !miscLeft.nextElementSibling.querySelector('[data-backup-target="user-settings"]') || !miscLeft.contains(miscConfig) || miscConfig.hidden || miscConfig.closest('[data-gamepad-settings-row]').querySelectorAll('button').length !== 1) throw new Error('Misc backups or separate XIV Config row have the wrong owner');
+        await check(miscConfig, 'launch_config_tool', "Couldn't open XIV Config. Copy logs from the Help page for support.", document.querySelector('[data-settings-pane="misc"]'));
+        await check(document.querySelector('[data-extension-folder="screenshots"]'), 'open_extension_folder', "Couldn't open Screenshots Folder. Copy logs from the Help page for support.", document.querySelector('[data-settings-pane="misc"]'));
+        document.querySelector('[data-utility="gamepad"]').click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        await check(document.querySelector('#gamepad-config-tool-button'), 'launch_config_tool', "Couldn't open XIV Config. Copy logs from the Help page for support.", document.querySelector('.gamepad-grid'));
+        const gamepadSetting = document.querySelector('#screen-gamepad .gamepad-setting');
+        if (document.querySelector('#gamepad-config-tool-button').getBoundingClientRect().top - gamepadSetting.getBoundingClientRect().bottom !== 42) throw new Error('Gamepad XIV Config does not follow Navigation with normal row spacing');
+        document.querySelector('[data-route="home"]').click();
+        if (document.querySelector('#screen-gamepad [data-feedback]').textContent) throw new Error('leaving Gamepad retained its error');
+        document.querySelector('[data-action="open-profiles"]').click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        if (innerWidth > 900) {
+          const left = document.querySelector('.profile-card');
+          const before = left.getBoundingClientRect().height;
+          left.querySelector('[data-feedback]').style.display = 'none';
+          if (left.getBoundingClientRect().height !== before || getComputedStyle(left.nextElementSibling.querySelector('[data-feedback]')).display !== 'none') throw new Error('Profiles feedback extended the cards');
+          left.querySelector('[data-feedback]').style.display = '';
+        }
+        await check(document.querySelector('#profile-form button[type="submit"]'), 'save_server_profile', "Couldn't save server profile. Copy logs from the Help page for support.", document.querySelector('.profiles-grid'));
+        document.querySelector('[data-action="close-profiles"]').click();
+        document.querySelector('[data-action="open-register"]').click();
+        for (const [id, value] of [['register-username','preview-player'],['register-password','fixture-password'],['register-confirm','fixture-password']]) {
+          const input = document.getElementById(id); input.value = value; input.dispatchEvent(new Event('input', {bubbles:true}));
+        }
+        const registerCard = document.querySelector('.register-card');
+        const registerSubmit = document.querySelector('.register-submit');
+        if (Math.abs(registerCard.getBoundingClientRect().bottom - registerSubmit.getBoundingClientRect().bottom - 25) > 1 || registerCard.querySelector('[data-feedback]').getBoundingClientRect().bottom > registerSubmit.getBoundingClientRect().top) throw new Error('Create Account added a feedback row beneath its button');
+        await check(registerSubmit, 'register', "Couldn't create your account. Copy logs from the Help page for support.", document.querySelector('.register-page'));
+        document.querySelector('[data-action="close-register"]').click();
+        if (state.extensionInventory.overlays.length === 3) state.extensionInventory.overlays.push(...['Forest Detail','Character Detail','World Lighting'].map((name, index) => ({id:'preview-overlay-' + index,name,author:'Preview',version:'1.0.0',description:'Layout fixture.',homepage:null,enabled:true})));
+        document.querySelector('[data-route="extensions"]').click();
+        await hydrateExtensions();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const library = document.querySelector('.extension-library');
+        if (library.querySelector('[data-feedback]') || library.getBoundingClientRect().bottom - library.querySelector('.extension-groups').getBoundingClientRect().bottom > 2) throw new Error('Extensions library still reserves feedback space');
+        document.querySelector('[data-extension-item="overlays:dats-overlay"]').click();
+        const overlay = document.querySelector('.extension-overlay-detail');
+        if (overlay.querySelectorAll('.extension-overlay-package').length !== 6) throw new Error('Six-overlay layout fixture did not render');
+        if (innerWidth > 1180) {
+          const detail = document.querySelector('.extension-detail');
+          if (detail.scrollHeight <= detail.clientHeight || getComputedStyle(detail).overflowY !== 'auto') throw new Error('Six DAT overlays do not scroll within the detail area');
+          detail.scrollTop = detail.scrollHeight;
+          if ([...overlay.querySelectorAll('.extension-overlay-package')].at(-1).getBoundingClientRect().bottom > detail.getBoundingClientRect().bottom) throw new Error('Last DAT overlay is unreachable by scrolling');
+        }
+        if (overlay.getBoundingClientRect().bottom - overlay.querySelector('.extension-overlay-editor').getBoundingClientRect().bottom > 20) throw new Error('DAT detail added a feedback row below the packages');
+        const extensionSlot = document.querySelector('#extension-feedback');
+        if (overlay.querySelector('[data-feedback]') || extensionSlot.closest('.glass-panel') || extensionSlot.parentElement !== document.querySelector('.extension-action-dock') || document.querySelector('.extension-folder-actions').getBoundingClientRect().top - extensionSlot.getBoundingClientRect().bottom !== 10) throw new Error('Extensions feedback did not move above the compact folder card');
+        if (innerWidth <= 1180 && ([...library.querySelectorAll('.extension-row')].at(-1).getBoundingClientRect().bottom > library.getBoundingClientRect().bottom || overlay.getBoundingClientRect().bottom > extensionSlot.getBoundingClientRect().top)) throw new Error('Stacked Extensions clipped rows or overlapped its feedback');
+        await check(document.querySelector('[data-dat-package-enabled="base-world"]'), 'set_dat_package_enabled', "Couldn't disable Base World. Copy logs from the Help page for support.", document.querySelector('.extensions-page'));
+        document.querySelector('[data-extension-item="addons:fps"]').click();
+        await check(document.querySelector('[data-addon-enabled="fps"]'), 'set_addon_enabled', "Couldn't disable fps. Copy logs from the Help page for support.", document.querySelector('.extensions-page'));
+        await check(document.querySelector('.extension-folder-actions [data-extension-folder="plugins"]'), 'open_extension_folder', "Couldn't open Plugins Folder. Copy logs from the Help page for support.", document.querySelector('.extensions-page'));
+        const dock = document.querySelector('.extension-folder-actions');
+        if (dock.querySelector('[data-feedback]') || dock.getBoundingClientRect().height > 72) throw new Error('Extension footer grew for errors');
+        document.querySelector('[data-utility="help"]').click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        await check(document.querySelector('[data-help-action="open"]'), 'open_launcher_log', "Couldn't open logs. Try Copy Logs or contact support on Discord.", document.querySelector('.help-page'));
+        const helpFeedback = document.querySelector('#help-feedback');
+        if (helpFeedback.parentElement !== document.querySelector('.help-copy') || helpFeedback.getBoundingClientRect().top < document.querySelector('.help-subtitle').getBoundingClientRect().bottom || helpFeedback.getBoundingClientRect().bottom > document.querySelector('#help-log').getBoundingClientRect().top || document.querySelector('#help-log [data-feedback]')) throw new Error('Help error did not stay beneath the support text');
+        const help = document.querySelector('.help-page');
+        const beforeCopy = stable(help);
+        const copy = document.querySelector('[data-help-action="copy"]');
+        copy.focus(); copy.click();
+        await new Promise(resolve => setTimeout(resolve, 80));
+        const copyStatus = document.querySelector('#help-status');
+        if (copyStatus.textContent !== 'Logs copied to clipboard.' || document.querySelector('#help-feedback').textContent || copyStatus.getBoundingClientRect().top < copy.getBoundingClientRect().bottom || copyStatus.getBoundingClientRect().bottom > copyStatus.closest('.help-actions').getBoundingClientRect().bottom) throw new Error('Copy confirmation did not stay beneath the Help buttons');
+        if (beforeCopy !== stable(help) || document.activeElement !== copy) throw new Error('Copy confirmation moved controls or focus');
+        document.querySelector('[data-route="home"]').click();
+        if (copyStatus.textContent || document.querySelector('#help-feedback').textContent) throw new Error('Leaving Help retained its status');
+      `);
+    }
+  }
+
+  await devtools.send('Emulation.setDeviceMetricsOverride', { width:600, height:400, screenWidth:600, screenHeight:400, deviceScaleFactor:1, mobile:false });
+  await assertUi(`
+    const state = window.__launcherBrowserState;
+    document.querySelector('[data-utility="help"]').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    for (const theme of ['dark','light']) {
+      document.body.dataset.theme = theme;
+      for (const [command, selector] of [['get_launcher_log','[data-help-action="copy"]'],['open_launcher_log','[data-help-action="open"]']]) {
+        const geometry = () => JSON.stringify([...document.querySelectorAll('.help-header,.help-log-window,.help-action')].map(element => {const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height];}));
+        const before = geometry();
+        state.commandPlan = { command, error:'narrow Help diagnostic' };
+        document.querySelector(selector).click();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const slot = document.querySelector('#help-feedback');
+        const range = document.createRange(); range.selectNodeContents(slot);
+        if (!slot.textContent || range.getClientRects().length > 2 || slot.scrollHeight > slot.clientHeight || geometry() !== before) throw new Error('Narrow Help error exceeded its fixed two-line space: ' + JSON.stringify({theme,command,lines:range.getClientRects().length}));
+        const log = document.querySelector('#help-log');
+        const logStyle = getComputedStyle(log);
+        if (log.clientHeight <= parseFloat(logStyle.paddingTop) + parseFloat(logStyle.paddingBottom) + parseFloat(logStyle.lineHeight) || log.getBoundingClientRect().bottom > document.querySelector('.help-shell').getBoundingClientRect().bottom) throw new Error('Short Help window lost its usable log viewport');
+      }
+    }
+    document.querySelector('[data-route="home"]').click();
+  `);
+  await devtools.send('Emulation.setDeviceMetricsOverride', { width:840, height:900, screenWidth:840, screenHeight:900, deviceScaleFactor:1, mobile:false });
+
+  await assertUi(`
+    const state = window.__launcherBrowserState;
+    document.querySelector('[data-route="settings"]').click();
+    activateSettingsTab('graphics');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    state.configToolSupported = false;
+    activateSettingsTab('misc');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    if ([...document.querySelectorAll('[data-settings-action="open-config"]')].some(button => !button.hidden)) throw new Error('Unsupported XIV Config remained visible');
+    state.configToolSupported = true;
+    activateSettingsTab('graphics');
+    state.commandPlan = { command:'config_tool_supported', delayMs:120, error:'late Config availability diagnostic' };
+    activateSettingsTab('misc');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    activateSettingsTab('graphics');
+    activateSettingsTab('misc');
+    await new Promise(resolve => setTimeout(resolve, 160));
+    if (document.querySelector('#settings-config-tool-button').hidden || document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late Config availability diagnostic'))) throw new Error('Late Config check revived feedback or was not logged');
+    activateSettingsTab('graphics');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    state.commandPlan = { command:'set_camera_zoom_selection', delayMs:120, error:'late save diagnostic' };
+    const zoom = document.querySelector('#camera-zoom-range');
+    zoom.value = '1'; zoom.dispatchEvent(new Event('change', { bubbles:true }));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    activateSettingsTab('general');
+    activateSettingsTab('graphics');
+    await new Promise(resolve => setTimeout(resolve, 180));
+    if ([...document.querySelectorAll('[data-settings-pane] [data-feedback]')].some(slot => slot.textContent)) throw new Error('late Settings failure resurrected a cleared message');
+    if (!state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late save diagnostic'))) throw new Error('late Settings failure was not logged');
+
+    document.querySelector('[data-route="extensions"]').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const toggle = document.querySelector('[data-addon-enabled="fps"]');
+    toggle.focus();
+    state.commandPlan = { command:'set_addon_enabled', delayMs:130, error:'late extension diagnostic' };
+    toggle.click();
+    document.querySelector('[data-route="home"]').click();
+    document.querySelector('[data-route="extensions"]').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    state.commandPlan = { command:'get_extension_inventory', error:'late dependent inventory diagnostic' };
+    document.querySelector('#extension-search').focus();
+    await new Promise(resolve => setTimeout(resolve, 170));
+    if ([...document.querySelectorAll('#screen-extensions [data-feedback]')].some(slot => slot.textContent) || document.activeElement !== document.querySelector('#extension-search')) throw new Error('late dependent extension failure restored feedback or focus');
+    if (!state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late dependent inventory diagnostic'))) throw new Error('late dependent inventory failure was not logged');
+    state.commandPlan = { command:'set_addon_enabled', delayMs:100, error:'slow current extension diagnostic' };
+    const currentToggle = document.querySelector('[data-addon-enabled="fps"]');
+    currentToggle.focus(); currentToggle.click();
+    document.querySelector('#extension-search').focus();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (document.activeElement !== document.querySelector('#extension-search') || !document.querySelector('#extension-feedback').textContent.includes('fps')) throw new Error('slow extension failure stole Search focus or lost feedback');
+
+    document.querySelector('[data-route="settings"]').click(); activateSettingsTab('misc');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    state.commandPlan = { command:'create_backup', delayMs:100, error:'slow backup diagnostic' };
+    const backup = document.querySelector('[data-backup-action="create"]');
+    backup.focus(); backup.click();
+    const path = document.querySelector('[data-settings-action="browse-game"]'); path.focus();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (document.activeElement !== path) throw new Error('slow backup failure stole focus');
+    state.commandPlan = { command:'restore_backup', delayMs:150 };
+    document.querySelector('[data-backup-action="restore"][data-backup-target="user-settings"]').click();
+    document.querySelector('#settings-confirmation-confirm').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    document.querySelector('[data-route="home"]').click(); document.querySelector('[data-route="settings"]').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    state.commandPlan = { command:'get_game_settings', error:'late dependent settings diagnostic' };
+    await new Promise(resolve => setTimeout(resolve, 200));
+    if ([...document.querySelectorAll('#screen-settings [data-feedback]')].some(slot => slot.textContent) || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late dependent settings diagnostic'))) throw new Error('late restore hydration revived feedback or was not logged');
+
+    document.querySelector('[data-route="home"]').click();
+    state.commandPlan = { command:'login', delayMs:100, error:'late login diagnostic' };
+    document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+    document.querySelector('[data-route="extensions"]').click();
+    document.querySelector('[data-route="home"]').click();
+    await new Promise(resolve => setTimeout(resolve, 140));
+    if (document.querySelector('#account-feedback').textContent || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late login diagnostic'))) throw new Error('late login was shown or not logged');
+
+    state.mode = 'rate';
+    const logsBefore = state.calls.filter(call => call.command === 'record_ui_failure' && call.args.action === 'log in').length;
+    document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    document.querySelector('[data-route="settings"]').click();
+    document.querySelector('[data-route="home"]').click();
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    if (document.querySelector('#account-feedback').textContent || state.calls.filter(call => call.command === 'record_ui_failure' && call.args.action === 'log in').length !== logsBefore + 1) throw new Error('countdown resurrected feedback or duplicated failure logs');
+
+    document.querySelector('[data-action="open-register"]').click();
+    document.querySelector('#register-username').value = 'fixture-player';
+    document.querySelector('#register-password').value = 'fixture-password';
+    document.querySelector('#register-confirm').value = 'fixture-password';
+    document.querySelector('#register-confirm').dispatchEvent(new Event('input', { bubbles:true }));
+    state.commandPlan = { command:'register', delayMs:100, error:'registration after edited confirmation' };
+    document.querySelector('.register-submit').click();
+    document.querySelector('#register-confirm').value = 'different-password';
+    document.querySelector('#register-confirm').dispatchEvent(new Event('input', { bubbles:true }));
+    await new Promise(resolve => setTimeout(resolve, 140));
+    if (document.querySelector('#register-confirm-error').textContent !== 'Passwords do not match.' || getComputedStyle(document.querySelector('#register-confirm-error')).visibility !== 'visible' || getComputedStyle(document.querySelector('.register-result [data-feedback]')).visibility !== 'hidden' || !document.querySelector('.register-submit').disabled || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('registration after edited confirmation'))) throw new Error('Late registration feedback hid field validation or skipped its log');
+    document.querySelector('#register-confirm').value = 'fixture-password';
+    document.querySelector('#register-confirm').dispatchEvent(new Event('input', { bubbles:true }));
+    state.commandPlan = { command:'register', delayMs:100, error:'late registration diagnostic' };
+    document.querySelector('.register-submit').click();
+    document.querySelector('[data-action="close-register"]').click();
+    document.querySelector('[data-action="open-register"]').click();
+    await new Promise(resolve => setTimeout(resolve, 140));
+    if (document.querySelector('#screen-register [data-feedback]').textContent || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late registration diagnostic'))) throw new Error('late registration was shown or not logged');
+    if (state.calls.filter(call => call.command === 'record_ui_failure').some(call => JSON.stringify(call.args).includes('fixture-password'))) throw new Error('UI logger received entered credentials');
+
+    document.querySelector('[data-action="close-register"]').click();
+    state.mode = 'success';
+    document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    state.launchError = { message:'unknown launch diagnostic' };
+    document.querySelector('#home-primary').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (document.querySelector('#account-feedback').textContent !== "Couldn't launch the game. Copy logs from the Help page for support." || document.querySelector('#account-feedback').textContent.includes('lobby')) throw new Error('unknown launch error was misclassified or leaked raw diagnostics');
+    if (document.querySelector('#account-feedback').getBoundingClientRect().bottom > document.querySelector('[data-action="logout"]').getBoundingClientRect().top) throw new Error('launch feedback was not above Logout');
+    state.gameRunning = true; window.__launcherHome.gameRunning = true;
+    const pollingBefore = state.calls.filter(call => call.command === 'record_ui_failure' && call.args.action === 'read game status').length;
+    state.gameStatusError = 'repeated game-status diagnostic';
+    for (let attempt = 0; attempt < 3; attempt += 1) await window.refreshGameStatus();
+    if (state.calls.filter(call => call.command === 'record_ui_failure' && call.args.action === 'read game status').length !== pollingBefore + 1) throw new Error('repeated background failures duplicated log entries');
+    state.gameStatusError = null; state.gameRunning = false;
+    await window.refreshGameStatus();
+    document.querySelector('[data-action="logout"]').click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (document.querySelector('.check-line').getBoundingClientRect().bottom > document.querySelector('#account-feedback').getBoundingClientRect().top || document.querySelector('#account-feedback').getBoundingClientRect().bottom > document.querySelector('#login-submit').getBoundingClientRect().top) throw new Error('Account feedback did not return to the reserved login gap');
+
+    document.querySelector('[data-utility="help"]').click();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    const help = document.querySelector('.help-shell');
+    const before = [...help.querySelectorAll('button')].map(button => button.getBoundingClientRect().top).join(',');
+    state.failureLogDelayMs = 100;
+    state.commandPlan = { command:'open_launcher_log', error:'fresh pending diagnostic' };
+    document.querySelector('[data-help-action="open"]').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    state.supportLog.content += '\\nlatest launcher context';
+    document.querySelector('[data-help-action="copy"]').focus();
+    document.querySelector('[data-help-action="copy"]').click();
+    await new Promise(resolve => setTimeout(resolve, 160));
+    if (!state.clipboardText.includes('fresh pending diagnostic') || !state.clipboardText.includes('latest launcher context')) throw new Error('Copy Logs used a stale transcript or skipped pending failure writes');
+    if (document.querySelector('#help-log [data-log-content]').textContent !== state.clipboardText || help.querySelector('#help-status').textContent !== 'Logs copied to clipboard.' || help.querySelector('#help-feedback').textContent) throw new Error('fresh copy did not update Help or its success feedback');
+    if (before !== [...help.querySelectorAll('button')].map(button => button.getBoundingClientRect().top).join(',') || document.activeElement !== document.querySelector('[data-help-action="copy"]')) throw new Error('Help feedback moved controls or focus');
+    state.failureLogDelayMs = 0;
+    state.commandPlan = { command:'get_launcher_log', delayMs:120, error:'late Help read diagnostic' };
+    document.querySelector('[data-utility="help"]').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    document.querySelector('[data-route="home"]').click();
+    document.querySelector('[data-utility="help"]').click();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    if (document.querySelector('#help-feedback').textContent || document.querySelector('#help-log [data-log-content]').textContent === 'Launcher logs could not be loaded.' || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late Help read diagnostic'))) throw new Error('Late Help read restored feedback/transcript or was not logged');
+  `);
+  await devtools.send('Page.navigate', { url:`http://127.0.0.1:${port}/index.html?boot-late-fail` });
+  await evaluate(devtools, `new Promise(resolve => { const check = () => document.querySelector('#account-feedback') ? resolve() : setTimeout(check, 10); check(); })`);
+  await assertUi(`
+    document.querySelector('[data-route="settings"]').click();
+    document.querySelector('[data-route="home"]').click();
+    await new Promise(resolve => setTimeout(resolve, 600));
+    if (document.querySelector('#account-feedback').textContent || !window.__launcherBrowserState.calls.some(call => call.command === 'record_ui_failure' && call.args.diagnostic.includes('late boot diagnostic'))) throw new Error('late boot failure revived feedback or was not logged');
+  `);
+});
+
 test('home_auth_and_terminal_install_states', async t => {
   const server = createServer(serveUiFixture);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -800,7 +1170,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (!near(stage.x, 0) || !near(stage.y, 77) || !near(stage.width, 1280) || !near(stage.height, 723)) throw new Error('stage shell geometry drifted');
     if (!near(homeLayout.x, 30) || !near(homeLayout.y, 101) || !near(homeLayout.width, 1220) || !near(homeLayout.height, 669)) throw new Error('Home stage geometry drifted');
     if (!near(homeLeft.width, 430) || !near(homeRight.width, 766) || !near(homeRight.x - homeLeft.right, 24)) throw new Error('Home columns are not 430px + 24px + 766px');
-    if (!near(session.height, 402) || !near(primary.height, 68)) throw new Error('Home account/play geometry drifted');
+    if (!near(session.height, 418) || !near(primary.height, 68)) throw new Error('Home account/play geometry drifted');
     if (newsPanel.height < 190 || newsPanel.height > 260 || newsPanelStyle.flexGrow !== '0' || newsListStyle.maxHeight !== '416px') throw new Error('Recent News is not compact with a bounded scrolling feed: ' + newsPanel.height);
     state.sessionCardHeight = session.height;
     if (getComputedStyle(document.body).minWidth !== '0px' || getComputedStyle(document.body).minHeight !== '0px') throw new Error('body still prevents smaller work-area sizing');
@@ -1035,8 +1405,8 @@ test('home_auth_and_terminal_install_states', async t => {
     state.mode = 'invalid';
     document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (document.querySelector('#login-alert').textContent !== 'Incorrect username or password.') throw new Error('invalid credentials copy drifted from Avalon');
-    const alert = document.querySelector('#login-alert');
+    if (document.querySelector('#account-feedback').textContent !== 'Incorrect username or password.') throw new Error('invalid credentials copy drifted from Avalon');
+    const alert = document.querySelector('#account-feedback');
     alert.textContent = 'A server supplied a deliberately long login error. '.repeat(30);
     const card = document.querySelector('#session-card');
     if (alert.scrollHeight <= alert.clientHeight || alert.getBoundingClientRect().bottom > card.getBoundingClientRect().bottom || card.scrollHeight > card.clientHeight) throw new Error('long login errors escape the fixed account card');
@@ -1049,7 +1419,7 @@ test('home_auth_and_terminal_install_states', async t => {
     document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
     await new Promise(resolve => setTimeout(resolve, 50));
     if (!document.querySelector('#login-submit').disabled) throw new Error('rate limit did not disable login');
-    if (!document.querySelector('#login-alert').textContent.includes('2 seconds')) throw new Error('retry countdown was not rendered');
+    if (!document.querySelector('#account-feedback').textContent.includes('2 seconds')) throw new Error('retry countdown was not rendered');
     await new Promise(resolve => setTimeout(resolve, 2200));
     if (document.querySelector('#login-submit').disabled) throw new Error('retry countdown did not re-enable login');
   `);
@@ -1123,7 +1493,7 @@ test('home_auth_and_terminal_install_states', async t => {
     await new Promise(resolve => setTimeout(resolve, 50));
     if (state.lastLoginResponseEndpoint !== 'http://127.0.0.1:8080/api/v1/') throw new Error('login response was rebound to the later profile selection');
     if (localStorage.getItem('bahamut-session') || document.querySelector('#home-layout').dataset.lifecycle !== 'logged-out') throw new Error('stale login completion retained a session');
-    if (!document.querySelector('#login-alert').textContent.includes('changed during login')) throw new Error('stale login completion was not reported');
+    if (document.querySelector('#account-feedback').textContent || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.action === 'log in' && call.args.message.includes('Log in again'))) throw new Error('stale login completion resurrected feedback or was not logged');
     const usesAfterCompletion = state.calls.filter(call => credentialUseCommands.includes(call.command) || (call.command === 'get_home_status' && call.args.authenticated)).length;
     if (usesAfterCompletion !== usesBeforeCompletion) throw new Error('stale login token was used after profile selection changed');
     savedSession.authEndpoint = state.lastLoginRecipient;
@@ -1142,15 +1512,15 @@ test('home_auth_and_terminal_install_states', async t => {
     if (document.querySelector('.account-ready img,.account-ready [class*="character"],.account-ready [class*="portrait"]')) throw new Error('authenticated card exposed character identity instead of the account name');
     if (document.querySelector('[data-action="logout"]').textContent !== 'Logout' || getComputedStyle(document.querySelector('#lifecycle-strip')).display !== 'none') throw new Error('ready state logout or lifecycle visibility drifted');
     const readyCard = document.querySelector('#session-card');
-    let launchAlert = document.querySelector('#launch-alert');
+    let launchAlert = document.querySelector('#account-feedback');
     const readyLogout = document.querySelector('[data-action="logout"]');
     const readyCardHeight = readyCard.getBoundingClientRect().height;
     const readyLogoutTop = readyLogout.getBoundingClientRect().top;
     if (Math.abs(readyCardHeight - state.sessionCardHeight) >= .1) throw new Error('logged-in and logged-out account card sizes differ');
-    if (Math.abs(launchAlert.getBoundingClientRect().height - 60) >= .1 || Math.abs(readyLogout.getBoundingClientRect().top - launchAlert.getBoundingClientRect().bottom - 6) >= .1) throw new Error('launch error did not reserve the fixed gap above Logout');
-    launchAlert.textContent = 'Client extensions were not loaded: bootstrap helper failed (RenderBoundaryFailed): target_terminated pid=15148 stage=8 owner_path="C:\\WINDOWS\\SYSTEM32\\apphelp.dll"';
+    if (Math.abs(launchAlert.getBoundingClientRect().height - 36) >= .1 || launchAlert.getBoundingClientRect().bottom > readyLogout.getBoundingClientRect().top) throw new Error('launch error did not reserve the fixed gap above Logout');
+    launchAlert.textContent = "Couldn't prepare the game to launch. Copy logs from the Help page for support.";
     await new Promise(resolve => requestAnimationFrame(resolve));
-    if (Math.abs(readyCard.getBoundingClientRect().height - readyCardHeight) >= .1 || Math.abs(readyLogout.getBoundingClientRect().top - readyLogoutTop) >= .1 || launchAlert.scrollHeight > launchAlert.clientHeight || Math.abs(readyLogout.getBoundingClientRect().top - launchAlert.getBoundingClientRect().bottom - 6) >= .1) throw new Error('launch error changed the account card or Logout geometry');
+    if (Math.abs(readyCard.getBoundingClientRect().height - readyCardHeight) >= .1 || Math.abs(readyLogout.getBoundingClientRect().top - readyLogoutTop) >= .1 || launchAlert.scrollHeight > launchAlert.clientHeight || launchAlert.getBoundingClientRect().bottom > readyLogout.getBoundingClientRect().top) throw new Error('launch error changed the account card or Logout geometry');
     launchAlert.textContent = '';
     if (Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1) throw new Error('Recent News grew when the lifecycle strip stayed hidden');
     state.gameStatusDelayMs = 40;
@@ -1167,7 +1537,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (launchCalls.length !== 1 || !play.disabled) throw new Error('Play did not reserve one launch while startup was pending');
     await staleGameStatus;
     play = document.querySelector('#home-primary');
-    launchAlert = document.querySelector('#launch-alert');
+    launchAlert = document.querySelector('#account-feedback');
     if (!play.disabled) throw new Error('a stale game status re-enabled Play during startup');
     await new Promise(resolve => setTimeout(resolve, 60));
     if (!play.disabled || !state.gameRunning) throw new Error('Play re-enabled while the launched client was active');
@@ -1181,11 +1551,11 @@ test('home_auth_and_terminal_install_states', async t => {
     play.click();
     await new Promise(resolve => setTimeout(resolve, 20));
     const launchCountAfterFailure = state.calls.filter(call => call.command === 'launch_game').length;
-    if (play.disabled || !launchAlert.textContent.includes('fixture launch failure')) throw new Error('launch failure did not release Play (disabled=' + play.disabled + ', alert=' + launchAlert.textContent + ', launches=' + launchCountBeforeFailure + '->' + launchCountAfterFailure + ')');
+    if (play.disabled || !launchAlert.textContent.includes("Couldn't load client extensions")) throw new Error('launch failure did not release Play (disabled=' + play.disabled + ', alert=' + launchAlert.textContent + ', launches=' + launchCountBeforeFailure + '->' + launchCountAfterFailure + ')');
     state.launchError = { kind:'session-endpoint-changed', message:'Server address changed' };
     play.click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (localStorage.getItem('bahamut-session') || !document.querySelector('#login-form') || !document.querySelector('#login-alert').textContent.includes('Log in again')) throw new Error('launch endpoint mismatch did not clear the session');
+    if (localStorage.getItem('bahamut-session') || !document.querySelector('#login-form') || !document.querySelector('#account-feedback').textContent.includes('Log in again')) throw new Error('launch endpoint mismatch did not clear the session');
     state.launchError = null;
   `);
 
@@ -1364,6 +1734,17 @@ test('home_auth_and_terminal_install_states', async t => {
     state.outdatedInstall = false;
     state.pickerSelectsFinal = false;
     await window.refreshHomeStatus();
+
+    state.mode = 'success';
+    document.querySelector('#login-username').value = 'aesh';
+    document.querySelector('#login-password').value = 'password';
+    state.commandPlan = { command:'get_home_status', error:'transient Home status failure' };
+    document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (!window.__launcherHome.token || document.querySelector('#login-submit').disabled || !document.querySelector('#account-feedback').textContent.includes("Couldn't refresh Home")) throw new Error('transient post-login Home refresh did not release Login for recovery');
+    document.querySelector('#login-form').dispatchEvent(new Event('submit', { bubbles:true, cancelable:true }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (document.querySelector('#home-layout').dataset.lifecycle !== 'ready' || !document.querySelector('[data-action="logout"]')) throw new Error('successful login could not recover after a transient Home status failure');
   `);
 
   await assertUi(`
@@ -1592,7 +1973,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const backupsCard = document.querySelector('.settings-card--backups');
     if (/Game installation|selected path is shared|Existing Final Fantasy|Replace the current portable|Open the native XIV Config utility/i.test(locationsCard.textContent)) throw new Error('Misc retained removed install helper copy');
     if ([...locationsCard.querySelectorAll('.settings-field')].some(field => getComputedStyle(field).borderBottomWidth !== '0px')) throw new Error('Misc retained row separators');
-    if ([...backupsCard.querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || backupsCard.querySelector('[data-extension-folder="screenshots"]') !== backupsCard.querySelector('[data-gamepad-settings-row]:last-child button')) throw new Error('Right Misc card has the wrong backup headings or final action');
+    if ([...backupsCard.querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || [...locationsCard.querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'Install Location' || backupsCard.querySelector('[data-extension-folder="screenshots"]') !== [...backupsCard.querySelectorAll('[data-gamepad-settings-row]')].at(-1).querySelector('button')) throw new Error('Right Misc card has the wrong backup headings or final action');
     const generalPane = document.querySelector('[data-settings-pane="general"]');
     const generalCards = [...generalPane.querySelectorAll('.settings-card')];
     const generalLabels = generalCards.map(card => [...card.querySelectorAll('.settings-label')].map(label => label.textContent).join(','));
@@ -1611,7 +1992,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const monitorSelect = document.querySelector('#borderless-monitor');
     const monitorRow = monitorSelect.closest('.settings-field');
     const monitorFixture = state.borderlessMonitors;
-    if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('#settings-misc-status').textContent,gameSettingsError:document.querySelector('#game-settings-status').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
+    if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent,gameSettingsError:document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="borderless"]').click();
     await new Promise(resolve => setTimeout(resolve, 60));
     if (state.gameSettings.settings.display_mode !== 'borderless' || monitorSelect.disabled || monitorSelect.value !== 'removed-display-id') throw new Error('Borderless mode did not enable the retained monitor identity');
@@ -1650,33 +2031,33 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
       throw new Error('delayed settings hydration did not call ' + command);
     };
     state.calls.length = 0;
-    document.querySelector('#settings-misc-status').textContent = '';
+    document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent = '';
     state.installPath = 'C:/newer-game';
     state.settingsHydrationPlan = { command:'detect_game_install_command', delayMs:80, error:'stale settings hydration failure' };
     const staleFailedHydration = window.hydrateSettings();
     await waitForHydrationCall('detect_game_install_command');
     await window.hydrateSettings();
     await staleFailedHydration;
-    if (document.querySelector('#settings-misc-status').textContent || document.querySelector('#settings-game-path').textContent !== 'C:/newer-game') throw new Error('a stale failed settings hydration overwrote the newer successful result');
+    if (document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent || document.querySelector('#settings-game-path').textContent !== 'C:/newer-game') throw new Error('a stale failed settings hydration overwrote the newer successful result');
     state.installPath = 'C:/game';
     await window.hydrateSettings();
 
     state.calls.length = 0;
-    document.querySelector('#game-settings-status').textContent = '';
+    document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent = '';
     state.settingsHydrationPlan = { command:'get_borderless_monitors', delayMs:80, error:'stale monitor enumeration failure' };
     const staleMonitorHydration = window.hydrateSettings();
     await waitForHydrationCall('get_borderless_monitors');
     await window.queueBorderlessMonitorUpdate('display-secondary-id');
     await staleMonitorHydration;
-    if (state.borderlessMonitors.selected !== 'display-secondary-id' || document.querySelector('#borderless-monitor').value !== 'display-secondary-id' || document.querySelector('#game-settings-status').textContent.includes('monitor selection is unavailable')) throw new Error('a stale monitor enumeration error overwrote the saved display selection');
+    if (state.borderlessMonitors.selected !== 'display-secondary-id' || document.querySelector('#borderless-monitor').value !== 'display-secondary-id' || document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent.includes('monitor selection is unavailable')) throw new Error('a stale monitor enumeration error overwrote the saved display selection');
     if (generalPane.querySelector('[data-theme-choice]') || /Appearance|Launcher behavior|Account routing|Active server|Login, registration|Portable configuration|Edit profile|Saved to config/i.test(generalPane.textContent)) throw new Error('General settings retained removed titles or helper copy');
     if (generalPane.querySelector('.section-eyebrow,.settings-description,.settings-hint') || [...generalPane.querySelectorAll('.settings-field')].some(field => getComputedStyle(field).borderBottomWidth !== '0px')) throw new Error('General settings retained headings, hints, or row separators');
     const graphicsPane = document.querySelector('[data-settings-pane="graphics"]');
     const graphicsCards = [...graphicsPane.querySelectorAll('.settings-card')];
     const graphicsLabels = graphicsCards.map(card => [...card.querySelectorAll('.settings-label')].map(label => label.textContent).join(','));
     const graphicsBindings = cardBindings(graphicsCards);
-    if (graphicsLabels.join('|') !== 'Multisampling,General Drawing Quality,Background Drawing Quality,Extended Draw Distance,Shadow Detail,Cutscene Effects|Texture Quality,Texture Filtering,Ambient Occlusion,Depth Of Field,Extended Camera Zoom') throw new Error('Graphics labels or Cutscene Effects placement drifted: ' + graphicsLabels.join('|'));
-    if (graphicsBindings.join('|') !== 'Multisampling:graphics.multisampling,General Drawing Quality:graphics.general_quality,Background Drawing Quality:graphics.background_quality,Extended Draw Distance:object-distance,Shadow Detail:graphics.shadow_detail,Cutscene Effects:graphics.cutscene_effects|Texture Quality:graphics.texture_quality,Texture Filtering:graphics.texture_filtering,Ambient Occlusion:graphics.ambient_occlusion,Depth Of Field:graphics.depth_of_field,Extended Camera Zoom:camera-zoom') throw new Error('Graphics labels are not bound to the intended owners: ' + graphicsBindings.join('|'));
+    if (graphicsLabels.join('|') !== 'Multisampling,General Drawing Quality,Background Drawing Quality,Extended Draw Distance,Shadow Detail|Texture Quality,Texture Filtering,Ambient Occlusion,Depth Of Field,Cutscene Effects,Extended Camera Zoom') throw new Error('Graphics labels or Cutscene Effects placement drifted: ' + graphicsLabels.join('|'));
+    if (graphicsBindings.join('|') !== 'Multisampling:graphics.multisampling,General Drawing Quality:graphics.general_quality,Background Drawing Quality:graphics.background_quality,Extended Draw Distance:object-distance,Shadow Detail:graphics.shadow_detail|Texture Quality:graphics.texture_quality,Texture Filtering:graphics.texture_filtering,Ambient Occlusion:graphics.ambient_occlusion,Depth Of Field:graphics.depth_of_field,Cutscene Effects:graphics.cutscene_effects,Extended Camera Zoom:camera-zoom') throw new Error('Graphics labels are not bound to the intended owners: ' + graphicsBindings.join('|'));
     if (graphicsCards.length !== 2 || graphicsCards.map(card => card.dataset.gamepadRegionOrder).join(',') !== '1,2') throw new Error('Graphics card ownership or order drifted');
     if (graphicsPane.querySelectorAll('select').length || graphicsPane.querySelectorAll('input[type="range"]').length !== 6 || graphicsPane.querySelectorAll('.choice-row').length !== 5) throw new Error('Graphics did not keep discrete choices and ordered range bars');
     if (graphicsPane.querySelector('[data-game-setting-output]') || [...graphicsPane.querySelectorAll('.settings-range-labels')].filter(labels => labels.closest('.settings-field').querySelector('[data-game-setting]')).some(labels => labels.textContent !== 'LowHigh')) throw new Error('Retail graphics range bars retained numeric or inconsistent endpoint labels');
@@ -1693,9 +2074,9 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (miscCards.length !== 2 || [...miscCards[0].querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'Install Location' || [...miscCards[1].querySelectorAll('h2')].map(heading => heading.textContent).join(',') !== 'User Settings and Macros,Extensions' || miscCards[0].dataset.gamepadRegionOrder !== '1' || miscCards[1].dataset.gamepadRegionOrder !== '2') throw new Error('Misc did not keep its two original cards');
     const existingMiscContent = miscCards.slice(0, 2);
     if (existingMiscContent.some(card => card.querySelector('.settings-label'))) throw new Error('Misc contains an unexpected setting label');
-    if (existingMiscContent.flatMap(card => [...card.querySelectorAll('.settings-action')]).map(button => button.textContent).join(',') !== 'Path,Repair Install,Backup,Restore,Backup,Restore,Open Backup Folder,Open Install Folder,Open Screenshots Folder') throw new Error('Misc action labels or order drifted');
+    if (existingMiscContent.flatMap(card => [...card.querySelectorAll('.settings-action')]).map(button => button.textContent).join(',') !== 'Path,Repair Install,XIV Config,Backup,Restore,Backup,Restore,Open Backup Folder,Open Install Folder,Open Screenshots Folder') throw new Error('Misc action labels or order drifted');
     const accentActionLabels = [...document.querySelectorAll('.accent-action')].map(button => button.textContent.trim()).join(',');
-    if (accentActionLabels !== 'PATH,Pause,Cancel,Open Plugins Folder,Open Addons Folder,Path,Repair Install,Backup,Backup,Open Backup Folder,Open Screenshots Folder,XIV Config,Apply Steam Deck Defaults,Confirm') throw new Error('accent action mapping drifted: ' + accentActionLabels);
+    if (accentActionLabels !== 'PATH,Pause,Cancel,Open Plugins Folder,Open Addons Folder,Path,Repair Install,XIV Config,Backup,Backup,Open Backup Folder,Open Screenshots Folder,XIV Config,Apply Steam Deck Defaults,Confirm') throw new Error('accent action mapping drifted: ' + accentActionLabels);
     const prominentActions = [...document.querySelectorAll('.primary-action,.login-action,.accent-action,.help-action.primary,.choice-option[aria-pressed="true"]')].filter(button => !button.disabled);
     const actionEdges = { dark: 'rgb(240, 154, 145)', light: 'rgb(188, 238, 255)' };
     for (const theme of ['dark','light']) {
@@ -1717,10 +2098,10 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const disabledSteamActionStyle = getComputedStyle(document.querySelector('.gamepad-card--stub .accent-action'));
     const enabledAccentActions = [...document.querySelectorAll('.accent-action:not(:disabled)')];
     if (!enabledAccentActions.length || enabledAccentActions.some(button => !getComputedStyle(button).backgroundImage.includes('linear-gradient') || getComputedStyle(button).color !== 'rgb(25, 10, 13)') || !accentBackupStyle.backgroundImage.includes('linear-gradient') || secondaryRestoreStyle.backgroundImage !== 'none' || disabledSteamActionStyle.backgroundImage !== 'none' || disabledSteamActionStyle.backgroundColor !== 'rgba(90, 103, 120, 0.28)') throw new Error('night accent, secondary, or disabled action surfaces bypassed their semantic tiers');
-    if (!miscCards[0].querySelector('#settings-game-path') || miscCards[0].querySelector('[data-extension-folder="screenshots"]') || miscCards[1].querySelector('[data-gamepad-settings-row]:last-child button')?.dataset.extensionFolder !== 'screenshots' || miscCards[1].querySelector('[data-settings-action="browse-game"]') || miscCards[1].querySelectorAll('[data-backup-action]').length !== 4) throw new Error('Misc actions are not grouped with their owning content');
-    if ([...document.querySelectorAll('.settings-field')].some(field => Number.parseFloat(getComputedStyle(field).minHeight) < 76) || [...miscPane.querySelectorAll('.settings-action')].some(button => getComputedStyle(button).minHeight !== '48px') || getComputedStyle(miscPane.querySelector('h2')).marginBottom !== '16px') throw new Error('Settings spacing is not consistent across tabs');
-    if (miscPane.querySelector('.settings-progress') || document.querySelector('#settings-misc-status').textContent) throw new Error('Misc retained operational install progress');
-    if (getComputedStyle(document.querySelector('#game-settings-status')).display !== 'none') throw new Error('empty game-setting feedback still reserves layout space');
+    if (!miscCards[0].querySelector('#settings-game-path') || miscCards[0].querySelector('[data-extension-folder="screenshots"]') || [...miscCards[1].querySelectorAll('[data-gamepad-settings-row]')].at(-1).querySelector('button')?.dataset.extensionFolder !== 'screenshots' || miscCards[1].querySelector('[data-settings-action="browse-game"]') || miscCards[1].querySelectorAll('[data-backup-action]').length !== 4 || miscCards[0].querySelector('[data-backup-target="user-settings"]')) throw new Error('Misc actions are not grouped with their owning content');
+    if ([...document.querySelectorAll('.settings-field')].some(field => Number.parseFloat(getComputedStyle(field).minHeight) < 76) || [...miscPane.querySelectorAll('.settings-action')].some(button => getComputedStyle(button).minHeight !== (button.classList.contains('gamepad-config-action') ? '50px' : '48px')) || getComputedStyle(miscPane.querySelector('h2')).marginBottom !== '16px') throw new Error('Settings spacing is not consistent across tabs');
+    if (miscPane.querySelector('.settings-progress') || document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent) throw new Error('Misc retained operational install progress');
+    if (document.querySelector('[data-settings-pane][data-active] [data-feedback]').getBoundingClientRect().height !== 36) throw new Error('feedback did not reserve permanent space');
     if ([...document.querySelectorAll('[data-settings-tab]')].map(tab => tab.textContent).join(',') !== 'General,Graphics,Misc') throw new Error('flat Settings categories drifted');
     if (generalPane.querySelector('#profile-form,#profile-server-select') || document.querySelector('[data-settings-pane="controls"],#screenshot-hotkey')) throw new Error('retired profile or Controls content remains in Settings');
     if (document.querySelector('[data-game-settings-tab],[data-settings-pane="runtime"]') || /Diagnostics|Client runtime/i.test(document.querySelector('#screen-settings').textContent)) throw new Error('retired nested or runtime settings remain visible');
@@ -1750,7 +2131,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const userBackup = backupsCard.querySelector('[data-backup-action="create"][data-backup-target="user-settings"]');
     userBackup.click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.calls.some(call => call.command === 'create_backup' && call.args.target === 'user-settings') || document.querySelector('#settings-backup-status').textContent !== 'User Settings and Macros backup created.') throw new Error('User Settings backup did not report backend success');
+    if (!state.calls.some(call => call.command === 'create_backup' && call.args.target === 'user-settings') || document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent !== 'User Settings and Macros backup created.') throw new Error('User Settings backup did not report backend success');
 
     const extensionRestore = backupsCard.querySelector('[data-backup-action="restore"][data-backup-target="extensions"]');
     state.calls.length = 0;
@@ -1767,7 +2148,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     extensionRestore.click();
     document.querySelector('#settings-confirmation-confirm').click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.calls.some(call => call.command === 'restore_backup' && call.args.target === 'extensions') || document.querySelector('#settings-backup-status').textContent !== 'Extensions restored.' || document.activeElement !== extensionRestore) throw new Error('Confirmed Extensions restore did not report success and restore focus');
+    if (!state.calls.some(call => call.command === 'restore_backup' && call.args.target === 'extensions') || document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent !== 'Extensions restored.' || document.activeElement !== extensionRestore) throw new Error('Confirmed Extensions restore did not report success and restore focus');
     const userRestore = backupsCard.querySelector('[data-backup-action="restore"][data-backup-target="user-settings"]');
     userRestore.click();
     if (!restoreDialog.open || !document.querySelector('#settings-confirmation-copy').textContent.includes('latest backup?') || document.querySelector('#settings-confirmation-confirm').textContent !== 'Confirm') throw new Error('User Settings restore did not use the latest-backup Confirm wording');
@@ -1813,7 +2194,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 40));
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.display_mode !== 'fullscreen' || 'initialized' in save.args.settings) throw new Error('display mode did not use the strict typed save contract');
-    if (state.gameSettings.settings.display_mode !== 'fullscreen' || document.querySelector('#game-settings-status').textContent) throw new Error('display mode did not persist silently');
+    if (state.gameSettings.settings.display_mode !== 'fullscreen' || document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent) throw new Error('display mode did not persist silently');
 
     state.calls.length = 0;
     resolution.value = '1920x1080';
@@ -1859,7 +2240,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.failObjectDistanceWrite = true;
     chooseGraphicsStep(distanceRange, 0);
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.objectDistanceEnabled || distanceRange.value !== '2' || !document.querySelector('#object-distance-status').textContent.includes('fixture draw distance write failure')) throw new Error('failed Draw Distance write did not restore the saved selection');
+    if (!state.objectDistanceEnabled || distanceRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Draw Distance")) throw new Error('failed Draw Distance write did not restore the saved selection');
     chooseGraphicsStep(distanceRange, 0);
     await new Promise(resolve => setTimeout(resolve, 40));
     if (state.objectDistanceEnabled || distanceRange.value !== '0' || state.objectDistancePercent !== 150) throw new Error('Draw Distance Off did not disable the hook and retain the saved multiplier');
@@ -1873,7 +2254,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.failCameraZoomWrite = true;
     chooseGraphicsStep(zoomRange, 0);
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (!state.cameraZoomEnabled || zoomRange.value !== '2' || !document.querySelector('#camera-zoom-status').textContent.includes('fixture camera zoom write failure')) throw new Error('failed Camera Zoom write did not restore the saved selection');
+    if (!state.cameraZoomEnabled || zoomRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Camera Zoom")) throw new Error('failed Camera Zoom write did not restore the saved selection');
     chooseGraphicsStep(zoomRange, 0);
     await new Promise(resolve => setTimeout(resolve, 40));
     if (state.cameraZoomEnabled || zoomRange.value !== '0' || state.cameraZoomLimit !== 12) throw new Error('Camera Zoom Off did not disable the hook and retain the saved cap');
@@ -1907,7 +2288,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const failedChoice = settingsScreen.querySelector('[data-game-setting-choice="graphics.depth_of_field"][data-game-setting-value="true"]');
     failedChoice.click();
     await new Promise(resolve => setTimeout(resolve, 40));
-    if (state.gameSettings.settings.graphics.depth_of_field || failedChoice.getAttribute('aria-pressed') === 'true' || !document.querySelector('#game-settings-status').textContent.includes('fixture game settings write failure')) throw new Error('failed game-setting write did not restore authoritative state');
+    if (state.gameSettings.settings.graphics.depth_of_field || failedChoice.getAttribute('aria-pressed') === 'true' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Depth Of Field")) throw new Error('failed game-setting write did not restore authoritative state');
 
     activateSettingsTab('general');
     runControllerAction('cycle-settings');
@@ -1917,14 +2298,15 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.calls.length = 0;
     state.gameSettings.available = false;
     renderGameSettings(state.gameSettings);
-    if (![...settingsScreen.querySelectorAll('[data-game-setting],[data-game-setting-choice]')].every(control => control.disabled) || !document.querySelector('#game-settings-status').textContent.includes('valid retail config.sys')) throw new Error('unavailable retail mapping did not disable every control truthfully');
+    await hydrateSettings();
+    if (![...settingsScreen.querySelectorAll('[data-game-setting],[data-game-setting-choice]')].every(control => control.disabled) || !document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent.includes('valid retail config.sys')) throw new Error('unavailable retail mapping did not disable every control truthfully');
     const availableGeneralRows = [...document.querySelector('[data-settings-pane="general"] .settings-card').querySelectorAll('[data-gamepad-settings-row]')]
       .filter(row => row.querySelector('button:not(:disabled), select:not(:disabled), input:not(:disabled)'));
     if (availableGeneralRows.length !== 1 || !availableGeneralRows[0].querySelector('[data-launcher-setting-choice]')) throw new Error('gamepad navigation did not exclude unavailable game-owned rows');
-    const warningBeforeLauncherSave = document.querySelector('#game-settings-status').textContent;
+    const warningBeforeLauncherSave = document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent;
     const availableBeforeLauncherSave = window.__launcherSettings.gameSettings?.available;
     await queueLauncherBehaviorUpdate(true);
-    if (!document.querySelector('#game-settings-status').textContent.includes('valid retail config.sys')) throw new Error('launcher-owned setting save erased the unavailable game-settings warning: ' + document.querySelector('#game-settings-status').textContent + ' / ' + JSON.stringify({warningBeforeLauncherSave,availableBeforeLauncherSave,availableAfterLauncherSave:window.__launcherSettings.gameSettings?.available,calls:state.calls.map(call=>call.command)}));
+    if (!document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent.includes('valid retail config.sys')) throw new Error('launcher-owned setting save erased the unavailable game-settings warning: ' + document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent + ' / ' + JSON.stringify({warningBeforeLauncherSave,availableBeforeLauncherSave,availableAfterLauncherSave:window.__launcherSettings.gameSettings?.available,calls:state.calls.map(call=>call.command)}));
     state.gameSettings = available;
     renderGameSettings(state.gameSettings);
 
@@ -2061,12 +2443,12 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 50));
     if (!state.calls.some(call => call.command === 'set_selected_server' && call.args.displayName === 'Bahamut')) throw new Error('Profiles server selection did not persist');
     if (document.querySelector('#profile-host').value !== 'bahamut.example' || !document.querySelector('#profile-https').checked) throw new Error('selected server did not populate the editor: ' + JSON.stringify({ host:document.querySelector('#profile-host').value, https:document.querySelector('#profile-https').checked, selected:select.value, calls:state.calls }));
-    if (document.querySelector('#profile-server-select-status').textContent || document.querySelector('#profile-server-select-status').dataset.tone || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('successful server selection produced redundant feedback or changed profile geometry');
+    if (document.querySelector('#screen-profiles [data-feedback]').textContent || document.querySelector('#screen-profiles [data-feedback]').dataset.tone || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('successful server selection produced redundant feedback or changed profile geometry');
     state.profileMode = 'select-error';
     select.value = 'Local';
     select.dispatchEvent(new Event('change', { bubbles:true }));
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (document.querySelector('#profile-server-select-status').dataset.tone !== 'error' || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('server selection error changed profile geometry or lacked error semantics');
+    if (document.querySelector('#screen-profiles [data-feedback]').dataset.tone !== 'error' || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('server selection error changed profile geometry or lacked error semantics');
     state.profileMode = 'success';
     select.value = 'Bahamut';
     select.dispatchEvent(new Event('change', { bubbles:true }));
@@ -2077,10 +2459,10 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 50));
     const save = state.calls.find(call => call.command === 'save_server_profile');
     if (!save || save.args.originalDisplayName !== 'Bahamut' || save.args.profile.host !== 'new.example') throw new Error('Profiles server editor did not persist the profile');
-    if (!document.querySelector('#profile-save-status').textContent.includes('saved')) throw new Error('server save success was not reported');
-    if (document.querySelector('#profile-save-status').dataset.tone !== 'success' || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('profile save status changed profile geometry or used error semantics');
+    if (!document.querySelector('#screen-profiles [data-feedback]').textContent.includes('saved')) throw new Error('server save success was not reported');
+    if (document.querySelector('#screen-profiles [data-feedback]').dataset.tone !== 'success' || profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('profile save status changed profile geometry or used error semantics');
     await new Promise(resolve => setTimeout(resolve, 2700));
-    if (document.querySelector('#profile-save-status').textContent || document.querySelector('#profile-server-select-status').textContent) throw new Error('profile success feedback did not clear promptly');
+    if (document.querySelector('#screen-profiles [data-feedback]').textContent || document.querySelector('#screen-profiles [data-feedback]').textContent) throw new Error('profile success feedback did not clear promptly');
     if (profileCards.some((card, index) => card.getBoundingClientRect().height !== initialCardHeights[index])) throw new Error('clearing profile feedback changed profile geometry');
   `);
 
@@ -2097,7 +2479,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const extensionRegions = [...extensions.querySelectorAll('[data-gamepad-region]')];
     const folderDock = extensions.querySelector('.extension-folder-actions');
     const folderDockRect = folderDock.getBoundingClientRect();
-    if (folderDock.parentElement !== extensionsPage || extensionRegions.some(region => {
+    if (folderDock.parentElement !== extensionsPage.querySelector('.extension-action-dock') || extensionRegions.some(region => {
       const rect = region.getBoundingClientRect();
       return rect.left - extensionsPageRect.left < 3 || extensionsPageRect.right - rect.right < 3 || rect.top - extensionsPageRect.top < 3 || extensionsPageRect.bottom - rect.bottom < 3;
     })) throw new Error('Extensions regions do not reserve a stable, unclipped focus-ring gutter');
@@ -2118,7 +2500,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (datsDetail.querySelector('.extension-overlay-editor-heading') || datsDetail.textContent.includes('Overlay packages') || datsDetail.textContent.includes('Enabled packages are applied in first-hit order.')) throw new Error('Dats-Overlay retained the removed visible package copy');
     if (datsDetail.querySelector('.extension-overlay-editor')?.getAttribute('aria-label') !== 'Overlay package controls') throw new Error('Dats-Overlay package controls lost their accessible label');
     if (!datsDetail.querySelector('[data-dat-package-enabled="base-world"]')?.checked || !datsDetail.querySelector('[data-dat-package-enabled="detail-world"]')?.checked || datsDetail.querySelector('[data-dat-package-enabled="bahamut-dats-overlay"]')) throw new Error('Dats package enablement did not hydrate or official control remained');
-    if (datsDetail.querySelector('.extension-homepage') || !datsDetail.querySelector('[data-dat-conflict-summary]')?.textContent.includes('data/2A/08.DAT')) throw new Error('Dats package metadata or conflicts are not visible or safe');
+    if (datsDetail.querySelector('.extension-homepage') || datsDetail.querySelector('[data-dat-conflict-summary]')) throw new Error('Dats package metadata is unsafe or includes a conflict warning');
     if (datsDetail.querySelector('.extension-overlay-package .extension-meta,.extension-overlay-package-description,.extension-overlay-package-head,.extension-overlay-order') || /Author:|Version:|First-hit order|Move earlier|Move later/.test([...datsDetail.querySelectorAll('.extension-overlay-package')].map(row => row.textContent).join(' '))) throw new Error('Dats package rows retained manifest fluff');
     if ([...datsDetail.querySelectorAll('.extension-overlay-order-label')].map(node => node.textContent).join(',') !== '#1,#2,#3' || datsDetail.querySelector('[data-dat-move][data-dat-package-id="bahamut-dats-overlay"]') || datsDetail.querySelector('[data-dat-move="earlier"][data-dat-package-id="base-world"]')?.textContent !== '↑' || datsDetail.querySelector('[data-dat-move="later"][data-dat-package-id="base-world"]')?.textContent !== '↓' || !datsDetail.querySelector('[data-dat-move="earlier"][data-dat-package-id="base-world"]').disabled || !datsDetail.querySelector('[data-dat-move="later"][data-dat-package-id="detail-world"]').disabled) throw new Error('Dats priority controls did not lock official slot #1');
     const datsRow = extensions.querySelector('[data-extension-item="overlays:dats-overlay"]').closest('.extension-row').getBoundingClientRect();
@@ -2234,6 +2616,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 100));
     if (!selectedFpsButton.isConnected || document.activeElement !== selectedFpsButton || getComputedStyle(extensionLibrary).boxShadow === 'none') throw new Error('extension selection rebuilt the row or dropped the active card ring');
     const stableFolderDockRect = folderDock.getBoundingClientRect();
+    if (folderDock.querySelector('[data-feedback]') || stableFolderDockRect.height > 72) throw new Error('Extensions folder dock reserved an extra feedback row');
     if (Math.abs(stableFolderDockRect.left - folderDockRect.left) >= .1 || Math.abs(stableFolderDockRect.top - folderDockRect.top) >= .1 || Math.abs(stableFolderDockRect.width - folderDockRect.width) >= .1 || Math.abs(stableFolderDockRect.height - folderDockRect.height) >= .1) throw new Error('Extensions folder dock moved when the selected detail changed');
     const fpsDetail = extensions.querySelector('#extension-detail');
     const fpsMeta = [...fpsDetail.querySelectorAll('.extension-meta-item')].map(node => node.textContent).join('|');
@@ -2332,8 +2715,22 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 30));
     const rehydratedToggle = extensions.querySelector('[data-addon-enabled="fps"]');
     const inventoryReadsAfterFailure = state.calls.filter(call => call.command === 'get_extension_inventory').length;
-    const extensionActionAlert = extensions.querySelector('#extension-detail .extension-action-error[role="alert"]');
-    if (document.activeElement?.dataset.addonEnabled !== 'fps' || state.extensionInventory.addons[0].enabled || rehydratedToggle.checked || inventoryReadsAfterFailure !== inventoryReadsBeforeFailure + 1 || !extensionActionAlert?.textContent.includes('fixture addon write failure')) throw new Error('failed addon write did not restore focus, authoritative rehydrated state, and visible feedback');
+    const extensionActionAlert = extensions.querySelector('[data-feedback][data-tone="error"]');
+    if (document.activeElement?.dataset.addonEnabled !== 'fps' || state.extensionInventory.addons[0].enabled || rehydratedToggle.checked || inventoryReadsAfterFailure !== inventoryReadsBeforeFailure + 1 || !extensionActionAlert?.textContent.includes("Couldn't enable fps")) throw new Error('failed addon write did not restore focus, authoritative rehydrated state, and visible feedback');
+    state.extensionInventory.addons[0].enabled = true;
+    state.extensionInventory.addons[0].status = 'Enabled';
+    await hydrateExtensions();
+    const delayedToggle = extensions.querySelector('[data-addon-enabled="fps"]');
+    delayedToggle.focus();
+    delayedToggle.checked = false;
+    state.commandPlan = { command:'set_addon_enabled', delayMs:100 };
+    delayedToggle.dispatchEvent(new Event('change', { bubbles:true }));
+    document.querySelector('[data-route="home"]').click();
+    document.querySelector('[data-route="extensions"]').click();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (!extensions.querySelector('[data-addon-enabled="fps"]').checked) throw new Error('Extensions return did not hydrate the pre-save addon state');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    if (state.extensionInventory.addons[0].enabled || extensions.querySelector('[data-addon-enabled="fps"]').checked) throw new Error('delayed successful addon save did not render current state after returning to Extensions');
     document.body.dataset.inputMode = 'pointer';
     state.calls.length = 0;
     extensions.querySelector('[data-extension-folder="plugins"]').click();
@@ -2377,7 +2774,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (screen.textContent.includes('Enable Gamepad') || !screen.textContent.includes('Steam Deck not detected.') || screen.textContent.includes('support is unavailable') || screen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('Gamepad or Steam Deck support state is misleading');
     if (cardHeadingStyle.fontSize !== '22px' || cardHeadingStyle.lineHeight !== '33px' || settingStyle.minHeight !== '50px' || choiceRowStyle.gap !== '8px' || stubCardStyle.opacity !== '1' || stubSettingStyle.opacity !== '0.5' || separators.length) throw new Error('Gamepad card geometry drifted from Avalon: ' + JSON.stringify({ heading:cardHeadingStyle.fontSize, headingLine:cardHeadingStyle.lineHeight, settingHeight:settingStyle.minHeight, choiceGap:choiceRowStyle.gap, stubCardOpacity:stubCardStyle.opacity, stubSettingOpacity:stubSettingStyle.opacity, separators:separators.length }));
     const configCenters = configRects.map((rect, index) => Math.abs(rect.left + rect.width / 2 - (gamepadCardRects[index].left + gamepadCardRects[index].width / 2)));
-    if (Math.abs(functionalSettingRect.top - stubSettingRects[0].top) >= .1 || Math.abs(stubSettingRects[1].top - stubSettingRects[0].top - 92) >= .1 || Math.abs(stubSettingRects[0].top - stubStatusRect.bottom - 22) >= .1 || Math.abs(configRects[0].top - configRects[1].top) >= .1 || Math.abs(configRects[1].top - stubSettingRects[1].bottom - 42) >= .1 || configCenters.some(offset => offset >= .1)) throw new Error('Gamepad rows or actions are not aligned to the Avalon rhythm');
+    if (Math.abs(functionalSettingRect.top - stubSettingRects[0].top) >= .1 || Math.abs(stubSettingRects[1].top - stubSettingRects[0].top - 92) >= .1 || Math.abs(stubSettingRects[0].top - stubStatusRect.bottom - 22) >= .1 || Math.abs(configRects[0].top - functionalSettingRect.bottom - 42) >= .1 || Math.abs(configRects[1].top - stubSettingRects[1].bottom - 42) >= .1 || configCenters.some(offset => offset >= .1)) throw new Error('Gamepad rows or actions are not aligned to the Avalon rhythm');
     const configButton = document.querySelector('#gamepad-config-tool-button');
     if (!configButton || configButton.hidden || configButton.textContent !== 'XIV Config' || Math.abs(configButton.getBoundingClientRect().width - 280) >= .1 || Math.abs(configButton.getBoundingClientRect().height - 50) >= .1) throw new Error('Gamepad XIV Config action is missing or not centered to the Avalon size');
     configButton.click();
@@ -2594,7 +2991,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const resolutionRow = document.querySelector('#game-resolution').closest('[data-gamepad-settings-row]');
     const nativeResolutionRow = resolutionRow.nextElementSibling;
     if (!nativeResolutionRow || nativeResolutionRow.querySelector('.settings-label')?.textContent !== 'Native Resolution Override' || nativeResolutionRow.querySelectorAll('button').length !== 2) throw new Error('Native Resolution Override row did not sit directly below Window Resolution');
-    if (nativeResolutionRow.nextElementSibling || document.querySelector('[data-settings-pane="general"]').textContent.includes('HUD Layouts')) throw new Error('removed HUD Layouts row is still visible');
+    if (nativeResolutionRow.nextElementSibling?.matches('[data-gamepad-settings-row]') || document.querySelector('[data-settings-pane="general"]').textContent.includes('HUD Layouts')) throw new Error('removed HUD Layouts row is still visible');
     activateSettingsTab('graphics');
     focusAdjacentRegion(1);
     const graphicsCards = [...document.querySelectorAll('[data-settings-pane="graphics"] .settings-card')];
@@ -2649,7 +3046,11 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     }
     runControllerAction('down');
     if (document.activeElement !== miscLeftRows.at(-1)) throw new Error('D-pad escaped the bottom of the left Misc card');
-    runControllerAction('right');
+    let configActivations = 0;
+    miscLeftRows[2].querySelector('#settings-config-tool-button').addEventListener('click', () => { configActivations += 1; }, { once:true });
+    runControllerAction('confirm');
+    if (configActivations !== 1 || document.activeElement !== miscLeftRows[2]) throw new Error('separate XIV Config row did not activate on the first Confirm');
+    miscLeftRows[1].focus();
     runControllerAction('left');
     runControllerAction('confirm');
     if (!document.querySelector('#settings-confirmation-dialog').open || document.activeElement !== document.querySelector('#settings-confirmation-cancel')) throw new Error('Misc Repair Install row did not open a safe confirmation');
@@ -2660,7 +3061,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (document.activeElement !== miscRightCard) throw new Error('RB did not select the next Misc card');
     runControllerAction('down');
     if (document.activeElement !== miscRightRows[0]) throw new Error('D-pad did not select the first right Misc row');
-    if (miscLeftRows.map(row => row.querySelector('.settings-action')?.textContent || row.querySelector('.settings-label')?.textContent).join(',') !== 'Path,Repair Install') throw new Error('Misc install actions did not expose the requested gamepad order');
+    if (miscLeftRows.map(row => row.querySelector('.settings-action')?.textContent || row.querySelector('.settings-label')?.textContent).join(',') !== 'Path,Repair Install,XIV Config') throw new Error('Misc install actions did not expose the requested gamepad order');
     if (miscRightRows.map(row => [...row.querySelectorAll('.settings-action')].map(button => button.textContent).join('/')).join(',') !== 'Backup/Restore,Backup/Restore,Open Backup Folder/Open Install Folder,Open Screenshots Folder') throw new Error('Right Misc rows did not expose the requested gamepad order');
     for (const row of miscRightRows.slice(1)) {
       runControllerAction('down');
@@ -2759,27 +3160,27 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     submit.click();
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (state.calls.filter(call => call.command === 'register').length !== 1 || !document.querySelector('#register-alert').textContent) throw new Error('Registration allowed duplicate submissions while the first request was pending');
+    if (state.calls.filter(call => call.command === 'register').length !== 1 || !document.querySelector('#screen-register [data-feedback]').textContent) throw new Error('Registration allowed duplicate submissions while the first request was pending');
     window.__launcherBrowserState.registerMode = 'username-taken';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#register-alert').textContent !== 'That username is already taken.') throw new Error('Taken-username copy drifted from Avalon');
+    if (document.querySelector('#screen-register [data-feedback]').textContent !== 'That username is already taken.') throw new Error('Taken-username copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'network';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#register-alert').textContent !== 'Server unavailable.') throw new Error('Registration network-error copy drifted from Avalon');
+    if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't reach the server to create your account. Copy logs from the Help page for support.") throw new Error('Registration network-error copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'rate-limited';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#register-alert').textContent !== 'Too many attempts. Wait a few minutes.') throw new Error('Registration rate-limit copy drifted from Avalon');
+    if (document.querySelector('#screen-register [data-feedback]').textContent !== 'Too many attempts. Wait a few minutes.') throw new Error('Registration rate-limit copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'create-failed';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#register-alert').textContent !== 'Account creation failed. Create a ticket on Discord.') throw new Error('Registration create-failure copy drifted from Avalon');
+    if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration create-failure copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'server';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#register-alert').textContent !== 'Something went wrong. Create a ticket on Discord.') throw new Error('Registration fallback copy drifted from Avalon');
+    if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration fallback copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'username-invalid';
     submit.click();
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -2843,7 +3244,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const actionTier = style => ({ borderRadius:style.borderRadius, fontFamily:style.fontFamily, fontSize:style.fontSize, lineHeight:style.lineHeight });
     if (helpActionStyle.borderRadius !== settingsActionStyle.borderRadius || helpActionStyle.fontFamily !== settingsActionStyle.fontFamily || helpActionStyle.fontSize !== settingsActionStyle.fontSize || helpActionStyle.lineHeight !== settingsActionStyle.lineHeight) throw new Error('Help actions drifted from the shared launcher button tier: ' + JSON.stringify({ help:actionTier(helpActionStyle), settings:actionTier(settingsActionStyle) }));
     if (!screen.textContent.includes('#install-support') || screen.querySelector('.help-subtitle [data-link]')) throw new Error('Help support copy or plain-text Discord treatment drifted');
-    if (!screen.querySelector('#help-status.help-status') || screen.querySelector('#help-status').textContent) throw new Error('Help status line is missing or not initially empty');
+    if (!screen.querySelector('.help-copy > [data-feedback][role="status"]') || log.querySelector('[data-feedback]') || screen.querySelector('#help-feedback').textContent) throw new Error('Help status line is missing or not initially empty');
     document.body.dataset.inputMode = 'gamepad';
     const helpActions = screen.querySelector('.help-actions');
     helpActions.focus();
@@ -2852,7 +3253,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
 
     document.querySelector('[data-help-action="copy"]').click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (state.clipboardText !== log.textContent || document.querySelector('#help-status').textContent !== 'Logs copied to clipboard.') throw new Error('Copy Logs did not copy the rendered snapshot or report success');
+    if (state.clipboardText !== log.querySelector('[data-log-content]').textContent || document.querySelector('#help-status').textContent !== 'Logs copied to clipboard.' || screen.querySelector('#help-feedback').textContent) throw new Error('Copy Logs did not copy the rendered snapshot or report success');
 
     state.calls.length = 0;
     document.querySelector('[data-help-action="open"]').click();
@@ -2863,7 +3264,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.clipboardMode = 'error';
     document.querySelector('[data-help-action="copy"]').click();
     await new Promise(resolve => setTimeout(resolve, 20));
-    if (document.querySelector('#help-status').textContent !== 'Unable to copy logs.') throw new Error('clipboard failure did not report visible feedback');
+    if (screen.querySelector('#help-feedback').textContent !== "Couldn't copy logs. Try Open Logs or contact support on Discord." || document.querySelector('#help-status').textContent) throw new Error('clipboard failure did not report visible feedback');
     state.clipboardMode = 'success';
 
     log.focus();

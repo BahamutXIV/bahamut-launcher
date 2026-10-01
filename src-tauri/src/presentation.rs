@@ -239,18 +239,11 @@ pub(crate) struct OverlayPackageView {
     pub(crate) trust: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct OverlayConflictView {
-    pub(crate) relative_path: String,
-    pub(crate) package_ids: Vec<String>,
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub(crate) struct ExtensionInventoryView {
     pub(crate) addons: Vec<ExtensionItemView>,
     pub(crate) plugins: Vec<ExtensionItemView>,
     pub(crate) overlays: Vec<OverlayPackageView>,
-    pub(crate) overlay_conflicts: Vec<OverlayConflictView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -449,20 +442,21 @@ impl AuthError {
     }
 }
 
-/// Maps launch failures to the frontend's `kind` envelope; patch failures use `patch`, missing binaries use `no-install` or `server`.
+/// Maps launch failures to the frontend's `kind` envelope; known game setup failures use `preparation`.
 pub(crate) fn map_launch_error(err: platform::LaunchError) -> AuthError {
     use platform::LaunchError::*;
+    tracing::error!(diagnostic = ?err, "launch failure translated");
     match err {
         MissingClientBinary(_) => AuthError::bare("no-install"),
-        e @ MissingConfigBinary(_) => AuthError::server(e.to_string()),
-        e @ (PatchPlanning(_)
+        e @ (MissingConfigBinary(_)
+        | PatchPlanning(_)
+        | LaunchArgs(_)
+        | ArgsContainNul(_)
         | ImageBaseUnknown
         | PatchVerifyMismatch { .. }
         | PeParse(_)
-        | RvaUnmapped(_)) => AuthError::with_message("patch", e.to_string()),
-        e @ (LaunchArgs(_)
-        | ArgsContainNul(_)
-        | WindowsApi { .. }
+        | RvaUnmapped(_)) => AuthError::with_message("preparation", e.to_string()),
+        e @ (WindowsApi { .. }
         | WineNotFound(_)
         | WinePrefix(_)
         | Io { .. }

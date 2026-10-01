@@ -78,7 +78,7 @@
                   <div class="field"><label for="login-username">Username</label><input class="input" id="login-username" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter a username..."></div>
                   <div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" required autocomplete="off" placeholder="Enter a password..."></div>
                   <label class="check-line"><input type="checkbox" id="login-remember" checked>Remember Login</label>
-                  <div class="inline-alert" id="login-alert" role="alert"></div>
+
                   <button class="login-action" type="submit" id="login-submit" disabled>Login</button>
                   <div class="account-links">
                     <button class="text-button" type="button" data-action="open-register">Create account</button>
@@ -152,9 +152,12 @@
           <div class="extension-detail-column">
             <div class="extension-detail" id="extension-detail" data-gamepad-region data-gamepad-region-order="2" tabindex="-1"><div class="extension-empty">Select an installed package.</div></div>
           </div>
-          <div class="extension-folder-actions glass-panel" data-gamepad-region data-gamepad-region-order="3" tabindex="-1">
-            <button class="secondary-button accent-action" type="button" data-extension-folder="plugins">Open Plugins Folder</button>
-            <button class="secondary-button accent-action" type="button" data-extension-folder="addons">Open Addons Folder</button>
+          <div class="extension-action-dock">
+            <div class="page-feedback" id="extension-feedback" role="status" aria-live="polite" aria-atomic="true" data-feedback></div>
+            <div class="extension-folder-actions glass-panel" data-gamepad-region data-gamepad-region-order="3" tabindex="-1">
+              <button class="secondary-button accent-action" type="button" data-extension-folder="plugins">Open Plugins Folder</button>
+              <button class="secondary-button accent-action" type="button" data-extension-folder="addons">Open Addons Folder</button>
+            </div>
           </div>
         </div>
       </section>
@@ -165,7 +168,6 @@
             <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="graphics">Graphics</button>
             <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="misc">Misc</button>
           </div>
-          <div class="game-settings-status" id="game-settings-status" aria-live="polite"></div>
 
           <div class="settings-pane" data-settings-pane="general" data-active>
             <div class="settings-grid">
@@ -177,7 +179,7 @@
               </article>
               <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="display-mode-label">Display Mode</div><div class="choice-row choice-row--compact" role="group" aria-labelledby="display-mode-label"><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="windowed" aria-pressed="false">Windowed</button><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="borderless" aria-pressed="false">Borderless</button><button class="choice-option" type="button" data-game-setting-choice="display_mode" data-game-setting-value="fullscreen" aria-pressed="false">Fullscreen</button></div></div>
-                <div class="settings-field" id="borderless-monitor-row" role="group" tabindex="-1" data-gamepad-settings-row hidden><label class="settings-label" for="borderless-monitor">Borderless Monitor</label><div><select class="input" id="borderless-monitor" autocomplete="off" aria-describedby="borderless-monitor-status"><option value="">Default Monitor</option></select><div class="settings-status" id="borderless-monitor-status" aria-live="polite"></div></div></div>
+                <div class="settings-field" id="borderless-monitor-row" role="group" tabindex="-1" data-gamepad-settings-row hidden><label class="settings-label" for="borderless-monitor">Borderless Monitor</label><div><select class="input" id="borderless-monitor" autocomplete="off"><option value="">Default Monitor</option></select></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-resolution">Window Resolution</label><select class="input" id="game-resolution" autocomplete="off" data-game-setting="resolution"></select></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="native-resolution-override-label">Native Resolution Override</div><div class="choice-row" role="group" aria-labelledby="native-resolution-override-label"><button class="choice-option" type="button" data-launcher-setting-choice="native_resolution_override" data-launcher-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-launcher-setting-choice="native_resolution_override" data-launcher-setting-value="false" aria-pressed="true">Off</button></div></div>
               </article>
@@ -190,16 +192,16 @@
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="multisampling-label">Multisampling</div><div class="choice-row choice-row--compact" role="group" aria-labelledby="multisampling-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="none" aria-pressed="false">No AA</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="2x" aria-pressed="false">2x</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="4x" aria-pressed="false">4x</button><button class="choice-option" type="button" data-game-setting-choice="graphics.multisampling" data-game-setting-value="8x" aria-pressed="false">8x</button></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-general-quality">General Drawing Quality</label><div class="settings-range"><input id="game-general-quality" type="range" min="1" max="10" step="1" autocomplete="off" data-game-setting="graphics.general_quality"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-background-quality">Background Drawing Quality</label><div class="settings-range"><input id="game-background-quality" type="range" min="1" max="5" step="1" autocomplete="off" data-game-setting="graphics.background_quality"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
-                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="object-distance-range">Extended Draw Distance</label><div class="settings-range"><input id="object-distance-range" type="range" min="0" max="4" step="1" value="0" autocomplete="off" data-object-distance-selection data-graphics-values="off,125,150,175,200" disabled><div class="settings-range-labels"><span>Off</span><span>2x</span></div><div class="settings-status" id="object-distance-status" aria-live="polite"></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="object-distance-range">Extended Draw Distance</label><div class="settings-range"><input id="object-distance-range" type="range" min="0" max="4" step="1" value="0" autocomplete="off" data-object-distance-selection data-graphics-values="off,125,150,175,200" disabled><div class="settings-range-labels"><span>Off</span><span>2x</span></div></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-shadow-detail">Shadow Detail</label><div class="settings-range"><input id="game-shadow-detail" type="range" min="0" max="4" step="1" autocomplete="off" data-game-setting="graphics.shadow_detail" data-game-setting-values="lowest,low,standard,high,highest"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
-                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="cutscene-effects-label">Cutscene Effects</div><div class="choice-row" role="group" aria-labelledby="cutscene-effects-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
               </article>
               <article class="settings-card game-settings-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="texture-quality-label">Texture Quality</div><div class="choice-row" role="group" aria-labelledby="texture-quality-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="low" aria-pressed="false">Low</button><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="standard" aria-pressed="false">Standard</button><button class="choice-option" type="button" data-game-setting-choice="graphics.texture_quality" data-game-setting-value="high" aria-pressed="false">High</button></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="game-texture-filtering">Texture Filtering</label><div class="settings-range"><input id="game-texture-filtering" type="range" min="0" max="3" step="1" autocomplete="off" data-game-setting="graphics.texture_filtering" data-game-setting-values="low,standard,high,highest"><div class="settings-range-labels"><span>Low</span><span>High</span></div></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="ambient-occlusion-label">Ambient Occlusion</div><div class="choice-row" role="group" aria-labelledby="ambient-occlusion-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.ambient_occlusion" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.ambient_occlusion" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
                 <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="depth-of-field-label">Depth Of Field</div><div class="choice-row" role="group" aria-labelledby="depth-of-field-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.depth_of_field" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.depth_of_field" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
-                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="camera-zoom-range">Extended Camera Zoom</label><div class="settings-range"><input id="camera-zoom-range" type="range" min="0" max="5" step="1" value="0" autocomplete="off" data-camera-zoom-selection data-graphics-values="off,11,12,13,14,15" disabled><div class="settings-range-labels"><span>Off</span><span>15</span></div><div class="settings-status" id="camera-zoom-status" aria-live="polite"></div></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><div class="settings-label" id="cutscene-effects-label">Cutscene Effects</div><div class="choice-row" role="group" aria-labelledby="cutscene-effects-label"><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="true" aria-pressed="false">On</button><button class="choice-option" type="button" data-game-setting-choice="graphics.cutscene_effects" data-game-setting-value="false" aria-pressed="false">Off</button></div></div>
+                <div class="settings-field" role="group" tabindex="-1" data-gamepad-settings-row><label class="settings-label" for="camera-zoom-range">Extended Camera Zoom</label><div class="settings-range"><input id="camera-zoom-range" type="range" min="0" max="5" step="1" value="0" autocomplete="off" data-camera-zoom-selection data-graphics-values="off,11,12,13,14,15" disabled><div class="settings-range-labels"><span>Off</span><span>15</span></div></div></div>
               </article>
             </div>
           </div>
@@ -210,6 +212,7 @@
                 <h2>Install Location</h2>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Install location"><div class="settings-path-picker"><div class="settings-value" id="settings-game-path">Checking...</div><button class="settings-action settings-path-action accent-action" type="button" data-settings-action="browse-game">Path</button></div></div>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Repair game install"><button class="settings-action accent-action" type="button" data-game-files-action="repair">Repair Install</button></div>
+                <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Open XIV Config"><button class="settings-action accent-action" id="settings-config-tool-button" type="button" data-settings-action="open-config" hidden>XIV Config</button></div>
               </article>
               <article class="settings-card settings-card--backups glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
                 <h2>User Settings and Macros</h2>
@@ -217,8 +220,7 @@
                 <h2>Extensions</h2>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Extensions backups"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-backup-action="create" data-backup-target="extensions">Backup</button><button class="settings-action settings-action--secondary" type="button" data-backup-action="restore" data-backup-target="extensions">Restore</button></div></div>
                 <div class="settings-field settings-field--full" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Backup and install folders"><div class="settings-action-row"><button class="settings-action accent-action" type="button" data-extension-folder="backups">Open Backup Folder</button><button class="settings-action settings-action--secondary" type="button" data-extension-folder="install">Open Install Folder</button></div></div>
-                <div class="settings-status" id="settings-backup-status" aria-live="polite"></div>
-                <div class="settings-status" id="settings-misc-status" aria-live="polite"></div>
+
                 <div class="settings-field settings-field--full settings-field--screenshots" role="group" tabindex="-1" data-gamepad-settings-row aria-label="Open screenshots folder"><button class="settings-action accent-action" type="button" data-extension-folder="screenshots">Open Screenshots Folder</button></div>
               </article>
             </div>
@@ -239,9 +241,11 @@
                 <div class="field"><label for="register-password">Password</label><input class="input" id="register-password" type="password" required autocomplete="off" aria-describedby="register-password-error"></div>
                 <p class="register-field-error" id="register-password-error" aria-live="polite"></p>
                 <div class="field"><label for="register-confirm">Confirm password</label><input class="input" id="register-confirm" type="password" required autocomplete="off" aria-describedby="register-confirm-error"></div>
-                <p class="register-field-error" id="register-confirm-error" aria-live="polite"></p>
               </div>
-              <div class="inline-alert register-submit-error" id="register-alert" aria-live="polite"></div>
+              <div class="register-result">
+                <p class="register-field-error" id="register-confirm-error" aria-live="polite"></p>
+                <div class="page-feedback" data-feedback role="status" aria-live="polite" aria-atomic="true"></div>
+              </div>
               <button type="submit" class="login-action register-submit" disabled>Create account</button>
             </form>
           </article>
@@ -260,7 +264,7 @@
                 <div class="summary-row"><div class="summary-label">Auth endpoint</div><div class="summary-value" id="profile-server-auth">Checking...</div></div>
                 <div class="summary-row"><div class="summary-label">Lobby endpoint</div><div class="summary-value" id="profile-server-lobby">Checking...</div></div>
               </div>
-              <div class="profile-feedback" id="profile-server-select-status" role="status" aria-live="polite"></div>
+
             </article>
             <article class="profile-card glass-panel" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
               <form class="server-form" id="profile-form" autocomplete="off">
@@ -270,7 +274,7 @@
                 <div class="field"><label for="profile-lobby-port">Lobby port</label><input class="input" id="profile-lobby-port" type="number" min="1" max="65535" required autocomplete="off"></div>
                 <label class="check-line"><input type="checkbox" id="profile-https">Use HTTPS for authentication</label>
                 <button class="login-action" type="submit">Save profile</button>
-                <div class="profile-feedback" id="profile-save-status" role="status" aria-live="polite"></div>
+
               </form>
             </article>
           </div>
@@ -291,7 +295,7 @@
                 <div class="gamepad-config-row">
                   <button class="settings-action gamepad-config-action accent-action" id="gamepad-config-tool-button" type="button" data-settings-action="open-config" hidden>XIV Config</button>
                 </div>
-                <div class="gamepad-action-status" id="gamepad-action-status" role="status" aria-live="polite"></div>
+
               </div>
             </article>
             <article class="gamepad-card gamepad-card--stub glass-panel" aria-labelledby="steam-deck-title">
@@ -321,16 +325,18 @@
               <div class="help-copy">
                 <h1 class="help-title" id="help-page-title">Need help?</h1>
                 <p class="help-subtitle">If you need additional assistance, post your logs in <span class="help-channel">#install-support</span> in Discord.</p>
+                <div class="page-feedback" id="help-feedback" role="status" aria-live="polite" aria-atomic="true" data-feedback></div>
               </div>
               <div class="help-actions" aria-label="Help actions" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
                 <div class="help-actions-buttons">
                   <button class="help-action primary" type="button" data-help-action="copy">Copy Logs</button>
                   <button class="help-action" type="button" data-help-action="open">Open Logs</button>
                 </div>
-                <div class="help-status" id="help-status" role="status"></div>
+                <div class="help-status" id="help-status" data-feedback role="status" aria-live="polite" aria-atomic="true"></div>
+
               </div>
             </header>
-            <pre class="help-log-window" id="help-log" aria-label="Launcher logs" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">Loading launcher logs...</pre>
+            <pre class="help-log-window" id="help-log" aria-label="Launcher logs" data-gamepad-region data-gamepad-region-order="2" tabindex="-1"><span data-log-content>Loading launcher logs...</span></pre>
           </article>
         </div>
       </section>

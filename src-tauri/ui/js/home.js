@@ -1,6 +1,7 @@
 import { home, settingsState, AUTH_ERROR_KINDS, invoke, escapeHtml, selectedServer, formatBytes } from './runtime.js';
 import { hydrateSettings } from './settings.js';
 import { repairState } from './game-repair.js';
+import { SUPPORT_COPY, feedbackToken, clearFeedback, showFeedback, reportFailure, recordFailure, recordPollingFailure, pollingRecovered } from './feedback.js';
 
 function renderNews() {
   const list = document.querySelector('#news-list');
@@ -39,12 +40,15 @@ function renderHome() {
   document.querySelector('#home-eyebrow').textContent = home.status.eyebrow;
   document.querySelector('#home-title').textContent = home.status.title;
   const content = document.querySelector('#home-session-content');
+  const feedback = document.querySelector('#account-feedback');
+  feedback.remove();
   const primary = document.querySelector('#home-primary');
   primary.textContent = state === 'no-valid-install' || state === 'outdated-install' ? 'Install' : home.status.primary_action;
   primary.disabled = operationActive || home.installStartPending || state === 'logged-out' || (state === 'ready' && home.gameRunning);
 
   if (['no-valid-install', 'outdated-install', 'logged-out'].includes(state)) {
     content.replaceChildren(loginContent(state === 'logged-out'));
+    content.querySelector('.check-line').after(feedback);
   }
   if (state === 'logged-out') {
     const form = document.querySelector('#login-form');
@@ -54,8 +58,8 @@ function renderHome() {
           <div class="account-ready">
             <div><div class="account-ready-kicker">Welcome back!</div><div class="account-ready-name">${escapeHtml(home.username)}</div></div>
           </div>
-          <div class="inline-alert" id="launch-alert" aria-live="polite"></div>
           <div class="account-ready-footer"><button class="login-action account-logout" type="button" data-action="logout">Logout</button></div>`;
+    content.querySelector('.account-ready-footer').before(feedback);
   }
 
   renderLifecycleStrip();
@@ -246,9 +250,9 @@ function clearRetryCountdown() {
 
 async function submitLogin(event) {
   event.preventDefault();
-  const alert = document.querySelector('#login-alert');
+  const feedback = feedbackToken('#session-card');
   const primary = document.querySelector('#login-submit');
-  alert.textContent = '';
+  clearFeedback(feedback);
   primary.disabled = true;
   primary.textContent = 'Logging In...';
   try {
@@ -266,44 +270,51 @@ async function submitLogin(event) {
     home.server = server;
     clearRetryCountdown();
     rememberSession(document.querySelector('#login-remember').checked);
-    await refreshHomeStatus();
+    if (!await refreshHomeStatus()) throw { kind:'home-refresh-failed' };
   } catch (error) {
-    showLoginError(error, alert);
+    if (error?.kind === 'home-refresh-failed') showFeedback(feedback, `Couldn't refresh Home. ${SUPPORT_COPY}`, 'error');
+    else showLoginError(error, feedback);
     if (!error || error.kind !== AUTH_ERROR_KINDS.rateLimited) primary.disabled = false;
   } finally {
     primary.textContent = 'Login';
   }
 }
-function showLoginError(error, alert) {
+function showLoginError(error, feedback) {
   const kind = error && error.kind;
+  let message;
   if (kind === AUTH_ERROR_KINDS.invalidCredentials) {
-    alert.textContent = 'Incorrect username or password.';
+    message = 'Incorrect username or password.';
   } else if (kind === AUTH_ERROR_KINDS.rateLimited) {
-    startRetryCountdown(alert, Number(error.retryAfter || 0));
+    recordFailure('home', 'log in', error, `Too many attempts. Try again in ${Math.max(1, Number(error.retryAfter || 1))} seconds.`);
+    startRetryCountdown(feedback, Number(error.retryAfter || 0));
+    return;
   } else if (kind === AUTH_ERROR_KINDS.network) {
-    alert.textContent = 'The selected server could not be reached.';
+    message = `Couldn't reach the selected server to log in. ${SUPPORT_COPY}`;
   } else if (kind === AUTH_ERROR_KINDS.noInstall) {
-    alert.textContent = 'Select a valid game install before logging in.';
+    message = 'Select a valid game install before logging in.';
   } else if (kind === AUTH_ERROR_KINDS.outdatedClient) {
-    alert.textContent = 'Install the final 1.23b client before logging in.';
+    message = 'Install the final 1.23b client before logging in.';
+  } else if (kind === 'session-endpoint-changed') {
+    message = 'The server address changed. Log in again.';
   } else {
-    alert.textContent = (error && error.message) || 'The server could not complete login.';
+    message = `Couldn't log in. ${SUPPORT_COPY}`;
   }
+  reportFailure(feedback, 'log in', error, { message, context:`server=${selectedServer() || ''}` });
 }
 
-function startRetryCountdown(alert, seconds) {
+function startRetryCountdown(feedback, seconds) {
   clearRetryCountdown();
   const primary = document.querySelector('#login-submit');
   if (primary) primary.disabled = true;
   let remaining = Math.max(1, seconds || 1);
-  const render = () => { alert.textContent = `Too many attempts. Try again in ${remaining} second${remaining === 1 ? '' : 's'}.`; };
+  const render = () => showFeedback(feedback, `Too many attempts. Try again in ${remaining} second${remaining === 1 ? '' : 's'}.`, 'error');
   render();
   home.retryTimer = setInterval(() => {
     remaining -= 1;
     if (remaining <= 0) {
       clearRetryCountdown();
       if (primary) primary.disabled = false;
-      alert.textContent = 'You can try logging in again.';
+      showFeedback(feedback, 'You can try logging in again.');
     } else render();
   }, 1000);
 }
@@ -318,6 +329,7 @@ async function chooseInstallFolder() {
     renderLifecycleStrip();
   } catch (error) {
     home.installError = error.message || String(error);
+    recordFailure('home/install', 'choose install folder', error, home.installError);
     renderLifecycleStrip();
   }
 }
@@ -336,7 +348,7 @@ async function startInstall() {
     await refreshInstallSnapshot();
   } catch (error) {
     home.installError = error.message || String(error);
-    console.error('Unable to start the game installation.', error);
+    recordFailure('home/install', 'start installation', error, home.installError, `destination=${destination}`);
     renderLifecycleStrip();
   } finally {
     home.installStartPending = false;
@@ -350,8 +362,8 @@ function installTarget() {
 
 async function launchGame() {
   if (home.gameRunning || home.installSnapshot?.is_running) return;
-  const alert = document.querySelector('#launch-alert');
-  if (alert) alert.textContent = '';
+  const feedback = feedbackToken('#session-card');
+  clearFeedback(feedback);
   const primary = document.querySelector('#home-primary');
   home.gameStatusRevision += 1;
   home.gameLaunchPending = true;
@@ -365,15 +377,21 @@ async function launchGame() {
       home.gameRunning = false;
       home.gameLaunchPending = false;
       await refreshHomeStatus();
-      document.querySelector('#login-alert').textContent = 'The server address changed. Log in again.';
+      reportFailure(feedback, 'launch game', error, { message:'The server address changed. Log in again.' });
       return;
     }
-    const titles = { 'no-install':'Game install not found', patch:'Patch verification failed', lobby:'Lobby connection failed', 'outdated-client':'Client is not 1.23b', extensions:'Client extensions were not loaded', prerequisite:'Windows runtime is required', 'game-running':'Game is already running' };
-    // extensions always carries a backend message; the empty copy falls through to it.
-    const copies = { 'no-install':'Set the game install path in Settings to continue.', patch:'The configured client files failed patch verification.', lobby:'The lobby could not be reached. Check the selected server and try again.', 'outdated-client':'Install the final 1.23b client into a new folder before launching.', extensions:'', prerequisite:'', 'game-running':'Close the current client before launching another.' };
-    const kind = (error && error.kind) || 'lobby';
-    const message = `${titles[kind] || 'Launch failed'}: ${copies[kind] || (error && error.message) || 'The extension bootstrap did not complete and the game was not started.'}`;
-    if (alert) alert.textContent = message;
+    const copies = {
+      'no-install':'Game install not found. Set the install path in Settings.',
+      preparation:`Couldn't prepare the game to launch. ${SUPPORT_COPY}`,
+      lobby:`Couldn't connect to the lobby. ${SUPPORT_COPY}`,
+      'outdated-client':'Install the final 1.23b client into a new folder before launching.',
+      extensions:`Couldn't load client extensions. ${SUPPORT_COPY}`,
+      prerequisite:`Couldn't prepare the Windows runtime. ${SUPPORT_COPY}`,
+      'game-running':'Close the current game before launching another.',
+    };
+    const kind = error?.kind || 'server';
+    const message = copies[kind] || `Couldn't launch the game. ${SUPPORT_COPY}`;
+    reportFailure(feedback, 'launch game', error, { message, context:`server=${home.server || ''}; kind=${kind}` });
     home.gameRunning = kind === 'game-running';
   } finally {
     home.gameLaunchPending = false;
@@ -386,18 +404,22 @@ async function refreshGameStatus() {
   const revision = ++home.gameStatusRevision;
   try {
     const gameRunning = Boolean(await invoke('game_status'));
+    pollingRecovered('home', 'read game status');
     if (revision !== home.gameStatusRevision || (!gameRunning && home.gameLaunchPending)) return;
     home.gameRunning = gameRunning;
     document.querySelector('#home-primary').disabled = home.gameRunning || Boolean(home.installSnapshot?.is_running);
   } catch (error) {
-    console.error('Unable to refresh the game process status.', error);
+    recordPollingFailure('home', 'read game status', error, 'Couldn\'t read game process status.');
   }
 }
 
 async function refreshInstallSnapshot() {
   if (!home.status) return;
   const revision = ++home.installSnapshotRevision;
-  const install = await invoke('install_status').catch(() => null);
+  const install = await invoke('install_status').then(status => { pollingRecovered('home/install', 'read install status'); return status; }).catch(error => {
+    recordPollingFailure('home/install', 'read install status', error, 'Couldn\'t read install status.');
+    return null;
+  });
   if (!install || revision !== home.installSnapshotRevision) return;
   home.installSnapshot = install;
   home.installTerminal = install.is_terminal && install.phase !== 'done' ? install : null;
@@ -411,15 +433,26 @@ async function refreshInstallSnapshot() {
 }
 
 async function refreshHomeStatus(installSnapshot = null) {
+  const feedback = feedbackToken('#session-card');
   const sessionToken = home.token;
   const gameStatusRevision = ++home.gameStatusRevision;
   const installRevision = ++home.installSnapshotRevision;
-  const [status, gameRunning, install] = await Promise.all([
+  let result;
+  try {
+    result = await Promise.all([
     invoke('get_home_status', { authenticated:!!home.token }),
     invoke('game_status'),
     installSnapshot ? Promise.resolve(installSnapshot) : invoke('install_status'),
-  ]);
-  if (sessionToken !== home.token) return;
+    ]);
+    pollingRecovered('home', 'refresh Home');
+  } catch (error) {
+    const message = `Couldn't refresh Home. ${SUPPORT_COPY}`;
+    recordPollingFailure('home', 'refresh Home', error, message);
+    showFeedback(feedback, message, 'error');
+    return false;
+  }
+  const [status, gameRunning, install] = result;
+  if (sessionToken !== home.token) return false;
   home.status = status;
   if (gameStatusRevision === home.gameStatusRevision && (gameRunning || !home.gameLaunchPending)) {
     home.gameRunning = Boolean(gameRunning);
@@ -434,6 +467,7 @@ async function refreshHomeStatus(installSnapshot = null) {
     localStorage.removeItem('bahamut-install-destination');
   }
   renderHome();
+  return true;
 }
 
 function resetInstallStatus() {
@@ -461,13 +495,11 @@ async function restoreSession() {
   home.expiresAt = Number(saved.expiresAt) || 0;
   home.server = saved.server || '';
 }
-async function handleSettingsAction(action) {
-  const status = document.querySelector('#settings-misc-status');
-  const gamepadStatus = document.querySelector('#gamepad-action-status');
-  if (status) status.textContent = '';
-  if (action === 'open-config') gamepadStatus.textContent = '';
+async function handleSettingsAction(action, target) {
+  const feedback = feedbackToken(target);
+  clearFeedback(feedback);
   if (home.installSnapshot?.is_running && action === 'browse-game') {
-    if (status) status.textContent = 'Wait for the current install to finish.';
+    showFeedback(feedback, 'Wait for the current install to finish.');
     return;
   }
   try {
@@ -487,10 +519,9 @@ async function handleSettingsAction(action) {
       await invoke('launch_config_tool');
       return;
     }
-    await hydrateSettings();
+    await hydrateSettings(feedback);
   } catch (error) {
-    const target = action === 'open-config' ? gamepadStatus : status;
-    if (target) target.textContent = error.message || String(error);
+    reportFailure(feedback, action === 'open-config' ? 'open XIV Config' : 'change Install Location', error, { context:`action=${action}` });
   }
 }
 

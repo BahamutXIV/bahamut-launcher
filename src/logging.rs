@@ -17,6 +17,8 @@ pub const SUPPORT_LOG_MAX_BYTES: usize = 256 * 1024;
 const DEFAULT_LOG_FILTER: &str = "warn,bahamut_launcher=info,bahamut_launcher_shell=info";
 const TRUNCATED_HEADER: &str = "[Log preview truncated to latest 256 KiB]\n";
 const EMPTY_LOG_MESSAGE: &str = "No launcher log entries have been written yet.";
+const UI_FAILURE_TARGET: &str = "bahamut_launcher_shell::ui_failure";
+const LOG_TIMER_FORMAT: &str = "[%Y-%m-%d %H:%M:%S %:z]";
 
 const SENSITIVE_KEYS: &[&str] = &[
     "authorization_header",
@@ -71,9 +73,14 @@ struct RedactingFileWriter {
     file: Mutex<File>,
 }
 
-struct RedactingEventWriter<'a> {
-    file: MutexGuard<'a, File>,
+struct RedactingStderrWriter {
+    stderr: Mutex<std::io::Stderr>,
+}
+
+struct RedactingEventWriter<'a, W: Write> {
+    sink: MutexGuard<'a, W>,
     pending: Vec<u8>,
+    mirror_stderr: bool,
 }
 
 impl RedactingFileWriter {
@@ -84,8 +91,16 @@ impl RedactingFileWriter {
     }
 }
 
+impl RedactingStderrWriter {
+    fn new() -> Self {
+        Self {
+            stderr: Mutex::new(std::io::stderr()),
+        }
+    }
+}
+
 impl<'a> MakeWriter<'a> for RedactingFileWriter {
-    type Writer = RedactingEventWriter<'a>;
+    type Writer = RedactingEventWriter<'a, File>;
 
     fn make_writer(&'a self) -> Self::Writer {
         let file = self
@@ -93,42 +108,82 @@ impl<'a> MakeWriter<'a> for RedactingFileWriter {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         RedactingEventWriter {
-            file,
+            sink: file,
             pending: Vec::new(),
+            mirror_stderr: true,
         }
     }
 }
 
-impl RedactingEventWriter<'_> {
+impl<'a> MakeWriter<'a> for RedactingStderrWriter {
+    type Writer = RedactingEventWriter<'a, std::io::Stderr>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        let stderr = self
+            .stderr
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        RedactingEventWriter {
+            sink: stderr,
+            pending: Vec::new(),
+            mirror_stderr: false,
+        }
+    }
+}
+
+impl<W: Write> RedactingEventWriter<'_, W> {
     fn write_pending(&mut self) -> io::Result<()> {
         if self.pending.is_empty() {
             return Ok(());
         }
         let redacted = redact_log_text(&String::from_utf8_lossy(&self.pending));
-        self.file.write_all(redacted.as_bytes())?;
-        std::io::stderr().write_all(redacted.as_bytes())?;
+        self.sink.write_all(redacted.as_bytes())?;
+        self.sink.flush()?;
         self.pending.clear();
+        if self.mirror_stderr {
+            std::io::stderr().write_all(redacted.as_bytes())?;
+            std::io::stderr().flush()?;
+        }
         Ok(())
     }
 }
 
-impl Write for RedactingEventWriter<'_> {
+/// Record a frontend failure at error level so it survives the normal and coarse log filters.
+/// The persistent writer redacts every rendered field before it reaches the transcript.
+pub fn record_ui_failure(
+    page: &str,
+    action: &str,
+    displayed_message: &str,
+    diagnostic: &str,
+    context: &str,
+) {
+    tracing::event!(
+        target: UI_FAILURE_TARGET,
+        tracing::Level::ERROR,
+        version = env!("BAHAMUT_GIT_DESCRIBE"),
+        platform = %format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        page = %page,
+        action = %action,
+        displayed_message = %displayed_message,
+        diagnostic = %diagnostic,
+        context = %context,
+        "UI failure"
+    );
+}
+
+impl<W: Write> Write for RedactingEventWriter<'_, W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.pending.extend_from_slice(bytes);
-        if self.pending.contains(&b'\n') {
-            self.write_pending()?;
-        }
         Ok(bytes.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         self.write_pending()?;
-        self.file.flush()?;
-        std::io::stderr().flush()
+        self.sink.flush()
     }
 }
 
-impl Drop for RedactingEventWriter<'_> {
+impl<W: Write> Drop for RedactingEventWriter<'_, W> {
     fn drop(&mut self) {
         let _ = self.write_pending();
     }
@@ -139,10 +194,10 @@ pub fn init() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(log_filter())
         .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-            "[%H:%M:%S]".to_string(),
+            LOG_TIMER_FORMAT.to_string(),
         ))
         .with_target(false)
-        .with_writer(std::io::stderr)
+        .with_writer(RedactingStderrWriter::new())
         .try_init();
 }
 
@@ -161,7 +216,7 @@ pub fn init_persistent() -> io::Result<PathBuf> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(log_filter())
         .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-            "[%H:%M:%S]".to_string(),
+            LOG_TIMER_FORMAT.to_string(),
         ))
         .with_target(false)
         .with_ansi(false)
@@ -282,6 +337,7 @@ fn read_log_snapshot(path: &Path, max_bytes: usize) -> io::Result<LauncherLogSna
 pub fn redact_log_text(text: &str) -> String {
     let mut redacted = redact_bearer_values(text);
     redacted = redact_assignments(&redacted);
+    redacted = redact_url_userinfo(&redacted);
     redact_session_ids(&redacted)
 }
 
@@ -309,8 +365,9 @@ fn redact_assignments(text: &str) -> String {
             }
 
             let mut cursor = after;
-            if cursor < bytes.len() && matches!(bytes[cursor], b'\'' | b'"') {
-                cursor += 1;
+            let (quote_start, quote) = quote_after_backslashes(bytes, cursor);
+            if quote.is_some() {
+                cursor = quote_start + 1;
             }
             let whitespace_start = cursor;
             while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
@@ -329,28 +386,107 @@ fn redact_assignments(text: &str) -> String {
                 continue;
             }
             let value_start = cursor;
-            let value_end = if matches!(bytes[cursor], b'\'' | b'"') {
-                let quote = bytes[cursor];
-                cursor += 1;
-                while cursor < bytes.len() && bytes[cursor] != quote {
-                    cursor += 1;
-                }
-                (cursor + usize::from(cursor < bytes.len())).min(bytes.len())
-            } else {
-                while cursor < bytes.len()
-                    && !bytes[cursor].is_ascii_whitespace()
-                    && !matches!(bytes[cursor], b',' | b';' | b'}' | b']')
-                {
-                    cursor += 1;
-                }
-                cursor
-            };
+            let value_end = structured_value_end(bytes, cursor);
             if value_end > value_start {
                 ranges.push((value_start, value_end));
             }
         }
     }
 
+    replace_ranges(text, ranges)
+}
+
+fn quote_after_backslashes(bytes: &[u8], start: usize) -> (usize, Option<u8>) {
+    let mut cursor = start;
+    while bytes.get(cursor) == Some(&b'\\') {
+        cursor += 1;
+    }
+    let quote = bytes
+        .get(cursor)
+        .copied()
+        .filter(|byte| matches!(byte, b'\'' | b'"'));
+    (cursor, quote)
+}
+
+fn structured_value_end(bytes: &[u8], start: usize) -> usize {
+    let mut cursor = start;
+    let mut stack = Vec::new();
+    let mut quote = None;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if matches!(byte, b'\\' | b'\'' | b'"') {
+            let (quote_start, delimiter) = quote_after_backslashes(bytes, cursor);
+            let backslashes = quote_start - cursor;
+            if let Some((active_quote, encoding)) = quote {
+                // Debug/JSON encoding escapes delimiters too. Pairs of encoded
+                // data backslashes may precede a closing quote; an interior quote is escaped.
+                if delimiter == Some(active_quote) && backslashes % (2 * (encoding + 1)) == encoding
+                {
+                    quote = None;
+                    if stack.is_empty() {
+                        return quote_start + 1;
+                    }
+                }
+            } else if let Some(delimiter) = delimiter {
+                if stack.is_empty() && cursor != start {
+                    return cursor;
+                }
+                quote = Some((delimiter, backslashes));
+            }
+            cursor = quote_start + usize::from(delimiter.is_some());
+            continue;
+        }
+        if quote.is_some() {
+            cursor += 1;
+            continue;
+        }
+
+        match byte {
+            b'[' | b'{' | b'(' => stack.push(byte),
+            b']' | b'}' | b')' => {
+                if stack.is_empty() {
+                    return cursor;
+                }
+                stack.pop();
+                if stack.is_empty() {
+                    return cursor + 1;
+                }
+            }
+            b',' | b';' | b'&' if stack.is_empty() => return cursor,
+            byte if byte.is_ascii_whitespace() && stack.is_empty() => return cursor,
+            _ => {}
+        }
+        cursor += 1;
+    }
+    cursor
+}
+
+fn redact_url_userinfo(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    while let Some(found) = text[offset..].find("://") {
+        let authority_start = offset + found + 3;
+        let mut authority_end = authority_start;
+        while authority_end < bytes.len()
+            && !bytes[authority_end].is_ascii_whitespace()
+            && !matches!(bytes[authority_end], b'/' | b'?' | b'#')
+        {
+            authority_end += 1;
+        }
+        let authority = &bytes[authority_start..authority_end];
+        if let Some(at) = authority.iter().rposition(|byte| *byte == b'@') {
+            let userinfo = &authority[..at];
+            if let Some(colon) = userinfo.iter().position(|byte| *byte == b':') {
+                let password_start = authority_start + colon + 1;
+                let password_end = authority_start + at;
+                if password_start < password_end {
+                    ranges.push((password_start, password_end));
+                }
+            }
+        }
+        offset = authority_end;
+    }
     replace_ranges(text, ranges)
 }
 
@@ -472,6 +608,60 @@ mod tests {
     }
 
     #[test]
+    fn redaction_masks_nested_values_escaped_quotes_and_url_userinfo() {
+        let input = r#"diagnostic={"token":["first-secret","second-secret"],"password":"prefix\"suffix-secret"} context=https://user:secret-value@downloads.example/"#;
+        let output = redact_log_text(input);
+
+        for secret in [
+            "first-secret",
+            "second-secret",
+            "suffix-secret",
+            "secret-value",
+        ] {
+            assert!(!output.contains(secret), "secret survived: {secret}");
+        }
+        assert!(output.contains("[REDACTED]"));
+        assert!(output.contains("https://user:[REDACTED]@downloads.example/"));
+    }
+
+    #[test]
+    fn redaction_masks_debug_error_chain_values() {
+        let input = r#"Transport(reqwest::Error { url: Some("https://user:network-secret@downloads.example"), source: Some(hyper::Error { password: "prefix\"suffix-secret" }) })"#;
+        let output = redact_log_text(input);
+
+        for secret in ["network-secret", "suffix-secret"] {
+            assert!(!output.contains(secret), "secret survived: {secret}");
+        }
+        assert!(output.contains("Transport(reqwest::Error"));
+        assert!(output.contains("https://user:[REDACTED]@downloads.example"));
+    }
+
+    #[test]
+    fn redaction_masks_colon_rich_userinfo_and_preserves_url_query_diagnostics() {
+        let input = r#"Transport(reqwest::Error { url: "https://user:alpha-value:beta-value@downloads.example/", source: ConnectError("connection refused") }) comma=https://user:alpha,beta@downloads.example/ semicolon=https://user:alpha;beta@downloads.example/ bracket=https://user:alpha]beta@downloads.example/ brace=https://user:alpha}beta@downloads.example/ next=https://example.test/?token=query-secret&keep=this"#;
+        let output = redact_log_text(input);
+
+        for secret in [
+            "alpha-value",
+            "beta-value",
+            "alpha,beta",
+            "alpha;beta",
+            "alpha]beta",
+            "alpha}beta",
+            "query-secret",
+        ] {
+            assert!(!output.contains(secret), "secret survived: {secret}");
+        }
+        assert!(output.contains("https://user:[REDACTED]@downloads.example/"));
+        assert!(output.contains("comma=https://user:[REDACTED]@downloads.example/"));
+        assert!(output.contains("semicolon=https://user:[REDACTED]@downloads.example/"));
+        assert!(output.contains("bracket=https://user:[REDACTED]@downloads.example/"));
+        assert!(output.contains("brace=https://user:[REDACTED]@downloads.example/"));
+        assert!(output.contains("https://example.test/?token=[REDACTED]&keep=this"));
+        assert!(output.contains("source: ConnectError(\"connection refused\")"));
+    }
+
+    #[test]
     fn persistent_writer_redacts_before_writing_to_disk() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("launcher.log");
@@ -486,6 +676,148 @@ mod tests {
         assert!(!persisted.contains("hunter2"));
         assert!(!persisted.contains("alpha"));
         assert_eq!(persisted, "login password=[REDACTED] token=[REDACTED]\n");
+    }
+
+    #[test]
+    fn persistent_writer_buffers_fragmented_multiline_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("launcher.log");
+        let sink = RedactingFileWriter::new(File::create(&path).unwrap());
+        {
+            let mut writer = sink.make_writer();
+            writer
+                .write_all(br#"diagnostic={"token":["first-"#)
+                .unwrap();
+            writer
+                .write_all(b"\nsecret\",\"second-secret\"],\"password\":\"prefix\\")
+                .unwrap();
+            writer.write_all(b"\"suffix-secret\"}\n").unwrap();
+        }
+
+        let persisted = std::fs::read_to_string(path).unwrap();
+        for secret in ["first-secret", "second-secret", "suffix-secret"] {
+            assert!(!persisted.contains(secret), "secret survived: {secret}");
+        }
+        assert!(persisted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn persistent_writer_preserves_debug_diagnostics_while_redacting_urls_and_queries() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("launcher.log");
+        let sink = RedactingFileWriter::new(File::create(&path).unwrap());
+        {
+            let mut writer = sink.make_writer();
+            writeln!(
+                writer,
+                r#"Transport(reqwest::Error {{ url: "https://user:alpha-value:beta-value@downloads.example/", source: ConnectError("connection refused") }}) comma=https://user:alpha,beta@downloads.example/ semicolon=https://user:alpha;beta@downloads.example/ bracket=https://user:alpha]beta@downloads.example/ brace=https://user:alpha}}beta@downloads.example/ next=https://example.test/?token=query-secret&keep=this"#
+            )
+            .unwrap();
+        }
+
+        let persisted = std::fs::read_to_string(path).unwrap();
+        for secret in [
+            "alpha-value",
+            "beta-value",
+            "alpha,beta",
+            "alpha;beta",
+            "alpha]beta",
+            "alpha}beta",
+            "query-secret",
+        ] {
+            assert!(!persisted.contains(secret), "secret survived: {secret}");
+        }
+        assert!(persisted.contains("https://user:[REDACTED]@downloads.example/"));
+        assert!(persisted.contains("comma=https://user:[REDACTED]@downloads.example/"));
+        assert!(persisted.contains("semicolon=https://user:[REDACTED]@downloads.example/"));
+        assert!(persisted.contains("bracket=https://user:[REDACTED]@downloads.example/"));
+        assert!(persisted.contains("brace=https://user:[REDACTED]@downloads.example/"));
+        assert!(persisted.contains("https://example.test/?token=[REDACTED]&keep=this"));
+        assert!(persisted.contains("source: ConnectError(\"connection refused\")"));
+    }
+
+    #[test]
+    fn ui_failure_persists_context_and_redacts_sensitive_values() {
+        let temp = tempfile::tempdir().unwrap();
+        for (name, environment) in [("default", None), ("coarse", Some("warn"))] {
+            let path = temp.path().join(format!("{name}.log"));
+            let sink = RedactingFileWriter::new(File::create(&path).unwrap());
+            let subscriber = tracing_subscriber::fmt()
+                .with_env_filter(log_filter_with_env(environment))
+                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                    LOG_TIMER_FORMAT.to_string(),
+                ))
+                .with_target(false)
+                .with_ansi(false)
+                .with_writer(sink)
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                record_ui_failure(
+                    "home",
+                    "launch",
+                    "Could not launch",
+                    r#"{"token":["first-secret","second-secret"],"password":"prefix\"suffix-secret"}"#,
+                    "download=https://user:secret-value@downloads.example/",
+                );
+            });
+
+            let persisted = std::fs::read_to_string(path).unwrap();
+            let timestamp = persisted.split(']').next().unwrap();
+            assert!(timestamp.contains(" +") || timestamp.contains(" -"));
+            assert!(persisted.contains("page=home"));
+            assert!(persisted.contains("action=launch"));
+            assert!(persisted.contains("displayed_message=Could not launch"));
+            assert!(
+                persisted.contains("context=download=https://user:[REDACTED]@downloads.example/")
+            );
+            assert!(persisted.contains("version="));
+            assert!(persisted.contains("platform="));
+            for secret in [
+                "first-secret",
+                "second-secret",
+                "suffix-secret",
+                "secret-value",
+            ] {
+                assert!(!persisted.contains(secret), "secret survived: {secret}");
+            }
+        }
+    }
+
+    #[test]
+    fn escaped_auth_diagnostics_are_redacted_before_persistence_and_support_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let body = r#"{"password":"prefix\"suffix-secret","token":["first-secret","second-secret"],"note":"diagnostic kept"}"#;
+        let error = crate::auth::client::AuthClientError::Malformed(format!(
+            "missing session_id; body excerpt: {body}"
+        ));
+        let frontend = serde_json::json!({ "kind": "server", "message": error.to_string() });
+        for (name, diagnostic) in [
+            ("native", format!("{error:?}")),
+            ("frontend", frontend.to_string()),
+        ] {
+            let path = temp.path().join(format!("{name}.log"));
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(RedactingFileWriter::new(File::create(&path).unwrap()))
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                if name == "native" {
+                    tracing::error!(diagnostic = ?error, "auth failure translated");
+                } else {
+                    record_ui_failure("home", "log in", "Could not log in", &diagnostic, "");
+                }
+            });
+            let persisted = std::fs::read_to_string(&path).unwrap();
+            let support = read_log_snapshot(&path, SUPPORT_LOG_MAX_BYTES).unwrap();
+            for text in [&persisted, &support.content] {
+                for secret in ["prefix", "suffix-secret", "first-secret", "second-secret"] {
+                    assert!(!text.contains(secret), "{name} retained {secret}: {text}");
+                }
+                assert!(text.contains("[REDACTED]"));
+                assert!(text.contains("missing session_id"));
+                assert!(text.contains("diagnostic kept"));
+            }
+        }
     }
 
     #[test]

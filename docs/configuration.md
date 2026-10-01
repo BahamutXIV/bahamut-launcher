@@ -232,8 +232,7 @@ rejects a second launch during startup or play. `content_root` overrides the
 HTTPS host in the shipped delivery manifest without changing trusted content
 identities. The default download cache directory is
 `<Documents>/XIVLegacy_Downloads`. Setting `download_cache_dir` replaces that
-default. The launcher also accepts `patch_download_dir` for the same setting
-when `download_cache_dir` is absent. The packaged loader and `bahamut.dll`
+default. The packaged loader and `bahamut.dll`
 are launcher components included by default rather than settings for players.
 `native_resolution_override` belongs to the launcher and defaults to `false` when
 absent. When enabled, Play uses the physical resolution of the explicitly
@@ -265,8 +264,8 @@ optional override for the verified complete client download cache. Misc keeps th
 Install Location path row, manual User Settings and Macros, Extensions backups,
 the backup and state folder actions, and the action for the screenshots
 folder. Launcher gamepad options remain on the dedicated Gamepad page. On
-Windows, its XIV Config action opens the installed retail configuration
-utility for settings outside the launcher's mapped surface.
+Windows, matching XIV Config actions on Gamepad and Misc open the installed
+retail configuration utility for settings outside the launcher's mapped surface.
 Display mode accepts `windowed`, `borderless`, or `fullscreen`. Multisampling
 accepts `none`, `2x`, `4x`, or `8x`. On Windows, Borderless uses the retail
 client's windowed configuration value and enables the packaged runtime's
@@ -554,8 +553,9 @@ the first existing package file for a safe relative request and otherwise calls
 the original client open with its original path. It never copies or modifies
 the installed DAT tree. Packages apply only to launches that load the client
 module, as listed in [Platform support](extensions.md#platform-support).
-The Dats-Overlay detail editor shows package controls,
-the match order, and conflicts where enabled packages contain the same path.
+The Dats-Overlay detail editor shows package controls and the match order. If
+enabled packages contain the same path, the first package in match order
+supplies it; the launcher does not report path overlaps.
 
 Server sections must be contiguous from `[server.1]`, display names must be
 unique, and `[servers] selected` must match one display name exactly. `host` is

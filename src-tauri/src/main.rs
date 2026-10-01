@@ -32,12 +32,12 @@ use commands::{
     install_status, launch_config_tool, launch_game, launcher_update_restart_available,
     launcher_version, list_news, login, logout, open_extension_folder, open_external,
     open_launcher_log, pause_game_repair, pause_install, pick_directory, pick_install_dir,
-    register, reorder_dat_package, reset_install, restore_backup, resume_game_repair,
-    resume_install, save_server_profile, set_addon_enabled, set_borderless_monitor,
-    set_camera_zoom_selection, set_close_on_game_start, set_dat_package_enabled,
-    set_discord_rpc_enabled, set_game_settings, set_native_resolution_override,
-    set_object_distance_selection, set_screenshot_enabled, set_selected_server, start_game_repair,
-    validate_session,
+    record_ui_failure, register, reorder_dat_package, reset_install, restore_backup,
+    resume_game_repair, resume_install, save_server_profile, set_addon_enabled,
+    set_borderless_monitor, set_camera_zoom_selection, set_close_on_game_start,
+    set_dat_package_enabled, set_discord_rpc_enabled, set_game_settings,
+    set_native_resolution_override, set_object_distance_selection, set_screenshot_enabled,
+    set_selected_server, start_game_repair, validate_session,
 };
 use shell_config::{load_dats_config, load_extensions_config, load_screenshot_config};
 use state::{BackupIpcState, ContentIpcState, GameIpcState};
@@ -337,6 +337,7 @@ fn main() {
             list_news,
             open_external,
             open_launcher_log,
+            record_ui_failure,
             create_backup,
             restore_backup,
             open_extension_folder,

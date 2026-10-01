@@ -1,4 +1,5 @@
 import { tauriInvoke, invoke } from './runtime.js';
+import { recordFailure, recordPollingFailure, pollingRecovered } from './feedback.js';
 
 const repairState = {
   status:null,
@@ -11,11 +12,12 @@ async function refreshGameRepairStatus() {
   const revision = ++repairState.revision;
   try {
     const status = await invoke('game_repair_status');
+    pollingRecovered('home/repair', 'read repair status');
     if (revision === repairState.revision && !(status.phase === 'idle' && repairState.status?.phase === 'error')) {
       repairState.status = status;
     }
   } catch (error) {
-    console.error('Unable to read game repair status.', error);
+    recordPollingFailure('home/repair', 'read repair status', error, 'Couldn\'t read game repair status.');
   }
   return repairState.status;
 }
@@ -33,7 +35,7 @@ async function startGameRepair() {
       is_terminal:true,
       error:error?.message || String(error),
     };
-    console.error('Unable to start game repair.', error);
+    recordFailure('home/repair', 'start repair', error, repairState.status.error);
   } finally {
     repairState.starting = false;
   }
@@ -47,7 +49,7 @@ async function controlGameRepair(action) {
     await invoke(`${action}_game_repair`);
     await refreshGameRepairStatus();
   } catch (error) {
-    console.error(`Unable to ${action} game repair.`, error);
+    recordFailure('home/repair', `${action} repair`, error, `Couldn't ${action} game repair.`);
   }
   return repairState.status;
 }

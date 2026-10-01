@@ -16,7 +16,8 @@ The launcher writes its native structured transcript to
 [macOS app layout](configuration.md#macos-app-layout) and
 [Linux package layout](configuration.md#linux-package-layout) for the state
 root on each platform). Use the Help button in the launcher to view the newest
-256 KiB, copy the displayed snapshot, and see the canonical path. The support
+256 KiB. Copy Logs refreshes the transcript and waits for pending failure
+entries before copying it. Open Logs opens the canonical file. The support
 view contains launcher events only. Wine output and game chat logs remain
 separate sources. See the
 [portable launcher tree](configuration.md#portable-launcher-tree) for the chat
@@ -32,6 +33,24 @@ launcher/runtime artifacts, attached displays, and Home lifecycle transitions.
 The launcher keeps these INFO events even when a coarse inherited
 `RUST_LOG=warn` is set.
 `RUST_LOG` directives for a target can still request additional detail.
+
+Frontend failures also append a synchronous ERROR event with the page, action,
+displayed message, diagnostic, and context that the UI reported. These events
+include the launcher version and host platform so a newly copied support log
+retains the runtime context for the failure.
+
+Page feedback reserves space for one or two short lines at the bottom of the
+left card in two-column layouts and in the affected card when cards stack.
+Profiles uses the left card's spare space. Account creation uses the message
+area above Create Account. Extensions shows feedback above the folder-button
+card in both layouts, keeping library and package controls in place.
+Login and launch failures share the Account Login card's feedback area above
+Login or Logout. Login
+feedback follows Remember Login. Leaving a page or Settings tab
+clears its visible messages; a pending operation can still record its failure
+without bringing the message back. Technical failures direct players to Help
+for logs to share with support. Help reports its own errors
+beneath the support text and copy confirmation beneath Copy Logs and Open Logs. Successful Settings saves remain silent.
 
 Credentials, authorization values, bearer tokens, and launcher session IDs are
 redacted before persistence and again before the Help view receives the log.

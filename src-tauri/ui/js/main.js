@@ -3,6 +3,9 @@ import { renderChoice, setNestedValue, queueGameSettingsUpdate, queueBorderlessM
 import { hydrateExtensions, renderExtensionLibrary } from './extensions.js';
 import { repairState, refreshGameRepairStatus, startGameRepair, controlGameRepair } from './game-repair.js';
 import { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshInstallSnapshot, refreshHomeStatus, restoreSession, chooseInstallFolder, startInstall, launchGame, handleSettingsAction } from './home.js';
+import { SUPPORT_COPY, initializeFeedback, feedbackToken, feedbackCurrent, clearFeedback, showFeedback, leaveFeedback, reportFailure, recordFailure, flushFailureLogs } from './feedback.js';
+
+initializeFeedback();
 
 let activePrimaryRoute = 'home';
 const PROFILE_SUCCESS_MS = 2500;
@@ -17,29 +20,22 @@ function setProfileFeedback(element, message, tone = '') {
   const pending = profileFeedbackTimers.get(element);
   if (pending) clearTimeout(pending);
   profileFeedbackTimers.delete(element);
-  element.textContent = message;
-  if (tone) element.dataset.tone = tone;
-  else delete element.dataset.tone;
+  showFeedback(element, message, tone);
   if (message && tone === 'success') {
     profileFeedbackTimers.set(element, setTimeout(() => {
-      element.textContent = '';
-      delete element.dataset.tone;
+      clearFeedback(element, message);
       profileFeedbackTimers.delete(element);
     }, PROFILE_SUCCESS_MS));
   }
 }
 
-function setBackupStatus(message, tone = '') {
-  const status = document.querySelector('#settings-backup-status');
+function setBackupStatus(status, message, tone = '') {
   if (backupStatusTimer) clearTimeout(backupStatusTimer);
   backupStatusTimer = null;
-  status.textContent = message;
-  if (tone) status.dataset.tone = tone;
-  else delete status.dataset.tone;
+  showFeedback(status, message, tone);
   if (message && tone === 'success') {
     backupStatusTimer = setTimeout(() => {
-      status.textContent = '';
-      delete status.dataset.tone;
+      clearFeedback(status, message);
       backupStatusTimer = null;
     }, BACKUP_STATUS_MS);
   }
@@ -102,23 +98,26 @@ async function runBackupAction(button) {
   backupBusy = true;
   const action = button.dataset.backupAction;
   const target = button.dataset.backupTarget;
+  const feedback = feedbackToken(button);
+  const label = target === 'user-settings' ? 'User Settings and Macros' : 'Extensions';
+  let focusAfterRequest = null;
   try {
     if (action === 'restore' && !(await confirmRestore(target))) return;
     document.querySelectorAll('[data-backup-action]').forEach(control => { control.disabled = true; });
-    const label = target === 'user-settings' ? 'User Settings and Macros' : 'Extensions';
-    setBackupStatus(action === 'create' ? `Creating ${label} backup...` : `Restoring ${label}...`);
+    focusAfterRequest = document.activeElement;
+    setBackupStatus(feedback, action === 'create' ? `Creating ${label} backup...` : `Restoring ${label}...`);
     const message = await invoke(action === 'create' ? 'create_backup' : 'restore_backup', { target });
-    if (action === 'restore' && target === 'user-settings') await hydrateSettings();
-    if (action === 'restore' && target === 'extensions') await hydrateExtensions();
-    setBackupStatus(message, 'success');
+    if (action === 'restore' && target === 'user-settings') await hydrateSettings(feedback);
+    if (action === 'restore' && target === 'extensions') await hydrateExtensions(feedback);
+    setBackupStatus(feedback, message, 'success');
   } catch (error) {
-    setBackupStatus(error.message || String(error), 'error');
+    reportFailure(feedback, `${action === 'create' ? 'back up' : 'restore'} ${label}`, error, { context:`target=${target}` });
   } finally {
     backupBusy = false;
     document.querySelectorAll('[data-backup-action]').forEach(control => { control.disabled = false; });
     const focusTarget = settingsDialogOpener || button;
     settingsDialogOpener = null;
-    focusTarget?.focus({ preventScroll:true });
+    if (feedbackCurrent(feedback) && (document.activeElement === focusAfterRequest || document.activeElement === button)) focusTarget?.focus({ preventScroll:true });
   }
 }
 
@@ -131,8 +130,8 @@ let registerBusy = false;
 const registerSubmitErrors = {
   'username-taken': 'That username is already taken.',
   'rate-limited': 'Too many attempts. Wait a few minutes.',
-  network: 'Server unavailable.',
-  'create-failed': 'Account creation failed. Create a ticket on Discord.',
+  network: `Couldn't reach the server to create your account. ${SUPPORT_COPY}`,
+  'create-failed': `Couldn't create your account. ${SUPPORT_COPY}`,
 };
 
 function registerValidation() {
@@ -157,7 +156,7 @@ function renderRegisterValidation(clearSubmitError = false) {
     input.setAttribute('aria-invalid', String(Boolean(message)));
   }
   document.querySelector('.register-submit').disabled = registerBusy || !validation.complete;
-  if (clearSubmitError) document.querySelector('#register-alert').textContent = '';
+  if (clearSubmitError) clearFeedback(feedbackToken('#register-form'));
   return validation;
 }
 
@@ -167,17 +166,20 @@ function setRegisterBusy(busy) {
   document.querySelector('.register-submit').disabled = busy || !validation.complete;
 }
 
-function renderRegisterSubmitError(error) {
+function renderRegisterSubmitError(error, feedback) {
   const fieldName = error && error.kind === 'username-invalid' ? 'username' : error && error.kind === 'password-invalid' ? 'password' : '';
   if (fieldName && error.message) {
+    recordFailure('register', 'create account', error, error.message);
+    if (!feedbackCurrent(feedback)) return;
     document.querySelector(`#register-${fieldName}-error`).textContent = error.message;
     registerFields[fieldName].setAttribute('aria-invalid', 'true');
     return;
   }
-  document.querySelector('#register-alert').textContent = registerSubmitErrors[error && error.kind] || 'Something went wrong. Create a ticket on Discord.';
+  reportFailure(feedback, 'create account', error, { message:registerSubmitErrors[error && error.kind] || `Couldn't create your account. ${SUPPORT_COPY}` });
 }
 
 function activateRoute(route, focusTab = false) {
+  if (document.querySelector('[data-screen][data-active]')?.dataset.screen !== route) leaveFeedback();
   resetGamepadModes();
   activePrimaryRoute = route;
   document.querySelectorAll('[data-route]').forEach(tab => {
@@ -192,11 +194,15 @@ function activateRoute(route, focusTab = false) {
   document.querySelector('[data-utility="gamepad"]').setAttribute('aria-pressed', 'false');
   document.querySelector('[data-utility="help"]').setAttribute('aria-pressed', 'false');
   updateGamepadPrompts(navigator.getGamepads ? [...navigator.getGamepads()] : []);
-  if (route === 'settings') hydrateSettings();
+  if (route === 'settings') {
+    hydrateSettings();
+    if (document.querySelector('[data-settings-pane="misc"][data-active]')) hydrateConfigToolSupport();
+  }
   if (route === 'extensions') hydrateExtensions();
 }
 
 function activateGamepadScreen(focusRegion = false) {
+  if (!document.querySelector('[data-screen="gamepad"][data-active]')) leaveFeedback();
   resetGamepadModes();
   document.querySelectorAll('[data-route]').forEach(tab => {
     tab.setAttribute('aria-selected', 'false');
@@ -208,11 +214,12 @@ function activateGamepadScreen(focusRegion = false) {
   document.querySelector('[data-utility="gamepad"]').setAttribute('aria-pressed', 'true');
   document.querySelector('[data-utility="help"]').setAttribute('aria-pressed', 'false');
   updateGamepadPrompts(navigator.getGamepads ? [...navigator.getGamepads()] : []);
-  hydrateGamepadPage();
+  hydrateConfigToolSupport();
   if (focusRegion) focusAdjacentRegion(1);
 }
 
 function activateHelpScreen(focusRegion = false) {
+  if (!document.querySelector('[data-screen="help"][data-active]')) leaveFeedback();
   resetGamepadModes();
   document.querySelectorAll('[data-route]').forEach(tab => {
     tab.setAttribute('aria-selected', 'false');
@@ -229,6 +236,7 @@ function activateHelpScreen(focusRegion = false) {
 }
 
 function activateSettingsTab(name, focus = false) {
+  if (!document.querySelector(`[data-settings-pane="${name}"][data-active]`)) leaveFeedback();
   document.querySelectorAll('[data-settings-tab]').forEach(tab => {
     const selected = tab.dataset.settingsTab === name;
     tab.setAttribute('aria-selected', String(selected));
@@ -237,6 +245,7 @@ function activateSettingsTab(name, focus = false) {
   });
   document.querySelectorAll('[data-settings-pane]').forEach(pane => pane.toggleAttribute('data-active', pane.dataset.settingsPane === name));
   hydrateSettings();
+  if (name === 'misc') hydrateConfigToolSupport();
 }
 function syncThemeToggle() {
   const night = body.dataset.theme === 'dark';
@@ -244,45 +253,72 @@ function syncThemeToggle() {
   document.querySelector('.brand img').src = `assets/brand-logo-${night ? 'night' : 'day'}.png`;
 }
 
-async function hydrateGamepadPage() {
+async function hydrateConfigToolSupport() {
+  const buttons = [...document.querySelectorAll('[data-settings-action="open-config"]')];
+  if (!buttons.length) return;
+  const activeButton = buttons.find(button => button.closest('[data-screen][data-active]')
+    && (!button.closest('[data-settings-pane]') || button.closest('[data-settings-pane][data-active]')))
+    || buttons[0];
+  const feedback = feedbackToken(activeButton);
   updateControllerLabel(navigator.getGamepads ? [...navigator.getGamepads()] : []);
-  const button = document.querySelector('#gamepad-config-tool-button');
   if (!tauriInvoke) {
-    button.hidden = true;
+    if (feedbackCurrent(feedback)) buttons.forEach(button => { button.hidden = true; });
     return;
   }
   try {
-    button.hidden = !(await invoke('config_tool_supported'));
-  } catch {
-    button.hidden = true;
+    const supported = await invoke('config_tool_supported');
+    if (feedbackCurrent(feedback)) buttons.forEach(button => { button.hidden = !supported; });
+  } catch (error) {
+    if (feedbackCurrent(feedback)) buttons.forEach(button => { button.hidden = true; });
+    reportFailure(feedback, 'check XIV Config availability', error);
   }
 }
-async function hydrateHelpPage() {
+function helpLogTranscript() {
   const log = document.querySelector('#help-log');
-  document.querySelector('#help-status').textContent = '';
-  log.textContent = 'Loading launcher logs...';
+  return log?.querySelector('[data-log-content]');
+}
+async function hydrateHelpPage() {
+  const feedback = feedbackToken('#help-log');
+  clearFeedback(feedback);
+  const transcript = helpLogTranscript();
+  if (transcript) transcript.textContent = 'Loading launcher logs...';
   try {
+    await flushFailureLogs();
     const snapshot = await invoke('get_launcher_log');
-    log.textContent = normalizeLauncherLog(snapshot.content);
+    if (feedbackCurrent(feedback)) {
+      const currentTranscript = helpLogTranscript();
+      if (currentTranscript) currentTranscript.textContent = normalizeLauncherLog(snapshot.content);
+    }
   } catch (error) {
-    log.textContent = (error && error.message) || 'Unable to load launcher logs.';
+    if (feedbackCurrent(feedback)) {
+      const currentTranscript = helpLogTranscript();
+      if (currentTranscript) currentTranscript.textContent = 'Launcher logs could not be loaded.';
+    }
+    reportFailure(feedback, 'load launcher logs', error, { message:'Couldn\'t load launcher logs. Try again or contact support on Discord.' });
   }
 }
 
 async function copyHelpLog() {
-  const status = document.querySelector('#help-status');
-  status.textContent = '';
+  const feedback = feedbackToken('#help-log');
+  clearFeedback(feedback);
   try {
+    await flushFailureLogs();
+    const snapshot = await invoke('get_launcher_log');
+    const content = normalizeLauncherLog(snapshot.content);
+    if (feedbackCurrent(feedback)) {
+      const transcript = helpLogTranscript();
+      if (transcript) transcript.textContent = content;
+    }
     if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('Clipboard access is unavailable.');
-    await navigator.clipboard.writeText(document.querySelector('#help-log').textContent);
-    status.textContent = 'Logs copied to clipboard.';
+    await navigator.clipboard.writeText(content);
+    showFeedback(feedback, 'Logs copied to clipboard.', 'success');
   } catch (error) {
-    status.textContent = 'Unable to copy logs.';
-    console.error('Unable to copy launcher logs.', error);
+    reportFailure(feedback, 'copy launcher logs', error, { message:'Couldn\'t copy logs. Try Open Logs or contact support on Discord.' });
   }
 }
 
 function activateProfilesScreen(focusRegion = false) {
+  if (!document.querySelector('[data-screen="profiles"][data-active]')) leaveFeedback();
   resetGamepadModes();
   document.querySelectorAll('[data-route]').forEach(tab => {
     tab.setAttribute('aria-selected', 'false');
@@ -299,21 +335,21 @@ function activateProfilesScreen(focusRegion = false) {
 }
 
 async function openHelpLogs() {
-  const status = document.querySelector('#help-status');
-  status.textContent = '';
+  const feedback = feedbackToken('#help-log');
+  clearFeedback(feedback);
   try {
     await invoke('open_launcher_log');
   } catch (error) {
-    status.textContent = 'Unable to open logs.';
-    console.error('Unable to open launcher logs.', error);
+    reportFailure(feedback, 'open launcher logs', error, { message:'Couldn\'t open logs. Try Copy Logs or contact support on Discord.' });
   }
 }
 
 async function hydrateProfiles() {
+  const feedback = feedbackToken('#profile-server-select');
   try {
     renderServerSettings(await invoke('get_server_settings'));
   } catch (error) {
-    setProfileFeedback(document.querySelector('#profile-server-select-status'), error.message || String(error), 'error');
+    reportFailure(feedback, 'load server profiles', error);
   }
 }
 document.addEventListener('click', event => {
@@ -321,12 +357,14 @@ document.addEventListener('click', event => {
   if (route) activateRoute(route.dataset.route);
   const link = event.target.closest('[data-link]');
   if (link) {
-    invoke('open_external', { target:link.dataset.link }).catch(error => { console.error('Unable to open external link.', error); });
+    const feedback = feedbackToken(link);
+    const target = link.dataset.link;
+    invoke('open_external', { target }).catch(error => reportFailure(feedback, `open ${target === 'discord' ? 'Discord' : 'YouTube'}`, error, { context:`target=${target}` }));
   }
   const settingsTab = event.target.closest('[data-settings-tab]');
   if (settingsTab) activateSettingsTab(settingsTab.dataset.settingsTab);
   const settingsAction = event.target.closest('[data-settings-action]');
-  if (settingsAction) handleSettingsAction(settingsAction.dataset.settingsAction);
+  if (settingsAction) handleSettingsAction(settingsAction.dataset.settingsAction, settingsAction);
   const gameFilesAction = event.target.closest('[data-game-files-action]');
   if (gameFilesAction?.dataset.gameFilesAction === 'repair') void runRepairInstall();
   const backupAction = event.target.closest('[data-backup-action]');
@@ -340,15 +378,15 @@ document.addEventListener('click', event => {
     const value = ['true', 'false'].includes(gameSettingChoice.dataset.gameSettingValue)
       ? gameSettingChoice.dataset.gameSettingValue === 'true'
       : gameSettingChoice.dataset.gameSettingValue;
-    queueGameSettingsUpdate(next => setNestedValue(next, path, value));
+    queueGameSettingsUpdate(next => setNestedValue(next, path, value), gameSettingChoice);
   }
   const launcherSettingChoice = event.target.closest('[data-launcher-setting-choice]');
   if (launcherSettingChoice) {
     const value = launcherSettingChoice.dataset.launcherSettingValue === 'true';
     if (launcherSettingChoice.dataset.launcherSettingChoice === 'close_on_game_start') {
-      queueLauncherBehaviorUpdate(value);
+      queueLauncherBehaviorUpdate(value, launcherSettingChoice);
     } else if (launcherSettingChoice.dataset.launcherSettingChoice === 'native_resolution_override') {
-      queueNativeResolutionOverrideUpdate(value);
+      queueNativeResolutionOverrideUpdate(value, launcherSettingChoice);
     }
   }
   const gamepadChoice = event.target.closest('[data-gamepad-choice]');
@@ -377,13 +415,14 @@ document.addEventListener('click', event => {
     home.authEndpoint = '';
     home.expiresAt = 0;
     localStorage.removeItem('bahamut-session');
-    invoke('logout', { token, server, authEndpoint }).catch(() => {});
+    const feedback = feedbackToken('#session-card');
+    invoke('logout', { token, server, authEndpoint }).catch(error => reportFailure(feedback, 'log out on the server', error, { context:`server=${server || ''}` }));
     refreshHomeStatus();
   }
 });
 
 document.querySelector('#profile-server-select').addEventListener('change', async event => {
-  const status = document.querySelector('#profile-server-select-status');
+  const status = feedbackToken(event.currentTarget);
   setProfileFeedback(status, '');
   try {
     const serverSettings = await invoke('set_selected_server', { displayName:event.target.value });
@@ -391,7 +430,7 @@ document.querySelector('#profile-server-select').addEventListener('change', asyn
     if (!home.token) home.server = serverSettings.selected_server;
   } catch (error) {
     if (settingsState.serverSettings) renderServerSettings(settingsState.serverSettings);
-    setProfileFeedback(status, error.message || String(error), 'error');
+    reportFailure(status, 'select server profile', error);
   }
 });
 
@@ -411,10 +450,10 @@ document.querySelectorAll('[data-game-setting]').forEach(control => {
       queueGameSettingsUpdate(next => {
         next.width = width;
         next.height = height;
-      });
+      }, event.currentTarget);
     } else {
       const numeric = ['graphics.general_quality', 'graphics.background_quality'].includes(path);
-      queueGameSettingsUpdate(next => setNestedValue(next, path, numeric ? Number(value) : value));
+      queueGameSettingsUpdate(next => setNestedValue(next, path, numeric ? Number(value) : value), event.currentTarget);
     }
   });
 });
@@ -434,7 +473,7 @@ document.querySelector('#borderless-monitor').addEventListener('change', event =
 
 document.querySelector('#profile-form').addEventListener('submit', async event => {
   event.preventDefault();
-  const status = document.querySelector('#profile-save-status');
+  const status = feedbackToken(event.currentTarget);
   setProfileFeedback(status, '');
   const form = event.currentTarget;
   const profile = {
@@ -451,7 +490,7 @@ document.querySelector('#profile-form').addEventListener('submit', async event =
     if (!home.token && home.server === previous) home.server = serverSettings.selected_server;
     setProfileFeedback(status, 'Server profile saved.', 'success');
   } catch (error) {
-    setProfileFeedback(status, error.message || String(error), 'error');
+    reportFailure(status, 'save server profile', error, { context:`host=${profile.host}; auth_port=${profile.auth_port}; lobby_port=${profile.lobby_port}` });
   }
 });
 
@@ -491,7 +530,7 @@ document.querySelector('#lifecycle-cancel').addEventListener('click', async () =
     await controlGameRepair('cancel');
     renderLifecycleStrip();
   } else {
-    await invoke('cancel_install').catch(() => {});
+    await invoke('cancel_install').catch(error => recordFailure('home/install', 'cancel install', error, 'Couldn\'t cancel installation.'));
   }
 });
 
@@ -508,25 +547,28 @@ document.querySelector('#lifecycle-pause').addEventListener('click', async event
   } catch (error) {
     const alert = document.querySelector('#install-home-alert');
     if (alert) alert.textContent = error.message || String(error);
+    recordFailure('home/install', resume ? 'resume install' : 'pause install', error, alert?.textContent || 'Couldn\'t pause installation.');
   }
 });
 
 document.querySelector('#register-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (registerBusy) return;
-  const alert = document.querySelector('#register-alert');
+  const feedback = feedbackToken(event.currentTarget);
   const username = document.querySelector('#register-username').value.trim();
   const password = document.querySelector('#register-password').value;
   if (!renderRegisterValidation().complete) return;
-  alert.textContent = '';
+  clearFeedback(feedback);
   setRegisterBusy(true);
   try {
     await invoke('register', { username, password, server:selectedServer() });
     home.username = username;
-    activateRoute('home');
-    renderHome();
+    if (feedbackCurrent(feedback)) {
+      activateRoute('home');
+      renderHome();
+    }
   } catch (error) {
-    renderRegisterSubmitError(error);
+    renderRegisterSubmitError(error, feedback);
   } finally {
     setRegisterBusy(false);
   }
@@ -553,7 +595,13 @@ extensionSearch.addEventListener('input', event => {
   renderExtensionLibrary();
 });
 document.querySelectorAll('[data-extension-folder]').forEach(button => {
-  button.addEventListener('click', () => invoke('open_extension_folder', { target:button.dataset.extensionFolder }).catch(error => { console.error('Unable to open extension folder.', error); }));
+  button.addEventListener('click', () => {
+    const feedback = feedbackToken(button);
+    const target = button.dataset.extensionFolder;
+    const label = { plugins:'Plugins', addons:'Addons', backups:'Backup', install:'Install', screenshots:'Screenshots' }[target];
+    clearFeedback(feedback);
+    invoke('open_extension_folder', { target }).catch(error => reportFailure(feedback, `open ${label} Folder`, error, { context:`target=${target}` }));
+  });
 });
 document.querySelector('#settings-confirmation-cancel').addEventListener('click', () => closeSettingsConfirmation(false));
 document.querySelector('#settings-confirmation-confirm').addEventListener('click', () => closeSettingsConfirmation(true));
@@ -569,14 +617,18 @@ const tauriListen = window.__TAURI__?.event?.listen;
 if (tauriListen) {
   tauriListen('launcher-closing', () => {
     if (!closingDialog.open) closingDialog.showModal();
-  }).catch(error => console.error('Unable to listen for launcher closing.', error));
+  }).catch(error => recordFailure('launcher', 'listen for launcher closing', error, 'Couldn\'t receive launcher closing updates.'));
 }
 document.querySelectorAll('[data-window]').forEach(button => {
-  button.addEventListener('click', () => invoke('control_window', { action:button.dataset.window }).catch(error => { console.error('Unable to control the launcher window.', error); }));
+  button.addEventListener('click', () => {
+    const feedback = feedbackToken(button);
+    const action = button.dataset.window;
+    invoke('control_window', { action }).catch(error => reportFailure(feedback, `${action} the launcher window`, error, { context:`window_action=${action}` }));
+  });
 });
 document.querySelector('[data-window-drag-region]').addEventListener('pointerdown', event => {
   if (event.button !== 0 || event.target.closest('[data-window-no-drag], button, a, input, select, textarea, [role="button"]')) return;
-  invoke('control_window', { action:'start-dragging' }).catch(error => { console.error('Unable to drag the launcher window.', error); });
+  invoke('control_window', { action:'start-dragging' }).catch(error => recordFailure('launcher', 'drag launcher window', error, 'Couldn\'t move the launcher window.'));
 });
 const savedTheme = localStorage.getItem('bahamut-theme');
 if (savedTheme === 'light' || savedTheme === 'dark') body.dataset.theme = savedTheme;
@@ -1238,6 +1290,7 @@ window.addEventListener('gamepaddisconnected', event => {
 });
 
 async function boot() {
+  const feedback = feedbackToken('#session-card');
   if (!tauriInvoke) {
     console.error('Launcher backend is unavailable.');
     return;
@@ -1245,7 +1298,7 @@ async function boot() {
   try {
     await invoke('fit_window_to_work_area', { availableWidth:window.screen.availWidth, availableHeight:window.screen.availHeight });
   } catch (error) {
-    console.error('Unable to fit the launcher window.', error);
+    recordFailure('launcher', 'fit launcher window', error, 'Couldn\'t fit the launcher window.', `available_width=${window.screen.availWidth}; available_height=${window.screen.availHeight}`);
   }
   try {
     const [serverSettings, news, version] = await Promise.all([invoke('get_server_settings'), invoke('list_news'), invoke('launcher_version')]);
@@ -1257,7 +1310,7 @@ async function boot() {
     await restoreSession();
     await refreshHomeStatus();
   } catch (error) {
-    console.error('Unable to initialize the launcher.', error);
+    reportFailure(feedback, 'initialize the launcher', error);
   }
 }
 

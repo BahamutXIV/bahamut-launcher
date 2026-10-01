@@ -54,7 +54,10 @@ pub(crate) async fn launch_game(
         Ok::<_, AuthError>((close, pid))
     })
     .await
-    .map_err(|error| AuthError::server(format!("Launch worker failed: {error}")))??;
+    .map_err(|error| {
+        tracing::error!(diagnostic = ?error, "launch worker failed");
+        AuthError::server(format!("Launch worker failed: {error}"))
+    })??;
     tracing::info!(pid, "launcher now owns the active game session");
     if close_on_game_start
         && let Some(window) = app.get_webview_window("main")
@@ -339,6 +342,7 @@ pub(crate) fn resolve_profile_from_config(
 }
 
 pub(crate) fn translate_client_error(err: AuthClientError, op: AuthOp) -> AuthError {
+    tracing::error!(operation = ?op, diagnostic = ?err, "auth failure translated");
     match err {
         AuthClientError::SessionEndpointMismatch => AuthError::with_message(
             "session-endpoint-changed",
@@ -411,12 +415,12 @@ pub(crate) async fn logout(
     let client = match AuthClient::for_session(&profile.api_base(), auth_endpoint.as_deref()) {
         Ok(client) => client,
         Err(err) => {
-            tracing::warn!(error = %err, "logout: could not build auth client");
+            tracing::error!(diagnostic = ?err, "logout: could not build auth client");
             return Ok(());
         }
     };
     if let Err(err) = client.logout(&token).await {
-        tracing::info!(error = %err, "logout: server-side revoke failed (best-effort)");
+        tracing::error!(diagnostic = ?err, "logout: server-side revoke failed (best-effort)");
     }
     Ok(())
 }
