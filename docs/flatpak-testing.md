@@ -114,10 +114,11 @@ The tester grants only these runtime permissions:
 | `--socket=pulseaudio` | game audio |
 | `--device=dri` | runtime graphics device access |
 | `--allow=multiarch` | 32-bit PE execution (game and `bahamut-loader.exe`) under the WoW64 Wine engine; without it the Wine prefix is 64-bit only |
+| `--filesystem=~/Games:create` | writable game destinations and sibling staging directories under `~/Games`; Flatpak creates `~/Games` when absent |
 
-No host filesystem, broad home directory, i386, or GL32 permission is part of
-this tester manifest. If a test requires one, record the concrete failure
-before proposing a manifest change.
+Host filesystem access is limited to `~/Games` and its subdirectories.
+Flatpak applies this declared permission when starting the installed package;
+the running launcher does not grant itself new filesystem permissions.
 
 ### Game directory selection
 
@@ -134,22 +135,39 @@ before publishing it. A portal export of the selected game folder does not
 provide the required sibling access. Restarting retains the selected
 destination; it does not restore the default path.
 
-To test a custom internal-storage directory, close the launcher, create an
-empty game folder, and grant its parent using a
-[Flatpak override](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-override):
+To test a custom internal-storage directory under the package's `~/Games`
+permission:
+
+1. Create an empty `Bahamut` folder inside `~/Games` using the desktop file
+   manager.
+2. Use Home's Path action to select `~/Games/Bahamut`.
+3. Check that the displayed destination is its ordinary absolute filesystem
+   path before pressing Install. If it points into the document portal,
+   record that path and the launcher log.
+4. Complete installation, exit the launcher, and restart it. Confirm that it
+   still selects the installed client.
+
+Use a test profile without filesystem overrides to verify that access comes
+from the package. Record the installed permissions and both the global and
+application-specific override layers:
 
 ```bash
-mkdir -p "$HOME/Games/Bahamut"
-flatpak override --user --filesystem="$HOME/Games" io.github.BahamutXIV.Launcher.Tester
-flatpak run io.github.BahamutXIV.Launcher.Tester
+flatpak info --show-permissions io.github.BahamutXIV.Launcher.Tester
+flatpak override --show
+flatpak override --show io.github.BahamutXIV.Launcher.Tester
+flatpak override --user --show
+flatpak override --user --show io.github.BahamutXIV.Launcher.Tester
 ```
 
-Use Home's Path action to select `~/Games/Bahamut` again. Check that the
-displayed destination is its ordinary absolute filesystem path before
-pressing Install. If it still points into the document portal, record that
-path and the launcher log; the override has not resolved the picker problem.
-Record any override alongside the device results. An SD-card or external-drive
-test needs its actual mounted parent granted and the same path check.
+Confirm that the installed permissions include `~/Games` and that no override
+grants or denies filesystem access for this retest. If `~/Games` was absent
+before starting the package, confirm that Flatpak created it.
+
+An SD-card or external-drive destination needs its actual mounted parent
+granted using a
+[Flatpak override](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-override)
+and the same displayed-path check. Record additional permissions alongside
+the concrete failure and device results.
 
 ## Deck evidence template
 
@@ -172,6 +190,9 @@ Rust/Cargo toolchain receipt:
 Wine engine version/hash:      Wine 11.18 [unverified]
 DXVK version/hash:             DXVK 3.0 [unverified]
 Client identity/build:         [unverified]
+Selected game destination:     [unverified]
+Filesystem overrides:          [unverified]
+Install with package permission:[unverified]
 WebView opened:                [unverified]
 Real client launch:            [unverified]
 x86 helper transaction:        [unverified]

@@ -14,6 +14,8 @@ finish-args:
   - --device=dri
   # Without multiarch the WoW64 Wine engine creates a 64-bit-only prefix and PE32 executables do not start.
   - --allow=multiarch
+  # Installation needs the game folder and its sibling staging directory.
+  - --filesystem=~/Games:create
 
 modules:
   - name: rustc
