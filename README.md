@@ -24,7 +24,8 @@ installation, and first launch steps.
 
 - Windows x86_64. The launcher installs missing WebView2 and x86 Visual C++
   runtimes when needed.
-- Linux x86_64 with glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. The
+- Linux x86_64. SteamOS and Steam Deck use the [Flatpak package](docs/flatpak.md).
+  The Linux archive requires glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. The
   launcher downloads its own Wine on the first game launch. The archive runs
   in place or installs with an application menu entry.
 - macOS on Apple Silicon or Intel as a universal app, with managed Wine

@@ -2,6 +2,10 @@
 
 ## First launch
 
+For SteamOS or Steam Deck, follow the [Flatpak guide](flatpak.md) to install
+the launcher bundle and choose a game directory. The steps below cover the
+release archives.
+
 1. Download the archive for your system from the
    [releases page](https://github.com/BahamutXIV/bahamut-launcher/releases).
    On Windows, extract the entire archive into a writable folder. On Linux,
@@ -119,8 +123,8 @@ X11 class is `Bahamut-launcher`. The pattern matches both.
 | Linux x86_64 | WebKitGTK 4.1, GTK 3, and glibc 2.35 or newer. The first game launch downloads a Wine engine; see [Linux Wine engine](configuration.md#linux-wine-engine). The tar.gz archive does not bundle system libraries. |
 | macOS, Apple Silicon or Intel | Universal app (`Bahamut Launcher.app`), distributed as a zip. Managed Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for the Wine engine. |
 
-Linux and macOS game launch and client extensions remain unverified against a
-live client. See
+SteamOS and Steam Deck use the [Flatpak package](flatpak.md). macOS game
+launch and client extensions remain unverified against a live client. See
 [platform support](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/extensions.md#platform-support)
 for limitations. The Linux archive targets glibc-based distributions; musl
 distributions are not supported.
@@ -135,7 +139,7 @@ extracted folder or the installed copy on Linux. Opening
 `Bahamut Launcher.app` on macOS keeps its files together automatically. On
 macOS, use `f1` through `f9` for Screenshot's `hotkey` in
 `~/.bahamut-launcher/config/plugins/screenshot/settings.ini` when the
-keyboard has no Print Screen key. Screenshot capture under Wine remains
+keyboard has no Print Screen key. Screenshot capture on macOS under Wine remains
 unverified.
 
 ## Portable archives

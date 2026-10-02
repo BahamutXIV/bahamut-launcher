@@ -36,7 +36,7 @@ platform:
 |---|---|
 | Windows | Implemented. The loader starts the client and loads `bahamut.dll` as described in the [Handshake](handshake.md#windows-launch). |
 | macOS | Implemented, unverified against a live client. When `bahamut-loader.exe` and `bahamut.dll` are in the launcher [install root](configuration.md#macos-app-layout) (`Contents/Resources` in the app, beside the executable in a portable tree), the loader runs under the managed Sikarugir Wine engine. |
-| Linux | Implemented, unverified against a live client. When `bahamut-loader.exe` and `bahamut.dll` are in the launcher [install root](configuration.md#linux-package-layout) (beside the executable, in the Linux package and in a portable tree), the loader runs under the [managed Wine engine](configuration.md#linux-wine-engine), or the Wine that `BAHAMUT_WINE` selects. When the engine cannot be installed or the host is not x86_64, it runs under the system `wine`. |
+| Linux | The [Flatpak package](flatpak.md) supports SteamOS and Steam Deck. When `bahamut-loader.exe` and `bahamut.dll` are in the launcher [install root](configuration.md#linux-package-layout) (beside the executable, in the Linux package and in a portable tree), the loader runs under the [managed Wine engine](configuration.md#linux-wine-engine), or the Wine that `BAHAMUT_WINE` selects. When the engine cannot be installed or the host is not x86_64, it runs under the system `wine`. |
 
 The [Handshake](handshake.md#wine-extension-launch) defines the Wine launch
 transaction, its logs, and the fallback used when either file is missing.
@@ -50,7 +50,7 @@ These limits apply on macOS and Linux:
 - Screenshot's default hotkey is `print_screen`, which Apple keyboards do not
   have. On macOS, choose a function key as described in
   [Screenshot settings](configuration.md#screenshot-settings). Capture
-  under Wine is unverified.
+  on macOS under Wine is unverified.
 - Enabled DAT packages, including custom packages, apply to every macOS or
   Linux launch that loads the module.
 - Launcher updates and the signed managed inventory cover the Windows package

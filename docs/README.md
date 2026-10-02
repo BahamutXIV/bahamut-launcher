@@ -10,6 +10,8 @@ behavior.
 
 - [Getting started](getting-started.md) - platform requirements, archive use,
   Linux install, first launch, and client requirements.
+- [Flatpak](flatpak.md) - SteamOS and Steam Deck installation, game
+  directories, package permissions, and reproducible builds.
 - [Troubleshooting](troubleshooting.md) - build, logs, Linux startup,
   configuration, install, authentication, and recovery diagnosis.
 - [Configuration](configuration.md) - portable files, the macOS app and Linux
@@ -46,8 +48,6 @@ used by the launcher and its boundaries. Players can usually skip them.
   ebuild for the Linux release archive.
 - [Linux archive README](../packaging/linux/README.md) - the `README.md` that
   ships inside the Linux release archive.
-- [Flatpak tester](flatpak-testing.md) - package build, runtime requirements,
-  sandbox checks, and Steam Deck evidence template.
 
 ## Public documentation policy
 

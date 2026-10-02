@@ -1,8 +1,11 @@
-# Flatpak S0 tester
+# Flatpak
 
-The S0 tester packages the native Linux launcher in the GNOME 50 Flatpak
-runtime. It is a reproducibility and runtime-boundary test artifact. It does
-not establish SteamOS or retail-client support.
+[Back to the documentation index](README.md)
+
+The Flatpak package runs Bahamut Launcher on SteamOS and Steam Deck using the
+GNOME 50 runtime and the launcher's managed Wine engine. Use
+[Installation](#installation) to install a bundle or [Build](#build) to
+produce one from source.
 
 The manifest uses app ID `io.github.BahamutXIV.Launcher.Tester` and branch
 `s0`. Its app payload is read from `/app/lib/bahamut-launcher`. The wrapper
@@ -77,7 +80,7 @@ python3 scripts/prepare-flatpak.py \
 The work directory is disposable. Do not point it at an existing non-empty
 directory.
 
-## Install and smoke test
+## Installation
 
 Install the produced bundle for the current user, then query the packaged
 launcher before opening its window:
@@ -90,20 +93,17 @@ flatpak run io.github.BahamutXIV.Launcher.Tester --version
 flatpak run io.github.BahamutXIV.Launcher.Tester
 ```
 
-Use a fresh Flatpak data directory for the first run. Confirm that the WebView
-opens, launcher state is written below
-`~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher`, and the
-Documents directory is present. A second run should retain the launcher state.
-Record failures with the bundle digest and the identity file beside the test
-notes.
+Launcher state is stored below
+`~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher`. Install or
+select the game client, choose a server profile, sign in, and choose Play.
 
 A window that opens but stays blank is covered in
-[Troubleshooting](troubleshooting.md). Inside the tester, pass the WebKitGTK
+[Troubleshooting](troubleshooting.md). For Flatpak, pass the WebKitGTK
 override as
 `flatpak run --env=WEBKIT_DISABLE_DMABUF_RENDERER=1 io.github.BahamutXIV.Launcher.Tester`
-and record that it was needed.
+when the blank-window workaround is needed.
 
-The tester grants only these runtime permissions:
+The package declares these runtime permissions:
 
 | Permission | Purpose |
 | --- | --- |
@@ -123,9 +123,8 @@ the running launcher does not grant itself new filesystem permissions.
 ### Game directory selection
 
 The default game destination is
-`~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher/game`. On a
-fresh profile, test this destination with Home's Install action before using
-Path to choose another folder.
+`~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher/game`. Use
+Home's Install action for this destination or Path to choose another folder.
 
 A selected path under `/run/user/<uid>/doc/` or `/run/flatpak/doc/` refers to
 the [document portal](https://flatpak.github.io/xdg-desktop-portal/docs/documents-and-fuse.html).
@@ -135,21 +134,27 @@ before publishing it. A portal export of the selected game folder does not
 provide the required sibling access. Restarting retains the selected
 destination; it does not restore the default path.
 
-To test a custom internal-storage directory under the package's `~/Games`
-permission:
+To install in a custom internal-storage directory under `~/Games`:
 
 1. Create an empty `Bahamut` folder inside `~/Games` using the desktop file
    manager.
 2. Use Home's Path action to select `~/Games/Bahamut`.
 3. Check that the displayed destination is its ordinary absolute filesystem
    path before pressing Install. If it points into the document portal,
-   record that path and the launcher log.
-4. Complete installation, exit the launcher, and restart it. Confirm that it
-   still selects the installed client.
+   include the path and launcher log in a support report.
+4. Complete installation, choose a server profile, sign in, and choose Play.
 
-Use a test profile without filesystem overrides to verify that access comes
-from the package. Record the installed permissions and both the global and
-application-specific override layers:
+An SD-card or external-drive destination needs its actual mounted parent
+granted using a
+[Flatpak override](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-override)
+and the same displayed-path check. Close the launcher before changing its
+permissions, then reopen it and select the directory again.
+
+## Checking package permissions
+
+When checking a filesystem-permission change, use a profile without
+filesystem overrides so access comes from the package. Inspect the installed
+permissions and both the global and application-specific override layers:
 
 ```bash
 flatpak info --show-permissions io.github.BahamutXIV.Launcher.Tester
@@ -160,50 +165,7 @@ flatpak override --user --show io.github.BahamutXIV.Launcher.Tester
 ```
 
 Confirm that the installed permissions include `~/Games` and that no override
-grants or denies filesystem access for this retest. If `~/Games` was absent
-before starting the package, confirm that Flatpak created it.
-
-An SD-card or external-drive destination needs its actual mounted parent
-granted using a
-[Flatpak override](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-override)
-and the same displayed-path check. Record additional permissions alongside
-the concrete failure and device results.
-
-## Deck evidence template
-
-Leave each value blank or mark it `unverified` until it is observed on the
-named device. This template records evidence; it does not make an acceptance
-claim.
-
-```text
-Tester branch: s0
-Bundle filename:
-Bundle SHA-256:
-Source commit:
-Source tree:
-Deck model:                    [unverified]
-SteamOS build:                 [unverified]
-Flatpak Platform branch/commit:[unverified]
-Flatpak SDK branch/commit:     [unverified]
-Graphics GL branches/commits:  25.08; 25.08-extra; 1.4 [unverified]
-Rust/Cargo toolchain receipt:
-Wine engine version/hash:      Wine 11.18 [unverified]
-DXVK version/hash:             DXVK 3.0 [unverified]
-Client identity/build:         [unverified]
-Selected game destination:     [unverified]
-Filesystem overrides:          [unverified]
-Install with package permission:[unverified]
-WebView opened:                [unverified]
-Real client launch:            [unverified]
-x86 helper transaction:        [unverified]
-Real extensions/addons:        [unverified]
-Actual renderer:               [unverified]
-Audio and input:               [unverified]
-State retained after restart:  [unverified]
-Notes and logs:
-```
-
-For a test run, include the exact launch command, whether Desktop or Gaming
-Mode was used, the selected game path, the renderer evidence, and the relevant
-launcher and Wine logs. Separate a successful package smoke test from any
-claim about a real client, helper injection, extensions, or SteamOS hardware.
+grants or denies filesystem access. If `~/Games` was absent before starting
+the package, confirm that Flatpak created it. Select an empty destination
+under `~/Games`, complete installation, and confirm that the launcher retains
+the installed client after exit and restart.
