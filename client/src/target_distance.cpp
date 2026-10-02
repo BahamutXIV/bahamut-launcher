@@ -354,6 +354,11 @@ std::optional<TargetDistanceSnapshot> TargetDistanceService::Snapshot()
         snapshot.currentHp = health->second.current;
         snapshot.maxHp     = health->second.maximum;
     }
+    // The local actor's wire position can lag its live client position.
+    if (targetActorId_ == localActorId_)
+    {
+        return snapshot;
+    }
     const auto found = positions_.find(targetActorId_);
     if (found == positions_.end())
     {

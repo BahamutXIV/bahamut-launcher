@@ -104,6 +104,40 @@ int main()
         return 1;
     }
 
+    targetDistance.Observe(MakeActorPosition(kLocalActorId, 0.0F, 0.0F));
+    playerSnapshot.x = 130.0F;
+    if (!player.Publish(playerSnapshot))
+    {
+        std::cerr << "moved player state was rejected\n";
+        return 1;
+    }
+    targetDistance.Observe(MakeTarget(kLocalActorId));
+    if (!ExpectNoDistance(targetDistance, kLocalActorId))
+    {
+        std::cerr << "self-target reported distance from a stale server position\n";
+        return 1;
+    }
+    auto animatedSelfTarget   = MakeTarget(kLocalActorId);
+    animatedSelfTarget.opcode = 0x00D3u;
+    targetDistance.Observe(animatedSelfTarget);
+    if (!ExpectNoDistance(targetDistance, kLocalActorId))
+    {
+        std::cerr << "animated self-target reported a distance\n";
+        return 1;
+    }
+    playerSnapshot.x = 0.0F;
+    if (!player.Publish(playerSnapshot))
+    {
+        std::cerr << "restored player state was rejected\n";
+        return 1;
+    }
+    targetDistance.Observe(MakeTarget(kNpcActorId));
+    if (!ExpectDistance(targetDistance, kNpcActorId, 5.0F))
+    {
+        std::cerr << "switching from self-target did not restore target distance\n";
+        return 1;
+    }
+
     targetDistance.Observe(MakeTarget(kUnknownActorId));
     if (!ExpectNoDistance(targetDistance, kUnknownActorId))
     {

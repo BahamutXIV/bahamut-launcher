@@ -227,8 +227,9 @@ The `/pos` chat and clipboard output retain the server command format above.
 
 The packaged Distance addon shows the selected enemy, NPC, or friendly actor's
 horizontal X/Z range in yalms, to one decimal place, as unboxed text when its
-position is known. It hides the text otherwise. Positions observed during
-zone entry are retained for the matching player zone snapshot.
+position is known. It hides the text when targeting yourself or when the
+position is unavailable. Positions observed during zone entry are retained
+for the matching player zone snapshot.
 Its copied target and position state is cleared on zone changes, logout, and
 target despawn. `/distance lock` persists whether Shift-dragging its overlay is
 allowed. `/distance help` lists its commands.
@@ -365,8 +366,8 @@ also receives the bounded URL service:
   secondary SetMap argument. A pending zone change clears the previous snapshot.
 - `bahamut.target_distance()` is available only to the packaged `distance`
   addon. It returns the selected target's horizontal range, resolved name, and
-  actor ID. The range is `nil` when its position is unavailable. All three
-  values are `nil` when no target is selected.
+  actor ID. The range is `nil` when targeting yourself or when its position is
+  unavailable. All three values are `nil` when no target is selected.
 - `bahamut.target_hp()` is available only to the packaged `targethp` addon.
   It returns current HP, maximum HP, resolved name, and actor ID. Both HP
   values are `nil` until a complete health update is available. All four

@@ -1209,6 +1209,37 @@ end
         std::cerr << "target HP did not show unboxed target values\n";
         return 1;
     }
+    targetMessage.sourceId = 11u;
+    targetService.Observe(targetMessage);
+    targetMessage.opcode = 0x00CEu;
+    targetMessage.payload.assign(40u, 0u);
+    targetMessage.payload[4] = 11u;
+    targetService.Observe(targetMessage);
+    targetPlayerSnapshot.x = 130.0F;
+    if (!targetPlayer.Publish(targetPlayerSnapshot))
+    {
+        std::cerr << "moved player state for target addons was rejected\n";
+        return 1;
+    }
+    targetMessage.opcode  = 0x00DBu;
+    targetMessage.payload = { 11u, 0u, 0u, 0u };
+    targetService.Observe(targetMessage);
+    ResetDrawCapture(capture);
+    targetHost.Draw({ &capture, &CaptureWindow, &CaptureRawText });
+    if (capture.rawTexts != 1 || capture.rawAddonId != "targethp" ||
+        capture.rawText != "HP 27/27 (100%)")
+    {
+        std::cerr << "self-target did not hide distance while retaining target HP\n";
+        return 1;
+    }
+    targetPlayerSnapshot.x = 0.0F;
+    if (!targetPlayer.Publish(targetPlayerSnapshot))
+    {
+        std::cerr << "restored player state for target addons was rejected\n";
+        return 1;
+    }
+    targetMessage.payload = { 12u, 0u, 0u, 0u };
+    targetService.Observe(targetMessage);
     if (!targetHost.DispatchCommand("/distance color #00FF00") ||
         !targetHost.DispatchCommand("/distance size 20") ||
         !targetHost.DispatchCommand("/targethp color #0000FF") ||
