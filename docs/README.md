@@ -2,58 +2,42 @@
 
 [Back to the project README](../README.md)
 
-Use these pages to install, configure, build, troubleshoot, and release Bahamut
-Launcher. The launcher consumes Bahamut services and does not define server
-behavior.
+## Play the game
 
-## Guides
+Start with [Getting started](getting-started.md). It covers system
+requirements, installation, and first launch.
 
-- [Getting started](getting-started.md) - platform requirements, archive use,
-  Linux install, first launch, and client requirements.
-- [Flatpak](flatpak.md) - SteamOS and Steam Deck installation, game
-  directories, package permissions, and reproducible builds.
-- [Troubleshooting](troubleshooting.md) - build, logs, Linux startup,
-  configuration, install, authentication, and recovery diagnosis.
-- [Configuration](configuration.md) - portable files, the macOS app and Linux
-  package layouts, game settings, backups, extensions, scripts, and DAT
-  overlays.
-- [DAT overlays](dat-overlays.md) - package layout, selection, and a complete
-  replacement example.
+- [Flatpak](flatpak.md): SteamOS and Steam Deck installation, game directories, package permissions, and builds
+- [Configuration](configuration.md): change settings, find your files, and back up or restore data
+- [Troubleshooting](troubleshooting.md): fix startup, installation, login, and launch problems
+- [Extensions](extensions.md): use addons and plugins, and check platform support
+- [DAT overlays](dat-overlays.md): select replacement DAT packages or make your own
 
-## Technical docs
+## Build and package the launcher
 
-These pages define the requests, files, launch arguments, and release metadata
-used by the launcher and its boundaries. Players can usually skip them.
+These guides are for developers, package maintainers, and testers.
 
-- [Game content delivery](content-delivery.md) - verified downloads,
-  staged installation, recovery, and publisher inputs.
-- [Signed release metadata](release-metadata.md) - offline signing,
-  release ordering, managed inventories, and trust limits.
-- [Authentication](auth.md) - account requests, responses, errors,
-  and session behavior.
-- [Handshake](handshake.md) - launch arguments, session tokens,
-  PE patches, and platform launch behavior.
-- [Extensions](extensions.md) - Lua addons, native plugins, package
-  layout, host APIs, and platform support.
+- [Development](development.md): prerequisites, builds, checks, and tests
+- [Win32 client module](../client/README.md): MSVC and llvm-mingw builds and native tests
+- [Release process](releasing.md): versioning, tags, release contents, and publishing
+- [Linux package README](../packaging/linux/README.md): instructions shipped with the Linux tar.gz
+- [Gentoo package template](../packaging/gentoo/README.md): install the Linux release through a local overlay
+- [Flatpak build](flatpak.md#build): produce a bundle and inspect its source identity
 
-## Development and release
+## Integrate with the launcher
 
-- [Development](development.md) - prerequisites, workspace checks, browser
-  checks, native tests, Linux archive packaging, and platform limits.
-- [Release process](releasing.md) - merge-to-main version bump and tag
-  automation, archive contents, and platform limits.
-- [Win32 client module](../client/README.md) - MSVC and llvm-mingw build and
-  test commands and their coverage limits.
-- [Gentoo package template](../packaging/gentoo/README.md) - local overlay
-  ebuild for the Linux release archive.
-- [Linux archive README](../packaging/linux/README.md) - the `README.md` that
-  ships inside the Linux release archive.
+These references describe the launcher's contracts with services, client
+modules, and published content. The launcher consumes Bahamut services; these
+pages do not define server behavior.
 
-## Public documentation policy
+- [Authentication](auth.md): account requests, responses, errors, and sessions
+- [Handshake](handshake.md): launch arguments, session tokens, client patches, and platform launch paths
+- [Game content delivery](content-delivery.md): download verification, staged installation, recovery, and publisher inputs
+- [Signed release metadata](release-metadata.md): signing, release ordering, managed files, and trust limits
+- [Extension author reference](extensions.md): package formats, Lua APIs, and native plugins
 
-- [AI-assisted contributions](ai_agents/README.md) - ownership and tracked
-  documentation policy.
-- [Comments and prose](ai_agents/comments-and-prose.md) - source comment and
-  public prose rules.
-- [Evidence and claims](ai_agents/evidence-and-claims.md) - evidence classes,
-  citations, and compatibility wording.
+## Contribution guidance
+
+- [AI-assisted contributions](ai_agents/README.md)
+- [Comments and prose](ai_agents/comments-and-prose.md)
+- [Evidence and claims](ai_agents/evidence-and-claims.md)

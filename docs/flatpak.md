@@ -18,31 +18,23 @@ those components.
 
 ## Build
 
-Run the build on Linux with `flatpak`, `flatpak-builder`, `elfutils`,
-`desktop-file-utils`, Python 3, Cargo, and
-the Flatpak remotes that provide GNOME Platform and SDK 50. The SDK must
-provide GTK 3, WebKitGTK 4.1, and CMake. The manifest supplies official Rust
-1.95.0 components and checks the Rust and Cargo versions before compiling.
+Use Linux with `flatpak`, `flatpak-builder`, `elfutils`, `desktop-file-utils`,
+Python 3, Cargo, and remotes that provide GNOME Platform and SDK 50. The SDK
+must include GTK 3, WebKitGTK 4.1, and CMake. The manifest supplies official
+Rust 1.95.0 components and checks Rust and Cargo versions before compiling.
 
-Configure Flathub for the user installation and install the runtime before
-building or installing the bundle:
+Add Flathub to the user installation and install the runtime:
 
 ```bash
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user flathub org.gnome.Platform//50
 ```
 
-Install `org.gnome.Sdk//50` as well when using `flatpak-builder`. Use a native
-Linux filesystem for the build directory, including when building under WSL.
-Windows-backed WSL paths do not provide the filesystem behavior required by
-Flatpak build processing.
+Also install `org.gnome.Sdk//50` when building with `flatpak-builder`. Put the
+build directory on a native Linux filesystem, including under WSL.
+Windows-backed WSL paths lack the filesystem behavior Flatpak builds need.
 
-The preparation step archives the selected Git commit and requires the
-Flatpak packaging files in that commit. Uncommitted UI files therefore do not
-enter the source context. It vendors Cargo dependencies before the SDK build
-and uses Cargo offline in the manifest. The manifest downloads the official
-Rust 1.95.0 rustc, Cargo, and rust-std component archives with SHA-256
-checksums.
+Build from a commit that contains the Flatpak packaging files:
 
 ```bash
 git status --short
@@ -52,23 +44,31 @@ git status --short
   --keep-work
 ```
 
-The default output is `out/flatpak-s0/`. It contains a versioned
-`bahamut-launcher-tester-s0-<version>.flatpak`, its `.sha256` sidecar, and a
-`.identity.json` file containing the source commit and tree, Cargo and Rust
-inputs, llvm-mingw digest, runtime and SDK commits, and the SDK toolchain
-receipt. The archived source carries no Git metadata, so the packaged
-launcher reports the `source.launcher_version` value from that file for
-`--version`, the launcher log and its HTTP user agent. The bundle does not
-include the GNOME runtime or SDK; install those from the configured Flatpak
-remote before installing the bundle.
+The preparation step packages the selected Git commit. Uncommitted UI changes
+are excluded. It vendors Cargo dependencies before the SDK build, then the
+manifest runs Cargo offline. Official Rust 1.95.0 rustc, Cargo, and rust-std
+component downloads are checked against SHA-256 digests.
 
-Use an empty absolute `--work-dir` below the selected scratch root when build
-files or CTest results must be inspected after the build. `--keep-work` keeps
-that directory. Without it, the script removes its generated work directory
-after the bundle and identity files are written.
+Use an empty absolute `--work-dir` below the selected scratch root. With
+`--keep-work`, you can inspect build files and CTest results afterwards.
+Without it, the script removes its generated work directory after writing
+the bundle and identity files. **The work directory is disposable; never
+point it at an existing non-empty directory.**
 
-To inspect the source identity without making a bundle, run the preparation
-script with an empty scratch directory:
+The default output directory, `out/flatpak-s0/`, contains:
+
+- `bahamut-launcher-tester-s0-<version>.flatpak`
+- A `.sha256` checksum sidecar
+- A `.identity.json` file recording the source commit and tree, Cargo and Rust
+  inputs, llvm-mingw digest, runtime and SDK commits, and SDK toolchain receipt
+
+The packaged source has no Git metadata. The launcher therefore reports
+`source.launcher_version` from the identity file in `--version`, the log, and
+its HTTP user agent. The bundle includes neither GNOME runtime nor SDK;
+install them from the configured remote before installing the bundle.
+
+To inspect source identity without building a bundle, prepare an empty scratch
+directory:
 
 ```bash
 python3 scripts/prepare-flatpak.py \
@@ -82,8 +82,8 @@ directory.
 
 ## Installation
 
-Install the produced bundle for the current user, then query the packaged
-launcher before opening its window:
+Install the bundle for the current user. Check its checksum and version before
+opening the launcher:
 
 ```bash
 cd out/flatpak-s0
@@ -126,13 +126,13 @@ The default game destination is
 `~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher/game`. Use
 Home's Install action for this destination or Path to choose another folder.
 
-A selected path under `/run/user/<uid>/doc/` or `/run/flatpak/doc/` refers to
-the [document portal](https://flatpak.github.io/xdg-desktop-portal/docs/documents-and-fuse.html).
-This installer requires a directly accessible destination and parent: it
-rejects symbolic-link ancestors and stages the game in a sibling directory
-before publishing it. A portal export of the selected game folder does not
-provide the required sibling access. Restarting retains the selected
-destination; it does not restore the default path.
+Paths under `/run/user/<uid>/doc/` or `/run/flatpak/doc/` are
+[document portal](https://flatpak.github.io/xdg-desktop-portal/docs/documents-and-fuse.html)
+exports. Installation needs direct access to the destination and its parent:
+it rejects symbolic-link ancestors and stages the game in a sibling directory
+before publishing it. Exporting only the selected game folder through the
+portal does not provide that sibling access. Restarting keeps the selected
+path; it does not reset it to the default.
 
 To install in a custom internal-storage directory under `~/Games`:
 
