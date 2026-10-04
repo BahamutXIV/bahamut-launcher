@@ -58,7 +58,7 @@ function renderHome() {
           <div class="account-ready">
             <div><div class="account-ready-kicker">Welcome back!</div><div class="account-ready-name">${escapeHtml(home.username)}</div></div>
           </div>
-          <div class="account-ready-footer"><button class="login-action account-logout" type="button" data-action="logout">Logout</button></div>`;
+          <div class="account-ready-footer"><button class="login-action account-logout" type="button" data-action="logout">Log Out</button></div>`;
     content.querySelector('.account-ready-footer').before(feedback);
   }
 
@@ -164,7 +164,7 @@ function renderLifecycleStrip() {
         : home.installError || (cancelled
           ? 'The installation was cancelled. Choose a different folder or retry this destination.'
           : install.error || 'The installation stopped with an error. Choose a different folder or retry this destination.');
-    const installHint = installTarget() || 'Choose a folder for the new game install';
+    const installHint = installTarget() || 'Choose a folder to install the game';
     locationPath.textContent = installHint;
     locationPath.title = installHint;
     pathAction.textContent = 'PATH';
@@ -203,11 +203,11 @@ function renderLifecycleStrip() {
     primary.textContent = 'Installing...';
     primary.disabled = true;
   } else if (installIdle) {
-    const installHint = installTarget() || 'Choose a folder for the new game install';
+    const installHint = installTarget() || 'Choose a folder to install the game';
     locationTitle.textContent = 'Install Game';
     const idleHelp = state === 'outdated-install'
       ? 'The selected game folder is not the final 1.23b client. Install the game into a new folder.'
-      : 'Install the client. Change the destination with PATH.';
+      : 'Install the game. Choose PATH to change the folder.';
     locationHelp.textContent = home.installStartPending ? 'Checking required space and starting the installation...' : (home.installError || idleHelp);
     locationPath.textContent = installHint;
     locationPath.title = installHint;
@@ -216,8 +216,8 @@ function renderLifecycleStrip() {
     primary.textContent = 'Install';
     primary.disabled = home.installStartPending;
   } else if (state === 'logged-out') {
-    title.textContent = 'Account session required';
-    copy.textContent = 'Sign in against the selected server profile to enable Play.';
+    title.textContent = 'Log In to Play';
+    copy.textContent = 'Log in to the selected server to play.';
   } else if (state === 'ready') {
     title.textContent = 'Ready to play';
     copy.textContent = `${home.server || 'Selected server'} - client version 1.23b`;
@@ -276,7 +276,7 @@ async function submitLogin(event) {
     else showLoginError(error, feedback);
     if (!error || error.kind !== AUTH_ERROR_KINDS.rateLimited) primary.disabled = false;
   } finally {
-    primary.textContent = 'Login';
+    primary.textContent = 'Log In';
   }
 }
 function showLoginError(error, feedback) {

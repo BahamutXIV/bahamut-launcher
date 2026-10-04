@@ -2,16 +2,16 @@ import { extensionState, tauriInvoke, invoke, escapeHtml } from './runtime.js';
 import { feedbackToken, feedbackCurrent, clearFeedback, reportFailure, recordFailure } from './feedback.js';
 
 const extensionGroupDefinitions = Object.freeze([
-  { key:'overlays', label:'Overlays', empty:'No installed overlays.' },
-  { key:'plugins', label:'Plugins', empty:'No installed plugins.' },
-  { key:'addons', label:'Addons', empty:'No installed addons.' },
+  { key:'overlays', label:'Overlays', empty:'No overlays installed.' },
+  { key:'plugins', label:'Plugins', empty:'No plugins installed.' },
+  { key:'addons', label:'Addons', empty:'No addons installed.' },
 ]);
 const datsOverlayItem = Object.freeze({
   id:'dats-overlay',
   name:'Dats-Overlay',
   author:'',
   version:'',
-  description:'Rearrange installed overlays to set DAT load priority.',
+  description:'Move overlays up or down. Higher overlays take priority.',
   commands:[],
   enabled:true,
   group:'overlays',
@@ -20,7 +20,7 @@ const plannedExtensionCommands = Object.freeze({
   'addons:fps':['/fps'],
 });
 const OFFICIAL_OVERLAY_ID = 'bahamut-dats-overlay';
-const EXTENSION_INVENTORY_FAILURE = 'Extension inventory is unavailable. Copy logs from the Help page for support.';
+const EXTENSION_INVENTORY_FAILURE = 'Could not load extensions. Copy logs from the Help page for support.';
 let extensionHydrationRevision = 0;
 
 function syncExtensionInventory(inventory) {
@@ -125,7 +125,7 @@ function renderDatsOverlayDetail(detail) {
             <span class="extension-overlay-order-label" aria-hidden="true">#${index + 1}</span>
           </li>`;
   }).join('');
-  const packageBody = packageRows || '<li class="extension-empty">No installed DAT overlay packages.</li>';
+  const packageBody = packageRows || '<li class="extension-empty">No DAT overlay packages installed.</li>';
   detail.innerHTML = `
         <article class="extension-detail-header glass-panel extension-overlay-detail" data-extension-detail="dats-overlay">
           <header class="extension-detail-title"><h2>Dats-Overlay</h2></header>

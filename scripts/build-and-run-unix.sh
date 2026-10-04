@@ -5,9 +5,9 @@
 #
 # Every argument goes to scripts/build-unix-package.sh (for example --release,
 # --test, or --skip-build to start the last build again). The published
-# launcher then runs in the foreground from its package directory, so Play
-# takes the extension launch and the launcher log lands beside it under
-# logs/launcher. RUST_LOG is passed through when set.
+# launcher runs in the foreground from its package directory, with extensions
+# available for Play and logs in logs/launcher beside it. RUST_LOG is passed
+# through when set.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname -- "$0")" && pwd -P)"

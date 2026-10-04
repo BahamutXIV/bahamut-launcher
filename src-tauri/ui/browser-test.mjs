@@ -272,9 +272,9 @@ function evaluateScript() {
         }],
         plugins: [{
           id:'screenshot', name:'Screenshot', author:'Aeshur', version:'1.0',
-          description:'Captures the game to the portable screenshots folder.',
+          description:'Saves game screenshots in the launcher screenshots folder.',
           homepage:null, commands:[
-            { name:'screenshot', usage:'/screenshot', description:'Captures a frame when invoked by a configured binding.' },
+            { name:'screenshot', usage:'/screenshot', description:'Takes a screenshot with the configured key binding.' },
           ], capabilities:[], compatibility:'Supported client build',
           status:'Enabled', trust:'First-party native', enabled:true,
         }, {
@@ -294,7 +294,7 @@ function evaluateScript() {
           trust:'Isolated Lua', enabled:true,
         }, {
           id:'wiki', name:'wiki', author:'Aeshur', version:'1.0',
-          description:'Opens the Bahamut wiki and searches its MediaWiki pages in your default browser.',
+          description:'Opens and searches the Bahamut wiki in your default browser.',
           homepage:'https://bahamut.miraheze.org/wiki/Main_Page', commands:[
             { name:'/wiki', usage:'/wiki', description:'Open the Bahamut wiki.' },
           ], capabilities:['chat.print','url.open'], compatibility:'Supported client build', status:'Disabled',
@@ -1258,10 +1258,12 @@ test('home_auth_and_terminal_install_states', async t => {
     const routeIcons = [...document.querySelectorAll('[data-route]')].map(button => button.querySelector('svg')?.dataset.icon).join(',');
     if (routeIcons !== 'house,plug,settings') throw new Error('route icon semantics drifted: ' + routeIcons);
     if (document.querySelector('[data-action="forgot-password"]') || document.body.textContent.includes('Forgot password')) throw new Error('Forgot Password is still exposed');
-    if ([...document.querySelectorAll('.account-links .text-button')].map(button => button.textContent).join(',') !== 'Create account,Profiles') throw new Error('account links drifted');
+    if ([...document.querySelectorAll('.account-links .text-button')].map(button => button.textContent).join(',') !== 'Create Account,Profiles') throw new Error('account links drifted');
     if (document.querySelector('#home-eyebrow').textContent || document.querySelector('#home-title').textContent !== 'Account Login' || getComputedStyle(document.querySelector('#home-title')).textAlign !== 'center') throw new Error('logged-out account title does not match Avalon');
     if (document.querySelector('#home-primary').textContent !== 'Play' || !document.querySelector('#home-primary').disabled || !document.querySelector('#login-submit')) throw new Error('Login did not move into the account card');
-    if (document.querySelector('#login-submit').textContent !== 'Login' || !document.querySelector('.check-line').textContent.includes('Remember Login')) throw new Error('Login labels drifted');
+    if (document.querySelector('#login-submit').textContent !== 'Log In' || !document.querySelector('.check-line').textContent.includes('Remember Login')) throw new Error('Login labels drifted');
+    if (document.querySelector('#login-username').placeholder !== 'Enter your username' || document.querySelector('#login-password').placeholder !== 'Enter your password') throw new Error('Login placeholders drifted');
+    if (document.querySelector('#lifecycle-title').textContent !== 'Log In to Play' || document.querySelector('#lifecycle-copy').textContent !== 'Log in to the selected server to play.') throw new Error('Logged-out guidance did not explain how to enable Play');
     const loginForm = document.querySelector('#login-form');
     if (loginForm.autocomplete !== 'off' || document.querySelector('#login-username').autocomplete !== 'off' || document.querySelector('#login-password').autocomplete !== 'off') throw new Error('Account Login still advertises browser autocomplete');
     if (document.querySelector('#login-username').hasAttribute('name') || document.querySelector('#login-password').hasAttribute('name')) throw new Error('Account Login still exposes credential field names to autofill heuristics');
@@ -1332,8 +1334,8 @@ test('home_auth_and_terminal_install_states', async t => {
     if (Math.abs(idleInstallStrip.height - 137) >= .1) throw new Error('install-location strip is not 137px tall');
     state.locationPickerOffset = document.querySelector('.lifecycle-path-picker').getBoundingClientRect().top - document.querySelector('#lifecycle-strip').getBoundingClientRect().top;
     if (Math.abs(document.querySelector('.news-panel').getBoundingClientRect().height - state.newsPanelHeight) >= .1 || Math.abs(document.querySelector('#lifecycle-strip').getBoundingClientRect().bottom - document.querySelector('.home-right').getBoundingClientRect().bottom) >= .1) throw new Error('Recent News grew or the location strip is not bottom-pinned');
-    if (document.querySelector('#home-primary').textContent !== 'Install' || document.querySelector('#lifecycle-location-path').textContent !== 'C:/Games/FINAL FANTASY XIV' || document.querySelector('#lifecycle-path-action').textContent !== 'PATH' || document.querySelector('#lifecycle-location-help').textContent !== 'Install the client. Change the destination with PATH.' || document.querySelector('#lifecycle-secondary-action')) throw new Error('Home default install destination and PATH choice drifted');
-    const installError = 'Base-game installation is not configured for this build.';
+    if (document.querySelector('#home-primary').textContent !== 'Install' || document.querySelector('#lifecycle-location-path').textContent !== 'C:/Games/FINAL FANTASY XIV' || document.querySelector('#lifecycle-path-action').textContent !== 'PATH' || document.querySelector('#lifecycle-location-help').textContent !== 'Install the game. Choose PATH to change the folder.' || document.querySelector('#lifecycle-secondary-action')) throw new Error('Home default install destination and PATH choice drifted');
+    const installError = 'Game installation is not configured for this build. Choose an existing game folder in Settings > Misc > Install Location.';
     state.installQuoteError = installError;
     document.querySelector('#home-primary').click();
     await new Promise(resolve => setTimeout(resolve, 40));
@@ -1515,7 +1517,7 @@ test('home_auth_and_terminal_install_states', async t => {
     if (JSON.parse(localStorage.getItem('bahamut-session')).authEndpoint !== savedSession.authEndpoint) throw new Error('remembered login lost the backend endpoint');
     if (document.querySelector('#home-title').textContent !== 'Account Login' || !document.querySelector('.account-ready-name') || document.querySelector('.account-ready-name').textContent !== 'aesh') throw new Error('authenticated account card did not retain the account login presentation');
     if (document.querySelector('.account-ready img,.account-ready [class*="character"],.account-ready [class*="portrait"]')) throw new Error('authenticated card exposed character identity instead of the account name');
-    if (document.querySelector('[data-action="logout"]').textContent !== 'Logout' || getComputedStyle(document.querySelector('#lifecycle-strip')).display !== 'none') throw new Error('ready state logout or lifecycle visibility drifted');
+    if (document.querySelector('[data-action="logout"]').textContent !== 'Log Out' || getComputedStyle(document.querySelector('#lifecycle-strip')).display !== 'none') throw new Error('ready state logout or lifecycle visibility drifted');
     const readyCard = document.querySelector('#session-card');
     let launchAlert = document.querySelector('#account-feedback');
     const readyLogout = document.querySelector('[data-action="logout"]');
@@ -1759,7 +1761,7 @@ test('home_auth_and_terminal_install_states', async t => {
     state.eventHandlers['launcher-closing']({ payload:null });
     state.eventHandlers['launcher-closing']({ payload:null });
     if (!dialog.matches(':modal') || !dialog.contains(document.activeElement)) throw new Error('closing message did not block background input and take focus');
-    if (!dialog.textContent.includes('Finishing current work safely') || !dialog.textContent.includes('close automatically')) throw new Error('closing message did not explain the wait');
+    if (!dialog.textContent.includes('Finishing current work safely') || !dialog.textContent.includes('will close when it is done')) throw new Error('closing message did not explain the wait');
     const route = document.querySelector('[data-screen][data-active]');
     const callsBefore = state.calls.length;
     runControllerAction('next-route');
@@ -2388,7 +2390,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     repairButton.click();
     const dialog = document.querySelector('#settings-confirmation-dialog');
     const dialogActions = [...dialog.querySelectorAll('.confirmation-dialog-actions button')];
-    if (!dialog.open || document.querySelector('#settings-confirmation-copy').textContent !== 'This may require downloading the full 7.2 GB game archive. Proceed?' || dialogActions.map(button => button.textContent).join(',') !== 'Confirm,Cancel' || document.activeElement !== dialogActions[1]) throw new Error('Repair Install did not show concise Confirm/Cancel dialog with safe Cancel focus');
+    if (!dialog.open || document.querySelector('#settings-confirmation-copy').textContent !== 'This may download the full 7.2 GB game package. Continue?' || dialogActions.map(button => button.textContent).join(',') !== 'Confirm,Cancel' || document.activeElement !== dialogActions[1]) throw new Error('Repair Install did not show concise Confirm/Cancel dialog with safe Cancel focus');
     document.querySelector('#settings-confirmation-cancel').click();
     await new Promise(resolve => setTimeout(resolve, 20));
     if (state.calls.some(call => call.command === 'start_game_repair')) throw new Error('cancelled Repair Install started work');
@@ -2501,7 +2503,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (extensions.querySelector('[data-runtime-enabled],[data-settings-action],[data-extension-action]')) throw new Error('Extensions still owns writable runtime controls');
     if (/Refresh diagnostics|Enable client runtime|Update channel|Overlay hotkey|Overlay scale/.test(extensions.textContent)) throw new Error('Extensions retained Settings-owned or unsupported controls');
     let datsDetail = extensions.querySelector('#extension-detail');
-    if (datsDetail.querySelector('h2').textContent !== 'Dats-Overlay' || datsDetail.querySelector('.extension-description').textContent !== 'Rearrange installed overlays to set DAT load priority.' || datsDetail.querySelectorAll('.extension-overlay-package').length !== 3) throw new Error('Extensions did not render the Dats-Overlay package editor');
+    if (datsDetail.querySelector('h2').textContent !== 'Dats-Overlay' || datsDetail.querySelector('.extension-description').textContent !== 'Move overlays up or down. Higher overlays take priority.' || datsDetail.querySelectorAll('.extension-overlay-package').length !== 3) throw new Error('Extensions did not render the Dats-Overlay package editor');
     if (datsDetail.querySelector('.extension-overlay-editor-heading') || datsDetail.textContent.includes('Overlay packages') || datsDetail.textContent.includes('Enabled packages are applied in first-hit order.')) throw new Error('Dats-Overlay retained the removed visible package copy');
     if (datsDetail.querySelector('.extension-overlay-editor')?.getAttribute('aria-label') !== 'Overlay package controls') throw new Error('Dats-Overlay package controls lost their accessible label');
     if (!datsDetail.querySelector('[data-dat-package-enabled="base-world"]')?.checked || !datsDetail.querySelector('[data-dat-package-enabled="detail-world"]')?.checked || datsDetail.querySelector('[data-dat-package-enabled="bahamut-dats-overlay"]')) throw new Error('Dats package enablement did not hydrate or official control remained');
@@ -2632,7 +2634,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     document.querySelector('[data-extension-item="addons:wiki"]').click();
     const wikiDetail = document.querySelector('#extension-detail');
     const wikiCommands = [...wikiDetail.querySelectorAll('.extension-command')].map(node => node.textContent).join('|');
-    if (wikiDetail.querySelector('h2').textContent !== 'wiki' || wikiCommands !== '/wiki' || wikiDetail.querySelector('.extension-commands').getAttribute('aria-label') !== 'Commands' || wikiDetail.querySelector('.extension-description').textContent !== 'Opens the Bahamut wiki and searches its MediaWiki pages in your default browser.') throw new Error('Wiki addon presentation or command inventory is missing');
+    if (wikiDetail.querySelector('h2').textContent !== 'wiki' || wikiCommands !== '/wiki' || wikiDetail.querySelector('.extension-commands').getAttribute('aria-label') !== 'Commands' || wikiDetail.querySelector('.extension-description').textContent !== 'Opens and searches the Bahamut wiki in your default browser.') throw new Error('Wiki addon presentation or command inventory is missing');
     document.querySelector('[data-extension-item="addons:fps"]').click();
     document.querySelector('[data-extension-item="plugins:screenshot"]').click();
     const screenshotDetail = document.querySelector('#extension-detail');

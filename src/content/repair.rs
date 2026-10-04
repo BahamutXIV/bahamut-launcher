@@ -67,7 +67,7 @@ impl RepairPhase {
     }
 }
 
-/// Progress and safe-boundary controls for one managed-game repair.
+/// Progress and controls that pause or cancel a game repair at safe checkpoints.
 pub struct RepairShared {
     phase: AtomicU8,
     bytes_completed: AtomicU64,
@@ -374,7 +374,7 @@ pub struct RepairQuote {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VerificationSummary {
-    /// Non-valid files only. Counts below cover the full managed-file inventory.
+    /// Files that failed validation. Counts below cover all managed files.
     pub files: Vec<ManagedFileStatus>,
     pub valid_count: usize,
     pub missing_count: usize,

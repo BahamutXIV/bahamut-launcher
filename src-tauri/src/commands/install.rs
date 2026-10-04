@@ -17,8 +17,7 @@ pub(crate) const INSTALL_BUSY_MSG: &str =
 pub(crate) const CONTENT_STATE_POISONED_MSG: &str =
     "Install state is unavailable because its synchronization state was poisoned.";
 pub(crate) const CONTENT_CLOSING_MSG: &str = "Launcher is closing.";
-const NO_BASE_PACKAGE_MSG: &str =
-    "Base-game installation is not configured for this build. Select Existing to use your client.";
+const NO_BASE_PACKAGE_MSG: &str = "Game installation is not configured for this build. Choose an existing game folder in Settings > Misc > Install Location.";
 
 #[tauri::command]
 pub(crate) fn detect_game_install_command() -> GameInstallInfo {
@@ -129,7 +128,7 @@ pub(crate) fn spawn_installer(
                     && let Err(error) = persist_game_location(&destination)
                 {
                     worker_shared.fail(format!(
-                        "Installation finished at {} but selecting it failed: {error}. Select Existing to use it.",
+                        "Installation finished at {} but selecting it failed: {error}. Choose that folder in Settings > Misc > Install Location.",
                         destination.display()
                     ));
                 }
@@ -289,4 +288,17 @@ pub(crate) async fn install_status(
         }
         None => InstallStatusView::idle(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_package_message_points_to_install_location() {
+        assert_eq!(
+            NO_BASE_PACKAGE_MSG,
+            "Game installation is not configured for this build. Choose an existing game folder in Settings > Misc > Install Location."
+        );
+    }
 }

@@ -90,7 +90,7 @@ pub(crate) struct LauncherLogView {
     pub(crate) updated_at: Option<u64>,
 }
 
-/// One-moment install snapshot returned to the WebView; JS redraws it on a fixed cadence.
+/// Current install snapshot returned to the WebView for periodic redraws.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct InstallStatusView {
     pub(crate) phase: &'static str,

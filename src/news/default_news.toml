@@ -1,4 +1,5 @@
-# Each [[items]] block becomes a Main-screen card; edit this feed for private-server announcements, and it reloads on each UI load.
+# Each [[items]] block becomes a Home news card.
+# Edit this feed for server announcements; the UI reloads it when opened.
 
 [[items]]
 date = "September 27"

@@ -59,7 +59,7 @@ fn main() {
         Some(path) => tracing::info!(install = %path.display(), "install detection succeeded"),
         None => tracing::warn!(
             "install detection found nothing; set game_location in bahamut.ini \
-             or use the Tauri UI override field",
+             or choose Settings > Misc > Install Location in the launcher",
         ),
     }
 }

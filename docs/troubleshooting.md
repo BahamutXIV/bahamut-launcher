@@ -445,8 +445,8 @@ Visible feedback behaves as follows:
 - Account creation shows messages above **Create Account**. Extensions shows
   them above the folder-button card in both layouts, without moving the
   library or package controls.
-- Login and launch share the Account Login feedback area above **Login** or
-  **Logout**, after **Remember Login**.
+- Login and launch share the Account Login feedback area above **Log In** or
+  **Log Out**, after **Remember Login**.
 - Leaving a page or Settings tab clears visible messages. Pending operations
   can still log failures without restoring the message. Technical failures
   direct players to Help.

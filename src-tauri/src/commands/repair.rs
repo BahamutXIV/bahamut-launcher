@@ -10,7 +10,8 @@ use crate::state::{
     GameReservation,
 };
 
-const NO_INSTALL_MSG: &str = "Game install not found. Select it on Home first.";
+const NO_INSTALL_MSG: &str =
+    "Game install not found. Select it in Settings > Misc > Install Location.";
 const REPAIR_BUSY_MSG: &str =
     "Close the game and wait for install, update, repair, or backup work to finish.";
 const REPAIR_CLOSING_MSG: &str = "Launcher is closing.";
@@ -130,7 +131,7 @@ fn clear_terminal_run(guard: &mut Option<GameRepairRun>) -> Result<(), String> {
     Ok(())
 }
 
-/// Start one recover, verify, and repair pass over the complete managed-game inventory.
+/// Recover interrupted work, then verify and repair all managed game files.
 #[tauri::command]
 pub(crate) fn start_game_repair(
     state: tauri::State<'_, ContentIpcState>,
@@ -231,6 +232,14 @@ pub(crate) fn cancel_game_repair(state: tauri::State<'_, ContentIpcState>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_install_message_points_to_install_location() {
+        assert_eq!(
+            NO_INSTALL_MSG,
+            "Game install not found. Select it in Settings > Misc > Install Location."
+        );
+    }
 
     #[test]
     fn game_reservation_blocks_repair_during_launch_or_install() {

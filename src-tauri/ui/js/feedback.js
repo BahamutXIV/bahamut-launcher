@@ -87,7 +87,7 @@ function diagnosticText(error) {
 
 function recordFailure(page, action, error, message, context = '') {
   const write = invoke('record_ui_failure', { page, action, message, diagnostic:diagnosticText(error) || 'Unknown failure', context })
-    .catch(loggingError => { console.error('Could not persist launcher failure.', loggingError); });
+    .catch(loggingError => { console.error('Could not save the launcher error to the log.', loggingError); });
   pendingLogs.add(write);
   write.finally(() => pendingLogs.delete(write));
   return write;

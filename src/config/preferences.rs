@@ -105,7 +105,7 @@ impl FromStr for ScreenshotHotkey {
     }
 }
 
-/// The display mode values accepted by the portable game settings owner.
+/// Display modes accepted by the portable game settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum DisplayMode {
     #[serde(rename = "windowed")]
@@ -140,7 +140,7 @@ impl FromStr for DisplayMode {
     }
 }
 
-/// The multisampling values accepted by the portable game settings owner.
+/// Multisampling values accepted by the portable game settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum Multisampling {
     #[serde(rename = "none")]
@@ -179,7 +179,7 @@ impl FromStr for Multisampling {
     }
 }
 
-/// The shadow detail values accepted by the portable game settings owner.
+/// Shadow detail values accepted by the portable game settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum ShadowDetail {
     #[serde(rename = "lowest")]
@@ -222,7 +222,7 @@ impl FromStr for ShadowDetail {
     }
 }
 
-/// The texture quality values accepted by the portable game settings owner.
+/// Texture quality values accepted by the portable game settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum TextureQuality {
     #[serde(rename = "high")]
@@ -315,7 +315,7 @@ pub struct GraphicsSettings {
     pub texture_filtering: TextureFiltering,
 }
 
-/// The texture filtering values accepted by the portable game settings owner.
+/// Texture filtering values accepted by the portable game settings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum TextureFiltering {
     #[serde(rename = "highest")]

@@ -82,7 +82,7 @@ async function runRepairInstall() {
   if (repairState.starting || repairState.status?.is_running) return;
   const confirmed = await showSettingsConfirmation({
     title:'Repair Install?',
-    copy:'This may require downloading the full 7.2 GB game archive. Proceed?',
+    copy:'This may download the full 7.2 GB game package. Continue?',
   });
   if (!confirmed) return;
   settingsDialogOpener = null;

@@ -12,8 +12,8 @@ name = "bahamut-launcher-shell"
 path = "src/main.rs"
 
 [features]
-# Build-only isolation route for comparing the direct patched launch against
-# the injected client runtime. This is intentionally not a persisted setting.
+# Compare a direct patched launch with the injected client runtime.
+# This build feature is not a saved setting.
 diagnostic-no-injection = []
 
 [build-dependencies]
@@ -43,7 +43,7 @@ windows = { version = "0.61", features = [
 ] }
 winreg = "0.55"
 
-# The non-Windows default game directory hint resolves the user's home directory.
+# The default game directory on non-Windows hosts uses the user's home directory.
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 directories = "5"
 

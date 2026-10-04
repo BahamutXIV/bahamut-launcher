@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare an exact-source Flatpak build context for the S0 tester."""
+"""Prepare the S0 tester Flatpak build from an exact source revision."""
 
 from __future__ import annotations
 

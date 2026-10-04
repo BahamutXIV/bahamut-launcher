@@ -272,7 +272,8 @@ fn ensure_login_profile_binding(
     Ok(())
 }
 
-/// POSTs credentials to the selected `api_base` + `/accounts`; a 201 advances registration, and a separate login mints the session because registration returns no token.
+/// POSTs credentials to the selected `api_base` + `/accounts`. A 201 completes
+/// registration; a separate login creates the session because registration returns no token.
 #[tauri::command]
 pub(crate) async fn register(
     username: String,

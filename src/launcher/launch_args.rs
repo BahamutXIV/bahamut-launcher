@@ -33,8 +33,8 @@ pub const SESSION_ID_LEN: usize = 56;
 /// The fixed `SERVER_UTC` value baked into every command-line plaintext.
 ///
 /// Note: the encoded launch argument uses the decimal value `1356916742`,
-/// while the PE `SERVER_UTC` immediate-load patch (a separate, later
-/// milestone) writes the bytes `B8 12 E8 E0 50`, which decode to the
+/// while the separate PE `SERVER_UTC` immediate-load patch writes
+/// the bytes `B8 12 E8 E0 50`, which decode to the
 /// little-endian `mov eax, 0x50E0E812`. These are kept as two separate
 /// facts per `docs/handshake.md` and must not be collapsed
 /// without a client-binary recheck.

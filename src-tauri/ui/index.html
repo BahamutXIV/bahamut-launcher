@@ -75,13 +75,13 @@
               <h1 id="home-title">Account Login</h1>
               <div id="home-session-content">
                 <form id="login-form" autocomplete="off" inert>
-                  <div class="field"><label for="login-username">Username</label><input class="input" id="login-username" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter a username..."></div>
-                  <div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" required autocomplete="off" placeholder="Enter a password..."></div>
+                  <div class="field"><label for="login-username">Username</label><input class="input" id="login-username" required autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Enter your username"></div>
+                  <div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" required autocomplete="off" placeholder="Enter your password"></div>
                   <label class="check-line"><input type="checkbox" id="login-remember" checked>Remember Login</label>
 
-                  <button class="login-action" type="submit" id="login-submit" disabled>Login</button>
+                  <button class="login-action" type="submit" id="login-submit" disabled>Log In</button>
                   <div class="account-links">
-                    <button class="text-button" type="button" data-action="open-register">Create account</button>
+                    <button class="text-button" type="button" data-action="open-register">Create Account</button>
                     <button class="text-button" type="button" data-action="open-profiles">Profiles</button>
                   </div>
                 </form>
@@ -111,17 +111,17 @@
             <aside class="lifecycle-strip glass-panel" id="lifecycle-strip" aria-live="polite" data-gamepad-region data-gamepad-region-order="3" tabindex="-1">
               <div class="lifecycle-location" id="lifecycle-location" hidden>
                 <div class="lifecycle-title" id="lifecycle-location-title">Install Game</div>
-                <div class="lifecycle-location-help" id="lifecycle-location-help">Install the client. Change the destination with PATH.</div>
+                <div class="lifecycle-location-help" id="lifecycle-location-help">Install the game. Choose PATH to change the folder.</div>
                 <div class="lifecycle-path-picker">
-                  <div class="lifecycle-path" id="lifecycle-location-path">Choose a folder for the new game install</div>
+                  <div class="lifecycle-path" id="lifecycle-location-path">Choose a folder to install the game</div>
                   <button class="small-button lifecycle-path-action accent-action" id="lifecycle-path-action" type="button" data-action="install-folder">PATH</button>
                 </div>
               </div>
               <div class="lifecycle-status" id="lifecycle-status">
                 <div class="lifecycle-summary">
                   <div class="lifecycle-copy-block">
-                    <div class="lifecycle-title" id="lifecycle-title">Checking Local Client</div>
-                    <div class="lifecycle-copy" id="lifecycle-copy">Reading the configured install path.</div>
+                    <div class="lifecycle-title" id="lifecycle-title">Checking Game Installation</div>
+                    <div class="lifecycle-copy" id="lifecycle-copy">Checking the selected game folder.</div>
                   </div>
                   <div class="lifecycle-metric" id="lifecycle-metric"></div>
                 </div>
@@ -147,10 +147,10 @@
         <div class="extensions-page">
           <aside class="extension-library glass-panel" data-gamepad-region data-gamepad-region-order="1" tabindex="-1" aria-label="Installed extensions">
             <input class="input extension-search" id="extension-search" type="search" placeholder="Search extensions" autocomplete="off" aria-label="Search extensions">
-            <div class="extension-groups" id="extension-groups" aria-live="polite"><div class="extension-empty">Reading installed packages.</div></div>
+            <div class="extension-groups" id="extension-groups" aria-live="polite"><div class="extension-empty">Loading installed extensions.</div></div>
           </aside>
           <div class="extension-detail-column">
-            <div class="extension-detail" id="extension-detail" data-gamepad-region data-gamepad-region-order="2" tabindex="-1"><div class="extension-empty">Select an installed package.</div></div>
+            <div class="extension-detail" id="extension-detail" data-gamepad-region data-gamepad-region-order="2" tabindex="-1"><div class="extension-empty">Select an extension.</div></div>
           </div>
           <div class="extension-action-dock">
             <div class="page-feedback" id="extension-feedback" role="status" aria-live="polite" aria-atomic="true" data-feedback></div>
@@ -246,7 +246,7 @@
                 <p class="register-field-error" id="register-confirm-error" aria-live="polite"></p>
                 <div class="page-feedback" data-feedback role="status" aria-live="polite" aria-atomic="true"></div>
               </div>
-              <button type="submit" class="login-action register-submit" disabled>Create account</button>
+              <button type="submit" class="login-action register-submit" disabled>Create Account</button>
             </form>
           </article>
         </div>
@@ -324,7 +324,7 @@
             <header class="help-header">
               <div class="help-copy">
                 <h1 class="help-title" id="help-page-title">Need help?</h1>
-                <p class="help-subtitle">If you need additional assistance, post your logs in <span class="help-channel">#install-support</span> in Discord.</p>
+                <p class="help-subtitle">For help, post your logs in <span class="help-channel">#install-support</span> on Discord.</p>
                 <div class="page-feedback" id="help-feedback" role="status" aria-live="polite" aria-atomic="true" data-feedback></div>
               </div>
               <div class="help-actions" aria-label="Help actions" data-gamepad-region data-gamepad-region-order="1" tabindex="-1">
@@ -351,7 +351,7 @@
     </dialog>
     <dialog class="confirmation-dialog glass-panel" id="launcher-closing-dialog" aria-labelledby="launcher-closing-title" aria-describedby="launcher-closing-copy">
       <h2 id="launcher-closing-title" tabindex="-1" autofocus>Closing Launcher</h2>
-      <p id="launcher-closing-copy" role="status">Finishing current work safely. The launcher will close automatically when it completes.</p>
+      <p id="launcher-closing-copy" role="status">Finishing current work safely. The launcher will close when it is done.</p>
     </dialog>
     <aside class="gamepad-prompt-bar" id="gamepad-prompts" hidden aria-label="Gamepad shortcuts">
       <span class="gamepad-prompt-bar__item"><span class="gamepad-prompt-bar__glyphs"><img class="gamepad-prompt-bar__glyph" data-gamepad-face="confirm" src="assets/gamepad/xbox/a.png" alt="" aria-hidden="true"></span><span class="gamepad-prompt-bar__label">Confirm</span></span>
