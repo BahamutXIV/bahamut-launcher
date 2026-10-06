@@ -17,14 +17,14 @@ Launcher for the BahamutXIV Final Fantasy XIV 1.23b emulation server.
 ## Install
 
 [Download the latest release](https://github.com/BahamutXIV/bahamut-launcher/releases),
-then follow [Getting started](docs/getting-started.md) to install the launcher
-and game. The launcher download does not include the game files.
+then follow [getting started](docs/getting-started.md) to install the launcher
+and game.
 
 ## System requirements
 
 - **Windows x86_64:** the launcher installs missing WebView2 and x86 Visual
   C++ runtimes when needed.
-- **Linux x86_64:** SteamOS and Steam Deck use the [Flatpak package](docs/flatpak.md).
+- **Linux x86_64:** SteamOS and Steam Deck use the [flatpak package](docs/flatpak.md).
   The Linux archive requires glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. Run the
   extracted tar.gz in place or install it with an application menu entry.
   Wine downloads on first game launch.
@@ -32,7 +32,7 @@ and game. The launcher download does not include the game files.
   first game launch. Apple Silicon also needs Rosetta 2 for Wine.
 
 macOS game launch and client extensions remain unverified against a live client.
-See [Getting started](docs/getting-started.md#platform-requirements)
+See [getting started](docs/getting-started.md#platform-requirements)
 for the full requirements and limitations.
 
 ## Documentation
@@ -49,3 +49,5 @@ for the full requirements and limitations.
 ## License
 
 <a href="LICENSE.md"><img src="https://upload.wikimedia.org/wikipedia/commons/f/f8/License_icon-mit-88x31-2.svg" width="88" height="31" alt="MIT License"></a>
+
+This unofficial project is not affiliated with or endorsed by Square Enix.
