@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bahamut_launcher::config::dirs;
 use bahamut_launcher::config::extension_config::{
@@ -88,13 +88,27 @@ pub(crate) fn resolve_content_root() -> Result<String, String> {
         .ok_or_else(|| "Game content delivery is not configured for this build.".to_owned())
 }
 
-/// `download_cache_dir` overrides the platform default (`Documents/XIVLegacy_Downloads`).
-pub(crate) fn resolve_download_cache_dir() -> Result<PathBuf, String> {
-    let prefs = load_preferences()?;
-    match prefs.launcher.download_cache_dir {
-        Some(dir) => Ok(dir),
-        None => dirs::default_download_cache_dir().map_err(|e| e.to_string()),
+/// Use the operation's destination so a new install does not inherit another game's drive.
+pub(crate) fn resolve_download_cache_dir(game_dir: Option<&Path>) -> Result<PathBuf, String> {
+    download_cache_dir_for_preferences(&load_preferences()?, game_dir)
+}
+
+fn download_cache_dir_for_preferences(
+    preferences: &Preferences,
+    game_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = &preferences.launcher.download_cache_dir {
+        return Ok(dir.clone());
     }
+    if let Some(game_dir) = game_dir {
+        let mut leaf = game_dir
+            .file_name()
+            .ok_or("The game directory has no final path component.")?
+            .to_os_string();
+        leaf.push(" Downloads");
+        return Ok(game_dir.with_file_name(leaf));
+    }
+    dirs::default_download_cache_dir().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -105,6 +119,55 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn download_cache_follows_the_operation_destination() {
+        let mut preferences = Preferences::default();
+        preferences.launcher.game_location = Some(PathBuf::from("old-game"));
+        let root = crate::test_support::tempdir().unwrap();
+        let game = root.path().join("FINAL FANTASY XIV");
+        let cache = download_cache_dir_for_preferences(&preferences, Some(&game)).unwrap();
+        assert_eq!(cache, root.path().join("FINAL FANTASY XIV Downloads"));
+        let package = bahamut_launcher::content::manifest::shipped_manifest()
+            .unwrap()
+            .base
+            .unwrap();
+        bahamut_launcher::content::installer::quote(&game, &cache, &package).unwrap();
+        assert!(
+            !cache.exists(),
+            "cache resolution must not create directories"
+        );
+
+        #[cfg(windows)]
+        assert_eq!(
+            download_cache_dir_for_preferences(
+                &preferences,
+                Some(Path::new(r"D:\Games\FINAL FANTASY XIV")),
+            )
+            .unwrap(),
+            PathBuf::from(r"D:\Games\FINAL FANTASY XIV Downloads")
+        );
+    }
+
+    #[test]
+    fn explicit_download_cache_overrides_the_game_destination() {
+        let mut preferences = Preferences::default();
+        preferences.launcher.download_cache_dir = Some(PathBuf::from("custom-downloads"));
+        for game_dir in [None, Some(Path::new("new-game"))] {
+            assert_eq!(
+                download_cache_dir_for_preferences(&preferences, game_dir).unwrap(),
+                PathBuf::from("custom-downloads")
+            );
+        }
+    }
+
+    #[test]
+    fn download_cache_without_a_game_uses_the_platform_fallback() {
+        assert_eq!(
+            download_cache_dir_for_preferences(&Preferences::default(), None).unwrap(),
+            dirs::default_download_cache_dir().unwrap()
+        );
+    }
 
     #[test]
     fn default_install_uses_dedicated_games_directory() {

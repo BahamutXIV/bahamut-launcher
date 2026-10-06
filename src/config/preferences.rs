@@ -459,7 +459,7 @@ pub struct LauncherSection {
     pub game_location: Option<PathBuf>,
     /// Override only the delivery host, never the shipped content identities.
     pub content_root: Option<String>,
-    /// `None` uses `XIVLegacy_Downloads` under the user's Documents folder.
+    /// `None` lets the shell select a download cache beside the game directory.
     pub download_cache_dir: Option<PathBuf>,
     /// Optional Windows monitor device-interface identity for borderless mode.
     pub borderless_monitor: Option<String>,

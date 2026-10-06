@@ -43,6 +43,11 @@ Install requires a new or empty destination. Home shows that destination;
 use PATH to change it. Install checks disk space first and reports failures
 in the strip. The worker repeats the checks before changing the destination.
 
+Downloads default to a sibling folder on the selected destination's drive.
+The [download cache setting](configuration.md#bahamutini) can override that
+location. When downloads and extraction share a volume, the space check
+requires enough room for both.
+
 The worker extracts into owned staging on the destination volume, verifies
 the ZIP inventory, and checks the final files and version before publishing
 the directory. It never clears a nonempty destination to make room. The

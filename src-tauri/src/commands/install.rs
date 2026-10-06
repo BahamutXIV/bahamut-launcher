@@ -169,10 +169,11 @@ pub(crate) async fn install_quote(
     let package = manifest::shipped_manifest()?
         .base
         .ok_or(NO_BASE_PACKAGE_MSG)?;
-    let cache = resolve_download_cache_dir()?;
+    let destination = PathBuf::from(destination);
+    let cache = resolve_download_cache_dir(Some(&destination))?;
     resolve_content_root()?;
     tauri::async_runtime::spawn_blocking(move || {
-        bahamut_launcher::content::installer::quote(&PathBuf::from(destination), &cache, &package)
+        bahamut_launcher::content::installer::quote(&destination, &cache, &package)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -189,10 +190,12 @@ pub(crate) fn install_game(
         .map_err(AuthError::server)?
         .base
         .ok_or_else(|| AuthError::server(NO_BASE_PACKAGE_MSG))?;
+    let destination = PathBuf::from(destination);
+    let cache_dir = resolve_download_cache_dir(Some(&destination)).map_err(AuthError::server)?;
     let request = InstallRequest {
-        destination: PathBuf::from(destination),
+        destination,
         content_root: resolve_content_root().map_err(AuthError::server)?,
-        cache_dir: resolve_download_cache_dir().map_err(AuthError::server)?,
+        cache_dir,
         package,
     };
     spawn_installer(&state, &game, &backups, request)

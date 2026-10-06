@@ -254,7 +254,11 @@ Blank paths and endpoints mean automatic detection or the shipped default.
 - `content_root` overrides the HTTPS host in the shipped delivery manifest.
   It does not change the trusted content identities.
 - `download_cache_dir` overrides the verified complete client download cache
-  location, which defaults to `<Documents>/XIVLegacy_Downloads`.
+  location. Install and Repair default to a sibling of the game folder with
+  ` Downloads` appended to its name: `D:\Games\FINAL FANTASY XIV` uses
+  `D:\Games\FINAL FANTASY XIV Downloads`. Without a selected game folder,
+  the fallback is `<Documents>/XIVLegacy_Downloads`, or the launcher data
+  directory's `XIVLegacy_Downloads` when Documents is unavailable.
 - `native_resolution_override` defaults to `false`. When enabled, Play writes
   the physical monitor resolution to retail `config.sys` without changing the
   saved `[game]` width and height. Those saved values remain the fallback when

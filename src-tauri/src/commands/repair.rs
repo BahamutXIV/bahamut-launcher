@@ -151,7 +151,7 @@ pub(crate) fn start_game_repair(
     let game_dir = resolve_game_dir().ok_or_else(|| NO_INSTALL_MSG.to_owned())?;
     let game_root = repair::canonical_game_root(&game_dir)?;
     let content_root = resolve_content_root()?;
-    let cache = resolve_download_cache_dir()?;
+    let cache = resolve_download_cache_dir(Some(&game_root))?;
     let package = repair_package()?;
     let shared = RepairShared::new();
     let worker_shared = shared.clone();
