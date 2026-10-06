@@ -40,6 +40,8 @@ struct DrawCapture
     std::vector<AddonCombatMeterRow> combatRows;
     bool                             combatLocked     = false;
     bool                             combatIncomplete = false;
+    int                              targetlines      = 0;
+    std::string                      targetlinesAddonId;
     std::string                      posText;
     std::vector<std::string>         chatLines;
     std::string                      clipboardText;
@@ -90,6 +92,13 @@ void CaptureCombatMeter(void* context, const char* addonId, const char* mode, co
     capture.combatIncomplete = incomplete;
 }
 
+void CaptureTargetlines(void* context, const char* addonId)
+{
+    auto& capture = *static_cast<DrawCapture*>(context);
+    ++capture.targetlines;
+    capture.targetlinesAddonId = addonId;
+}
+
 bool CaptureClipboard(void* context, std::string_view text)
 {
     auto& capture = *static_cast<DrawCapture*>(context);
@@ -134,6 +143,8 @@ void ResetDrawCapture(DrawCapture& capture)
     capture.combatRows.clear();
     capture.combatLocked     = false;
     capture.combatIncomplete = false;
+    capture.targetlines      = 0;
+    capture.targetlinesAddonId.clear();
     capture.posText.clear();
 }
 
@@ -141,9 +152,9 @@ void ResetDrawCapture(DrawCapture& capture)
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc != 14)
+    if (argc != 15)
     {
-        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <targethp-manifest> <combatparser-manifest> <settings> <chat-logs>\n";
+        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <targethp-manifest> <combatparser-manifest> <targetlines-manifest> <settings> <chat-logs>\n";
         return 2;
     }
     const std::filesystem::path                fpsManifest(argv[1]);
@@ -161,8 +172,9 @@ int wmain(int argc, wchar_t** argv)
         "distance", "targethp"
     };
     const std::filesystem::path combatParserManifest(argv[11]);
-    const std::filesystem::path settings(argv[12]);
-    const std::filesystem::path chatLogs(argv[13]);
+    const std::filesystem::path targetlinesManifest(argv[12]);
+    const std::filesystem::path settings(argv[13]);
+    const std::filesystem::path chatLogs(argv[14]);
     const std::time_t           now = std::time(nullptr);
     std::tm                     local{};
     localtime_s(&local, &now);
@@ -215,8 +227,8 @@ int wmain(int argc, wchar_t** argv)
     host.SetClipboardSink({ &capture, &CaptureClipboard });
     host.SetChatSink({ &capture, &CaptureChat });
     host.SetUrlSink({ &capture, &CaptureUrl });
-    host.LoadManifests({ fpsManifest, errorIsolationManifest, posManifest, wikiManifest, chatlogsManifest }, settings, chatLogs);
-    if (host.LoadedCount() != 5 || host.FaultedCount() != 0)
+    host.LoadManifests({ fpsManifest, errorIsolationManifest, posManifest, wikiManifest, chatlogsManifest, targetlinesManifest }, settings, chatLogs);
+    if (host.LoadedCount() != 6 || host.FaultedCount() != 0 || !host.TargetlinesEnabled())
     {
         std::cerr << "both addon states must load independently\n";
         return 1;
@@ -225,12 +237,154 @@ int wmain(int argc, wchar_t** argv)
     {
         host.Update(0.02);
     }
-    host.Draw({ &capture, &CaptureWindow, &CaptureRawText });
-    if (host.LoadedCount() != 4 || host.FaultedCount() != 1 || capture.windows != 0 || capture.rawTexts != 1 || capture.rawAddonId != "fps" || capture.rawText != "50" || capture.rawRed != 1.0F || capture.rawGreen != 0.0F || capture.rawBlue != 0.0F || capture.rawAlpha != 1.0F || capture.rawSize != 13.0F || capture.rawLocked || capture.rawText.find("FPS") != std::string::npos || !capture.posText.empty())
+    host.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (host.LoadedCount() != 5 || host.FaultedCount() != 1 || !host.TargetlinesEnabled() || capture.windows != 0 || capture.rawTexts != 1 || capture.rawAddonId != "fps" || capture.rawText != "50" || capture.rawRed != 1.0F || capture.rawGreen != 0.0F || capture.rawBlue != 0.0F || capture.rawAlpha != 1.0F || capture.rawSize != 13.0F || capture.rawLocked || capture.rawText.find("FPS") != std::string::npos || capture.targetlines != 1 || capture.targetlinesAddonId != "targetlines" || !capture.posText.empty())
     {
         std::cerr << "addon error isolation or FPS draw failed\n";
         return 1;
     }
+
+    const std::filesystem::path targetlinesFixtureRoot     = settings / "targetlines-lifecycle";
+    const std::filesystem::path targetlinesFixtureManifest = targetlinesFixtureRoot / "addon.toml";
+    const std::filesystem::path targetlinesOtherRoot       = settings / "targetlines-other";
+    const std::filesystem::path targetlinesOtherManifest   = targetlinesOtherRoot / "addon.toml";
+    std::filesystem::create_directories(targetlinesFixtureRoot);
+    std::filesystem::create_directories(targetlinesOtherRoot);
+    {
+        std::ofstream manifest(targetlinesFixtureManifest, std::ios::trunc);
+        manifest << "id = \"targetlines\"\nentry = \"targetlines.lua\"\n";
+        std::ofstream script(targetlinesFixtureRoot / "targetlines.lua", std::ios::trunc);
+        script << R"lua(
+function load()
+    bahamut.targetlines()
+end
+function update(_)
+    bahamut.targetlines()
+end
+function draw()
+    bahamut.targetlines(123)
+    bahamut.targetlines()
+end
+)lua";
+        std::ofstream otherManifest(targetlinesOtherManifest, std::ios::trunc);
+        otherManifest << "id = \"targetlines-other\"\nentry = \"targetlines-other.lua\"\n";
+        std::ofstream otherScript(targetlinesOtherRoot / "targetlines-other.lua", std::ios::trunc);
+        otherScript << R"lua(
+function draw()
+    if bahamut.targetlines ~= nil then error("targetlines API leaked") end
+end
+)lua";
+    }
+    AddonHost targetlinesHost;
+    targetlinesHost.LoadManifests({ targetlinesFixtureManifest, targetlinesOtherManifest, fpsManifest }, settings / "targetlines-state", chatLogs);
+    if (targetlinesHost.LoadedCount() != 3 || targetlinesHost.FaultedCount() != 0 || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "targetlines fixture did not load with a healthy owner\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Update(0.02);
+    if (capture.targetlines != 0 || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "targetlines update called its sink or disabled the feature\n";
+        return 1;
+    }
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 1 || capture.targetlinesAddonId != "targetlines" || capture.rawTexts != 1 || targetlinesHost.FaultedCount() != 0)
+    {
+        std::cerr << "targetlines draw callback or addon ownership failed\n";
+        return 1;
+    }
+    if (!targetlinesHost.Reload("targetlines") || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "host did not restore targetlines after a healthy reload\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 1 || capture.rawTexts != 1)
+    {
+        std::cerr << "reloaded targetlines or another addon did not draw exactly once\n";
+        return 1;
+    }
+    if (!targetlinesHost.Disable("targetlines") || targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "disabled targetlines remained enabled\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 0 || capture.rawTexts != 1 || targetlinesHost.FaultedCount() != 0)
+    {
+        std::cerr << "disabled targetlines failed drawing or fault checks\n";
+        return 1;
+    }
+    if (!targetlinesHost.Enable(targetlinesFixtureManifest) || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "targetlines did not recover after disable\n";
+        return 1;
+    }
+    {
+        std::ofstream script(targetlinesFixtureRoot / "targetlines.lua", std::ios::trunc);
+        script << "function load() error(\"targetlines load failure\") end\n";
+    }
+    if (!targetlinesHost.Reload("targetlines") || targetlinesHost.TargetlinesEnabled() ||
+        !targetlinesHost.IsLoaded("targetlines") || targetlinesHost.LoadedCount() != 2 || targetlinesHost.FaultedCount() != 1)
+    {
+        std::cerr << "targetlines load fault left incorrect addon state\n";
+        return 1;
+    }
+    {
+        std::ofstream script(targetlinesFixtureRoot / "targetlines.lua", std::ios::trunc);
+        script << "function update(_) error(\"targetlines update failure\") end\n"
+                  "function draw() bahamut.targetlines() end\n";
+    }
+    if (!targetlinesHost.Reload("targetlines") || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "targetlines did not recover after load fault\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Update(0.02);
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 0 || capture.rawTexts != 1 || targetlinesHost.TargetlinesEnabled() ||
+        !targetlinesHost.IsLoaded("targetlines") || targetlinesHost.LoadedCount() != 2 || targetlinesHost.FaultedCount() != 1)
+    {
+        std::cerr << "targetlines update fault failed addon state or drawing checks\n";
+        return 1;
+    }
+    {
+        std::ofstream script(targetlinesFixtureRoot / "targetlines.lua", std::ios::trunc);
+        script << "function draw() bahamut.targetlines() error(\"targetlines draw failure\") end\n";
+    }
+    if (!targetlinesHost.Reload("targetlines") || !targetlinesHost.TargetlinesEnabled())
+    {
+        std::cerr << "targetlines did not recover after update fault\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 1 || capture.rawTexts != 1 || targetlinesHost.TargetlinesEnabled() ||
+        !targetlinesHost.IsLoaded("targetlines") || targetlinesHost.LoadedCount() != 2 || targetlinesHost.FaultedCount() != 1)
+    {
+        std::cerr << "targetlines draw fault was not isolated from other addons\n";
+        return 1;
+    }
+    std::filesystem::remove(targetlinesFixtureRoot / "targetlines.lua");
+    if (targetlinesHost.Reload("targetlines") || targetlinesHost.TargetlinesEnabled() ||
+        targetlinesHost.IsLoaded("targetlines") || targetlinesHost.LoadedCount() != 2 || targetlinesHost.FaultedCount() != 0)
+    {
+        std::cerr << "failed targetlines reload left incorrect addon state\n";
+        return 1;
+    }
+    ResetDrawCapture(capture);
+    targetlinesHost.Draw({ &capture, &CaptureWindow, &CaptureRawText, nullptr, &CaptureTargetlines });
+    if (capture.targetlines != 0 || capture.rawTexts != 1)
+    {
+        std::cerr << "healthy addon did not survive failed targetlines reload\n";
+        return 1;
+    }
+
     capture.chatLines.clear();
     constexpr std::array<std::string_view, 4> fpsHelp = {
         "/fps", "/fps lock", "/fps color #RRGGBB", "/fps size 8-48"
@@ -687,7 +841,7 @@ int wmain(int argc, wchar_t** argv)
     ResetDrawCapture(capture);
     host.Update(0.02);
     host.Draw({ &capture, &CaptureWindow, &CaptureRawText });
-    if (capture.windows != 1 || capture.rawTexts != 0 || capture.posText.empty() || host.LoadedCount() != 3 || host.FaultedCount() != 1)
+    if (capture.windows != 1 || capture.rawTexts != 0 || capture.posText.empty() || host.LoadedCount() != 4 || host.FaultedCount() != 1)
     {
         std::cerr << "disabled addon retained callback activity\n";
         return 1;
@@ -1209,6 +1363,37 @@ end
         std::cerr << "target HP did not show unboxed target values\n";
         return 1;
     }
+    targetMessage.sourceId = 11u;
+    targetService.Observe(targetMessage);
+    targetMessage.opcode = 0x00CEu;
+    targetMessage.payload.assign(40u, 0u);
+    targetMessage.payload[4] = 11u;
+    targetService.Observe(targetMessage);
+    targetPlayerSnapshot.x = 130.0F;
+    if (!targetPlayer.Publish(targetPlayerSnapshot))
+    {
+        std::cerr << "moved player state for target addons was rejected\n";
+        return 1;
+    }
+    targetMessage.opcode  = 0x00DBu;
+    targetMessage.payload = { 11u, 0u, 0u, 0u };
+    targetService.Observe(targetMessage);
+    ResetDrawCapture(capture);
+    targetHost.Draw({ &capture, &CaptureWindow, &CaptureRawText });
+    if (capture.rawTexts != 1 || capture.rawAddonId != "targethp" ||
+        capture.rawText != "HP 27/27 (100%)")
+    {
+        std::cerr << "self-target did not hide distance while retaining target HP\n";
+        return 1;
+    }
+    targetPlayerSnapshot.x = 0.0F;
+    if (!targetPlayer.Publish(targetPlayerSnapshot))
+    {
+        std::cerr << "restored player state for target addons was rejected\n";
+        return 1;
+    }
+    targetMessage.payload = { 12u, 0u, 0u, 0u };
+    targetService.Observe(targetMessage);
     if (!targetHost.DispatchCommand("/distance color #00FF00") ||
         !targetHost.DispatchCommand("/distance size 20") ||
         !targetHost.DispatchCommand("/targethp color #0000FF") ||

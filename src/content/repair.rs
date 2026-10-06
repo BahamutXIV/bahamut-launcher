@@ -67,7 +67,7 @@ impl RepairPhase {
     }
 }
 
-/// Progress and safe-boundary controls for one managed-game repair.
+/// Progress and controls that pause or cancel a game repair at safe checkpoints.
 pub struct RepairShared {
     phase: AtomicU8,
     bytes_completed: AtomicU64,
@@ -76,12 +76,20 @@ pub struct RepairShared {
     files_total: AtomicUsize,
     current_file: Mutex<Option<String>>,
     error: Mutex<Option<String>>,
+    failure_context: Mutex<Option<FailureContext>>,
     pause_requested: AtomicBool,
     paused: AtomicBool,
     cancel_requested: AtomicBool,
     cancel_allowed: AtomicBool,
     pause_lock: Mutex<()>,
     pause_changed: Condvar,
+}
+
+#[derive(Clone)]
+struct FailureContext {
+    destination: String,
+    cache: String,
+    content_root: String,
 }
 
 impl RepairShared {
@@ -94,6 +102,7 @@ impl RepairShared {
             files_total: AtomicUsize::new(UNKNOWN_FILE_COUNT),
             current_file: Mutex::new(None),
             error: Mutex::new(None),
+            failure_context: Mutex::new(None),
             pause_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             cancel_requested: AtomicBool::new(false),
@@ -157,6 +166,17 @@ impl RepairShared {
 
     pub fn can_cancel(&self) -> bool {
         self.cancel_allowed.load(Ordering::Acquire) && !self.phase().is_terminal()
+    }
+
+    fn set_failure_context(&self, destination: &Path, cache: &Path, content_root: &str) {
+        *self
+            .failure_context
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(FailureContext {
+            destination: destination.display().to_string(),
+            cache: cache.display().to_string(),
+            content_root: content_root.to_owned(),
+        });
     }
 
     pub fn request_pause(&self) {
@@ -285,7 +305,26 @@ impl RepairShared {
     }
 
     pub fn fail(&self, message: impl Into<String>) {
-        *self.error.lock().unwrap_or_else(|error| error.into_inner()) = Some(message.into());
+        let message = message.into();
+        let context = self
+            .failure_context
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .unwrap_or_else(|| FailureContext {
+                destination: "<unknown>".into(),
+                cache: "<unknown>".into(),
+                content_root: "<unknown>".into(),
+            });
+        tracing::error!(
+            action = "repair",
+            destination = %context.destination,
+            cache = %context.cache,
+            content_root = %context.content_root,
+            diagnostic = %message,
+            "game repair failed"
+        );
+        *self.error.lock().unwrap_or_else(|error| error.into_inner()) = Some(message);
         self.finish_phase(RepairPhase::Error);
     }
 
@@ -335,7 +374,7 @@ pub struct RepairQuote {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 pub struct VerificationSummary {
-    /// Non-valid files only. Counts below cover the full managed-file inventory.
+    /// Files that failed validation. Counts below cover all managed files.
     pub files: Vec<ManagedFileStatus>,
     pub valid_count: usize,
     pub missing_count: usize,
@@ -443,6 +482,7 @@ pub fn repair_all(
     package: &BasePackage,
     shared: &RepairShared,
 ) -> Result<RepairResult, String> {
+    shared.set_failure_context(destination, cache, content_root);
     shared.begin_phase(RepairPhase::Starting, None, None);
     let result = repair_all_inner(destination, content_root, cache, package, shared);
     match result {
@@ -450,9 +490,8 @@ pub fn repair_all(
             if result.complete {
                 shared.finish_phase(RepairPhase::Done);
             } else {
-                shared.fail(
-                    "Repair finished, but the final scan still found managed files that need attention.",
-                );
+                let diagnostic = "Repair finished, but the final scan still found managed files that need attention.";
+                shared.fail(diagnostic);
             }
             Ok(result)
         }

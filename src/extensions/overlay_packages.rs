@@ -39,15 +39,8 @@ pub struct OverlayPackage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OverlayConflict {
-    pub relative_path: PathBuf,
-    pub package_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverlaySelection {
     pub roots: Vec<PathBuf>,
-    pub conflicts: Vec<OverlayConflict>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -251,7 +244,6 @@ pub fn select_overlay_packages(
     preferences: &[ExtensionPreference],
 ) -> OverlaySelection {
     let mut roots = Vec::new();
-    let mut selected = Vec::new();
     let official = ExtensionPreference {
         id: OFFICIAL_DAT_OVERLAY_PACKAGE_ID.into(),
         enabled: true,
@@ -266,30 +258,9 @@ pub fn select_overlay_packages(
         }
         if let Some(package) = packages.iter().find(|package| package.id == preference.id) {
             roots.push(package.root_path.clone());
-            selected.push(package);
         }
     }
-
-    let mut paths = BTreeMap::<String, (PathBuf, Vec<String>)>::new();
-    for package in selected {
-        for relative_path in &package.payload_files {
-            let key = path_key(relative_path);
-            let entry = paths
-                .entry(key)
-                .or_insert_with(|| (relative_path.clone(), Vec::new()));
-            entry.1.push(package.id.clone());
-        }
-    }
-    let conflicts = paths
-        .into_values()
-        .filter_map(|(relative_path, package_ids)| {
-            (package_ids.len() > 1).then_some(OverlayConflict {
-                relative_path,
-                package_ids,
-            })
-        })
-        .collect();
-    OverlaySelection { roots, conflicts }
+    OverlaySelection { roots }
 }
 
 fn validate_manifest(
@@ -584,7 +555,6 @@ mod tests {
             selection.roots,
             vec![packages[0].root_path.clone(), packages[1].root_path.clone()]
         );
-        assert!(selection.conflicts.is_empty());
     }
 
     #[test]
@@ -788,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_rows_are_ignored_and_enabled_order_drives_conflicts() {
+    fn stale_rows_are_ignored_and_enabled_order_drives_first_hit() {
         let root = tempfile::tempdir().unwrap();
         write_package(root.path(), "alpha", "alpha", &[("data/a.DAT", "a")]);
         write_package(root.path(), "beta", "beta", &[("data/a.DAT", "b")]);
@@ -810,12 +780,14 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(selection.roots[0], packages[1].root_path);
-        assert_eq!(selection.conflicts[0].package_ids, vec!["beta", "alpha"]);
+        assert_eq!(
+            selection.roots,
+            vec![packages[1].root_path.clone(), packages[0].root_path.clone()]
+        );
     }
 
     #[test]
-    fn enabled_packages_with_disjoint_payloads_have_no_conflicts() {
+    fn enabled_packages_keep_discovered_payloads() {
         let root = tempfile::tempdir().unwrap();
         write_package(root.path(), "alpha", "alpha", &[("data/a.DAT", "a")]);
         write_package(root.path(), "beta", "beta", &[("data/b.DAT", "b")]);
@@ -849,7 +821,23 @@ mod tests {
                 .payload_files,
             vec![PathBuf::from("data/b.DAT")]
         );
-        assert!(selection.conflicts.is_empty());
+        assert_eq!(
+            selection.roots,
+            vec![
+                packages
+                    .iter()
+                    .find(|package| package.id == "alpha")
+                    .unwrap()
+                    .root_path
+                    .clone(),
+                packages
+                    .iter()
+                    .find(|package| package.id == "beta")
+                    .unwrap()
+                    .root_path
+                    .clone(),
+            ]
+        );
     }
 
     #[cfg(windows)]

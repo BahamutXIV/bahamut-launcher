@@ -1,45 +1,45 @@
 # Bahamut Launcher for Linux
 
-Bahamut Launcher installs, repairs, and starts the FINAL FANTASY XIV 1.23b
-client for the BahamutXIV server. This folder is the Linux x86_64 release of
-the launcher.
+Use this Linux x86_64 release to install, repair, and start the FINAL FANTASY XIV
+1.23b client for the BahamutXIV server.
 
-The archive does not contain the game. The launcher downloads the game client
-when you choose Install on its Home tab.
+The download contains only the launcher. Choose Install on the Home tab to
+download the game.
 
 ## Requirements
 
-- An x86_64 machine running a glibc-based distribution with glibc 2.35 or
-  newer.
+- An x86_64 machine with a glibc-based distribution and glibc 2.35 or newer.
 - WebKitGTK 4.1 and GTK 3.
-- `tar` and `xz`, which the launcher uses to unpack its Wine download.
+- `tar` and `xz` to unpack the Wine download.
 
-Wine is not required. The launcher downloads its own Wine on the first Play.
-A Vulkan driver lets the game use DXVK; without one the game uses the slower
-OpenGL renderer.
+You do not need to install Wine; the launcher downloads it on the first Play.
+A Vulkan driver enables DXVK. Without one, the game uses the slower OpenGL
+renderer.
 
 ## Quick start
 
-Check the dependencies with
-[install-dependencies.sh](install-dependencies.sh), then run the launcher from
-this folder:
+Check dependencies with [install-dependencies.sh](install-dependencies.sh),
+then start the launcher from this folder:
 
 ```bash
 ./install-dependencies.sh --check
 ./bahamut-launcher
 ```
 
-`./install-dependencies.sh --check` reports missing libraries, a glibc that is
-too old, which Wine the launcher will use, and whether a Vulkan loader and
-driver are present. `./install-dependencies.sh --install` prints the package
-command for your distribution, asks for confirmation, and runs it through
-`sudo` or `doas`; add `--yes` to skip the confirmation. Both commands are
-optional. The script's usage text lists every option and exit code.
+`./install-dependencies.sh --check` reports missing libraries, an unsupported
+glibc version, the Wine the launcher will use, and the availability of a Vulkan
+loader and driver.
+
+To install missing dependencies, run `./install-dependencies.sh --install`.
+It prints your distribution's package command, asks for confirmation, and runs
+it through `sudo` or `doas`. Add `--yes` to skip confirmation. Both the check
+and install commands are optional. See the script's usage text for all options
+and exit codes.
 
 ## Install
 
-[install.sh](install.sh) puts the launcher on your `PATH` and in your
-application menu. The [Makefile](Makefile) wraps it.
+Use [install.sh](install.sh) to put the launcher on your `PATH` and in the
+application menu. The [Makefile](Makefile) wraps the same script. Choose one:
 
 ```bash
 ./install.sh
@@ -48,137 +48,132 @@ sudo make install
 ```
 
 - `./install.sh` installs for the current user under `~/.local`.
-- `sudo ./install.sh` installs for every user under `/usr/local`.
-- `sudo make install` installs under `/usr/local` as well. `make` reads
-  `PREFIX` and `DESTDIR`, for example `make install PREFIX="$HOME/.local"`.
+- `sudo ./install.sh` installs for all users under `/usr/local`.
+- `sudo make install` also installs under `/usr/local`. `make` reads `PREFIX`
+  and `DESTDIR`; for example, `make install PREFIX="$HOME/.local"`.
 
-The install writes these files, relative to the prefix:
+Paths are relative to the install prefix:
 
 | Path | Content |
 |---|---|
-| `lib/bahamut-launcher/` | The launcher payload: this folder's files except the `Makefile`, including `install.sh` and `install-dependencies.sh`. |
-| `bin/bahamut-launcher` | A link to the launcher in the payload directory. |
+| `lib/bahamut-launcher/` | All files from this folder except the `Makefile`, including `install.sh` and `install-dependencies.sh`. |
+| `bin/bahamut-launcher` | A link to the executable in the payload directory. |
 | `share/applications/bahamut-launcher.desktop` | The application menu entry. |
-| `share/icons/hicolor/<size>/apps/bahamut-launcher.png` | The icons, in 48x48, 128x128, and 256x256. |
+| `share/icons/hicolor/<size>/apps/bahamut-launcher.png` | Icons at 48x48, 128x128, and 256x256. |
 
-The menu entry works even when `~/.local/bin` is not on your `PATH`.
+The menu entry works even if `~/.local/bin` is absent from your `PATH`.
 
-`install.sh` takes these options:
+`install.sh` accepts these options:
 
-- `--prefix DIR` sets the install prefix; the default is `~/.local`, or
-  `/usr/local` as root.
-- `--pkgdir DIR` sets the payload directory; the default is
-  `PREFIX/lib/bahamut-launcher`.
-- `--destdir DIR` sets a staging root that is prepended to every written path.
-- `--skip-checks` skips the dependency check that runs before an install.
-- `--force` replaces or removes a payload directory that `install.sh` created
-  even when it no longer matches its install records. Everything in that
-  directory is deleted.
-- `--uninstall` removes an installation.
-- `--help` shows the usage text.
+- `--prefix DIR`: install prefix; defaults to `~/.local`, or `/usr/local` as root.
+- `--pkgdir DIR`: payload directory; defaults to `PREFIX/lib/bahamut-launcher`.
+- `--destdir DIR`: staging root prepended to every written path.
+- `--skip-checks`: skip the dependency check before installation.
+- `--force`: replace or remove a payload directory created by `install.sh`,
+  even if it no longer matches the install records. This deletes everything
+  in that directory.
+- `--uninstall`: remove an installation.
+- `--help`: show usage.
 
-`install.sh` also reads `PREFIX` and `DESTDIR` from the environment. Run
-`./install.sh --help` for the exact usage.
+The script also reads `PREFIX` and `DESTDIR` from the environment. Run
+`./install.sh --help` for exact usage.
 
 ## Update and uninstall
 
-To update a copy that runs in place, delete or rename the old
-`bahamut-launcher/` folder, then extract the new archive into a new or empty
-directory. Your settings stay in `~/.bahamut-launcher`.
+For a copy run directly from an extracted folder, delete or rename the old
+`bahamut-launcher/` folder first. Extract the new tar.gz into a new or empty
+directory. Settings remain in `~/.bahamut-launcher`.
 
-To update an installed copy, run `./install.sh` from the new archive's folder
-with the same options as the first install. It replaces the payload directory.
+For an installed copy, run `./install.sh` from the new release's folder with
+the original install options. It replaces the payload directory.
 
-To uninstall, run `--uninstall` as the user who installed. For an install
-under `~/.local`:
+To uninstall, use the same user account that installed it. For `~/.local`:
 
 ```bash
 ~/.local/lib/bahamut-launcher/install.sh --uninstall
 ```
 
-For an install under `/usr/local`:
+For `/usr/local`:
 
 ```bash
 sudo /usr/local/lib/bahamut-launcher/install.sh --uninstall
 ```
 
-From this folder, `sudo make uninstall` removes an install under `/usr/local`,
-and `./install.sh --uninstall` removes one under `~/.local`. For any other
-`--prefix`, `--pkgdir`, or `--destdir`, pass the same options to
-`--uninstall`.
+You can also run `sudo make uninstall` from this folder for a `/usr/local`
+installation, or `./install.sh --uninstall` for a `~/.local` installation.
+If you used another `--prefix`, `--pkgdir`, or `--destdir`, pass the same
+options with `--uninstall`.
 
-Uninstalling leaves `~/.bahamut-launcher` in place. To remove a copy that runs
-in place, delete this folder. Delete `~/.bahamut-launcher` as well to remove
-your settings, logs, and Wine prefix.
+Uninstall leaves `~/.bahamut-launcher` intact. To remove a copy you run directly
+from an extracted folder, delete that folder. Deleting `~/.bahamut-launcher` as
+well removes your settings, logs, and Wine prefix.
 
 ## First launch
 
-1. Start the launcher with `bahamut-launcher`, from the application menu, or
-   with `./bahamut-launcher` in this folder.
-2. On Home, choose Install to download the game into a new or empty folder. The
-   default is `~/Games/FINAL FANTASY XIV`. Keep the game in its own directory,
-   separate from the launcher.
+1. Start `bahamut-launcher` from the command line or application menu, or run
+   `./bahamut-launcher` from this folder.
+2. On Home, choose Install and select a new or empty game folder. The default
+   is `~/Games/FINAL FANTASY XIV`. Keep it separate from the launcher folder.
 3. Choose a server profile and sign in.
 4. Choose Play.
 
-The first Play downloads Wine and sets up the Wine prefix, so it takes longer
-than later ones.
+The first Play takes longer because it downloads Wine and sets up its prefix.
 
 ## Where files live
 
-The launcher keeps its writable state in `~/.bahamut-launcher`:
+Writable state lives in `~/.bahamut-launcher`:
 
 | Path | Content |
 |---|---|
 | `config/` | Configuration files. |
-| `logs/launcher/bahamut-launcher.log` | The launcher log. |
-| `logs/wine.log` | Wine's own output. |
-| `prefix/` | The managed Wine prefix. |
-| `runtime/` | The Wine engine and the DXVK cache. |
+| `logs/launcher/bahamut-launcher.log` | Launcher log. |
+| `logs/wine.log` | Wine output. |
+| `prefix/` | Managed Wine prefix. |
+| `runtime/` | Wine engine and DXVK cache. |
 
-If `BAHAMUT_LAUNCHER_HOME` holds an absolute path, the launcher uses that
-directory instead of `~/.bahamut-launcher`.
+Set `BAHAMUT_LAUNCHER_HOME` to an absolute path to use another state directory.
 
-The launcher uses this location because the file `.bahamut-launcher-package`
-sits beside `bahamut-launcher`. Keep it in an installed copy: `install.sh`
-replaces or deletes that whole directory and refuses to when the file is
-missing. In a folder you extracted yourself, removing it makes the launcher
-keep its configuration and logs beside the executable; the Wine prefix, the
-Wine engine, the DXVK cache, and `wine.log` stay in `~/.bahamut-launcher`.
+The `.bahamut-launcher-package` file beside `bahamut-launcher` selects this
+layout. Keep the marker in an installed copy: `install.sh` replaces or deletes
+the whole payload directory and refuses to do so without it.
+
+In a folder you extracted yourself, removing the marker makes the launcher store
+configuration and logs beside the executable. The Wine prefix, engine, DXVK cache, and
+`wine.log` still live in `~/.bahamut-launcher`.
 
 ## Using another Wine
 
-`BAHAMUT_WINE` names the Wine executable to use instead of the launcher's own:
+Set `BAHAMUT_WINE` to the Wine executable you want to use:
 
 ```bash
 BAHAMUT_WINE=/opt/wine/bin/wine bahamut-launcher
 ```
 
 The launcher uses that file as given. It must be Wine 7 or newer with 32-bit
-support. With `BAHAMUT_WINE` set, `./install-dependencies.sh --check` checks
+support. When the variable is set, `./install-dependencies.sh --check` checks
 that Wine.
 
 ## Desktop integration
 
-After `install.sh` runs, Bahamut Launcher appears in application menus and in
-launchers that read desktop entries, such as fuzzel, wofi, and rofi in `drun`
-mode. The Hyprland window rule for floating the launcher window is in the
+After installation, Bahamut Launcher appears in application menus and desktop
+entry launchers such as fuzzel, wofi, and rofi in `drun` mode. For a Hyprland
+rule that floats the window, see the
 [online getting-started guide](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/getting-started.md#gentoo-and-hyprland).
 
 ## What is in this folder
 
 | Path | Purpose |
 |---|---|
-| `bahamut-launcher` | The launcher executable. |
-| `install.sh` | Installs or uninstalls the launcher. |
-| `install-dependencies.sh` | Checks for, or installs, the libraries the launcher needs. |
-| `Makefile` | The `make install` and `make uninstall` targets. |
-| `.bahamut-launcher-package` | The package marker described above. |
-| `bahamut-loader.exe`, `bahamut.dll` | The client loader and module that run inside Wine. |
-| `plugins/`, `addons/` | Shipped native plugins, addons, and the official DAT package. |
-| `scripts/` | The seed for the default script file. |
-| `share/` | The menu entry and icons that `install.sh` installs. |
-| `LICENSE.md`, `licenses/` | The launcher license and third-party notices. |
+| `bahamut-launcher` | Launcher executable. |
+| `install.sh` | Install and uninstall script. |
+| `install-dependencies.sh` | Dependency checker and installer. |
+| `Makefile` | `make install` and `make uninstall` targets. |
+| `.bahamut-launcher-package` | Package marker described above. |
+| `bahamut-loader.exe`, `bahamut.dll` | Client loader and module used inside Wine. |
+| `plugins/`, `addons/` | Shipped native plugins, addons, and official DAT package. |
+| `scripts/` | Seed for the default script file. |
+| `share/` | Menu entry and icons installed by `install.sh`. |
+| `LICENSE.md`, `licenses/` | Launcher license and third-party notices. |
 | `README.md` | This file. |
 
 ## Troubleshooting and documentation
@@ -190,5 +185,5 @@ mode. The Hyprland window rule for floating the launcher window is in the
 
 ## License
 
-The launcher license is in `LICENSE.md`. Third-party notices are in the
-`licenses/` directory.
+Read `LICENSE.md` for the launcher license and `licenses/` for third-party
+notices.

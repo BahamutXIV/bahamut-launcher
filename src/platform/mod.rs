@@ -139,7 +139,7 @@ impl ExtensionArtifacts {
     }
 }
 
-/// Cross-platform launch tuning; native Windows ignores these, Wine reads them.
+/// Launch options shared by the platform backends.
 #[derive(Debug, Clone, Default)]
 pub struct LaunchOptions {
     /// Enable verbose Wine debug channels in the per-launch log.
@@ -148,7 +148,7 @@ pub struct LaunchOptions {
     pub display_mode: DisplayMode,
     /// Optional Windows display-interface identity used by borderless mode.
     pub borderless_monitor: Option<String>,
-    /// `None` is the first-class launch-without-extensions transaction.
+    /// `None` launches the game without extensions.
     pub extension_artifacts: Option<ExtensionArtifacts>,
 }
 

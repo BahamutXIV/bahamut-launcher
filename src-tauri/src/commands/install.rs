@@ -17,8 +17,7 @@ pub(crate) const INSTALL_BUSY_MSG: &str =
 pub(crate) const CONTENT_STATE_POISONED_MSG: &str =
     "Install state is unavailable because its synchronization state was poisoned.";
 pub(crate) const CONTENT_CLOSING_MSG: &str = "Launcher is closing.";
-const NO_BASE_PACKAGE_MSG: &str =
-    "Base-game installation is not configured for this build. Select Existing to use your client.";
+const NO_BASE_PACKAGE_MSG: &str = "Game installation is not configured for this build. Choose an existing game folder in Settings > Misc > Install Location.";
 
 #[tauri::command]
 pub(crate) fn detect_game_install_command() -> GameInstallInfo {
@@ -129,7 +128,7 @@ pub(crate) fn spawn_installer(
                     && let Err(error) = persist_game_location(&destination)
                 {
                     worker_shared.fail(format!(
-                        "Installation finished at {} but selecting it failed: {error}. Select Existing to use it.",
+                        "Installation finished at {} but selecting it failed: {error}. Choose that folder in Settings > Misc > Install Location.",
                         destination.display()
                     ));
                 }
@@ -170,10 +169,11 @@ pub(crate) async fn install_quote(
     let package = manifest::shipped_manifest()?
         .base
         .ok_or(NO_BASE_PACKAGE_MSG)?;
-    let cache = resolve_download_cache_dir()?;
+    let destination = PathBuf::from(destination);
+    let cache = resolve_download_cache_dir(Some(&destination))?;
     resolve_content_root()?;
     tauri::async_runtime::spawn_blocking(move || {
-        bahamut_launcher::content::installer::quote(&PathBuf::from(destination), &cache, &package)
+        bahamut_launcher::content::installer::quote(&destination, &cache, &package)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -190,10 +190,12 @@ pub(crate) fn install_game(
         .map_err(AuthError::server)?
         .base
         .ok_or_else(|| AuthError::server(NO_BASE_PACKAGE_MSG))?;
+    let destination = PathBuf::from(destination);
+    let cache_dir = resolve_download_cache_dir(Some(&destination)).map_err(AuthError::server)?;
     let request = InstallRequest {
-        destination: PathBuf::from(destination),
+        destination,
         content_root: resolve_content_root().map_err(AuthError::server)?,
-        cache_dir: resolve_download_cache_dir().map_err(AuthError::server)?,
+        cache_dir,
         package,
     };
     spawn_installer(&state, &game, &backups, request)
@@ -289,4 +291,17 @@ pub(crate) async fn install_status(
         }
         None => InstallStatusView::idle(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_package_message_points_to_install_location() {
+        assert_eq!(
+            NO_BASE_PACKAGE_MSG,
+            "Game installation is not configured for this build. Choose an existing game folder in Settings > Misc > Install Location."
+        );
+    }
 }

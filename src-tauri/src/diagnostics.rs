@@ -25,7 +25,7 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
     let layout = ExtensionLayout::new(&roots.install, &roots.state);
     let config_root = dirs::portable_config_dir().ok();
     let game_root = resolve_game_dir();
-    let download_cache = resolve_download_cache_dir().ok();
+    let download_cache = resolve_download_cache_dir(game_root.as_deref()).ok();
 
     log_path_value("Install root", Some(&roots.install));
     log_path_value("State root", Some(&roots.state));

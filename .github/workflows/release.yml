@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       level:
-        description: "Bump level for a release of the current main tip"
+        description: "Version increment for a release from the current main commit"
         required: true
         default: patch
         type: choice

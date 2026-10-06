@@ -7,8 +7,7 @@ use bahamut_launcher::config::extension_config::{
 
 use crate::extensions;
 use crate::presentation::{
-    ExtensionCommandView, ExtensionInventoryView, ExtensionItemView, OverlayConflictView,
-    OverlayPackageView,
+    ExtensionCommandView, ExtensionInventoryView, ExtensionItemView, OverlayPackageView,
 };
 use crate::shell_config::{load_dats_config, load_extensions_config};
 
@@ -96,8 +95,6 @@ pub(crate) fn extension_inventory_view_with_overlays(
                 .unwrap_or(usize::MAX)
         }
     });
-    let dat_selection =
-        bahamut_launcher::extensions::select_overlay_packages(&dat_packages, &dat_config.packages);
     let overlays = dat_packages
         .into_iter()
         .map(|package| {
@@ -124,14 +121,6 @@ pub(crate) fn extension_inventory_view_with_overlays(
             }
         })
         .collect();
-    let overlay_conflicts = dat_selection
-        .conflicts
-        .into_iter()
-        .map(|conflict| OverlayConflictView {
-            relative_path: conflict.relative_path.to_string_lossy().replace('\\', "/"),
-            package_ids: conflict.package_ids,
-        })
-        .collect();
     ExtensionInventoryView {
         addons,
         plugins: vec![
@@ -139,7 +128,6 @@ pub(crate) fn extension_inventory_view_with_overlays(
             discord_rpc_plugin_view(config.plugin_enabled(DISCORD_RPC_PLUGIN_ID)),
         ],
         overlays,
-        overlay_conflicts,
     }
 }
 
@@ -171,12 +159,12 @@ fn screenshot_plugin_view(enabled: bool) -> ExtensionItemView {
         name: "Screenshot".into(),
         author: "Aeshur".into(),
         version: "1.0".into(),
-        description: "Captures the game to the portable screenshots folder.".into(),
+        description: "Saves game screenshots in the launcher screenshots folder.".into(),
         homepage: None,
         commands: vec![ExtensionCommandView {
             name: "screenshot".into(),
             usage: "/screenshot".into(),
-            description: "Captures a frame when invoked by a configured binding.".into(),
+            description: "Takes a screenshot with the configured key binding.".into(),
         }],
         capabilities: Vec::new(),
         compatibility: "Supported client build".into(),

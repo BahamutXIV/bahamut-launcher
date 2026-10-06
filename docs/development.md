@@ -2,42 +2,41 @@
 
 [Back to the documentation index](README.md)
 
-The workspace contains a pure-Rust core, a Tauri 2 shell, and an x86 Win32
-client module. Run the commands below from the repository root. They match the
-hosted workflows unless a section names a platform-specific check.
+Run these commands from the repository root to build and check the launcher.
+The workspace has a pure-Rust core, a Tauri 2 shell, and an x86 Win32 client
+module. Commands match the hosted workflows unless a section specifies a
+platform-only check.
 
 ## Prerequisites
 
 - Rust 1.95.0, selected by [`rust-toolchain.toml`](../rust-toolchain.toml),
-  with `rustfmt` and `clippy` available.
-- Node.js 22 for browser tests, Markdown-reference validation, and the C++
-  formatter wrapper.
-- Python with `clang-format==22.1.8` for the project's native C++ formatting.
+  with `rustfmt` and `clippy`.
+- Node.js 22 for browser tests, Markdown link validation, and the C++ formatter
+  wrapper.
+- Python with `clang-format==22.1.8` for native C++ formatting.
 - [actionlint 1.7.12](https://github.com/rhysd/actionlint/releases/tag/v1.7.12)
   for workflow checks.
-- Native client work on Windows requires Visual Studio 2022 with the Win32
-  C++ toolchain.
-- Cross-compiling the client module on macOS or Linux requires CMake 3.25 or
+- For native client work on Windows: Visual Studio 2022 with the Win32 C++
+  toolchain.
+- For cross-compiling the client module on Linux or macOS: CMake 3.25 or
   later and the [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases)
   release pinned in
-  [`release-binaries.yml`](../.github/workflows/release-binaries.yml). Running
-  its tests requires Wine.
-- Linux Tauri work requires the packages listed in
-  [Tauri and WebView](#tauri-and-webview).
-- Packaging and checking the Linux archive
-  ([`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh),
-  [`test-linux-package.py`](../scripts/test-linux-package.py)) requires a
-  Linux host with GNU tar, gzip, Python 3, and `make`. `shellcheck` and
-  `desktop-file-validate` run the matching repository checks.
-- Packaging and checking the macOS app bundle
-  ([`package-macos-app.sh`](../scripts/package-macos-app.sh),
-  [`check-macos-app-zip.sh`](../scripts/check-macos-app-zip.sh)) requires
-  macOS itself, with Xcode's `codesign`, `plutil`, `xattr`, `ditto`, and
-  `lipo`.
+  [`release-binaries.yml`](../.github/workflows/release-binaries.yml).
+  Running its tests also requires Wine.
+- For Linux Tauri work: the packages in [Tauri and WebView](#tauri-and-webview).
+- For Linux packaging and package checks with
+  [`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh) and
+  [`test-linux-package.py`](../scripts/test-linux-package.py): a Linux host
+  with GNU tar, gzip, Python 3, and `make`. Install `shellcheck` and
+  `desktop-file-validate` for the matching repository checks.
+- For macOS packaging and ZIP checks with
+  [`package-macos-app.sh`](../scripts/package-macos-app.sh) and
+  [`check-macos-app-zip.sh`](../scripts/check-macos-app-zip.sh): macOS with
+  Xcode's `codesign`, `plutil`, `xattr`, `ditto`, and `lipo`.
 
-Use the tracked formatter configuration for each changed language. Keep
-comments and public documentation within the [comments and prose policy](ai_agents/comments-and-prose.md).
-Install the pinned native formatter with:
+Use the tracked formatter configuration for each language you change. Follow
+the [comments and prose policy](ai_agents/comments-and-prose.md) for comments
+and public documentation. Install the pinned native formatter with:
 
 ```powershell
 python -m pip install clang-format==22.1.8
@@ -57,49 +56,51 @@ python tools/format_lua.py check
 ```
 
 The Markdown check validates tracked files and local targets. The C++ check
-audits changed files and untracked project files under `client/{api,src,tests}`.
-Use `--base <ref>` for committed changes since a merge base and `--all` only
-for an intentional whole-tree audit. Format an owned file with
-`clang-format -i path/to/file.cpp` and preserve vendor sources. `actionlint`
-checks workflow syntax. The hosted workflow runs these checks and adds the
-platform checks below.
+audits changed files and untracked project files in `client/{api,src,tests}`.
+Add `--base <ref>` to check committed changes since a merge base; reserve
+`--all` for an intentional whole-tree audit. Format your files with
+`clang-format -i path/to/file.cpp` and leave vendor sources untouched.
+`actionlint` checks workflow syntax. Hosted checks also run the platform
+checks below.
 
 On Linux, `cargo test --lib pinned_engine -- --ignored` downloads the pinned
-[Wine engine](configuration.md#linux-wine-engine) and checks that it verifies
-and unpacks. It runs on any Linux CPU architecture and does not start Wine.
+[Wine engine](configuration.md#linux-wine-engine) and verifies that it checks
+and unpacks successfully. This runs on any Linux CPU architecture without
+starting Wine.
 
 ## Rust and NASM
 
-The checkout pins Rust 1.95.0 and includes `rustfmt` and `clippy` in
-`rust-toolchain.toml`. Run `rustup show` if Cargo is using an unexpected
-toolchain. On Windows with MSVC, `.cargo/config.toml` sets
-`AWS_LC_SYS_PREBUILT_NASM=1`, so `aws-lc-sys` uses its prebuilt objects, and
-statically links the x64 launcher shell's Rust runtime so it can report and
-repair a missing WebView2 Runtime before its UI starts. If Cargo
-reports a missing NASM executable, confirm that file is present and rerun
-`cargo build --workspace`.
+The checkout's `rust-toolchain.toml` pins Rust 1.95.0 with `rustfmt` and
+`clippy`. Run `rustup show` if Cargo selects an unexpected toolchain.
 
-The MSVC-built Win32 loader and native modules in the Windows package require
-the x86 Visual C++ Runtime. The llvm-mingw builds in the Linux and macOS
-archives link their runtime statically and import only Windows system DLLs and
-the UCRT API-set DLLs, which Wine supplies.
+On Windows with MSVC, `.cargo/config.toml` sets
+`AWS_LC_SYS_PREBUILT_NASM=1` so `aws-lc-sys` uses prebuilt objects. It also
+statically links the x64 launcher's Rust runtime, allowing the shell to report
+and repair a missing WebView2 Runtime before opening the UI. If Cargo reports
+a missing NASM executable, check that `.cargo/config.toml` is present and
+rerun `cargo build --workspace`.
+
+The Windows package's MSVC-built Win32 loader and native modules require the
+x86 Visual C++ Runtime. Linux and macOS llvm-mingw builds statically link
+their runtime and import only Windows system DLLs and UCRT API-set DLLs,
+which Wine provides.
 
 ## Tauri and WebView
 
-The root crate is Tauri-free, so `cargo test --workspace` does not require a
-WebView. The shell is the Tauri 2 package. For shell-only development on Linux
-or macOS, run:
+The root crate is Tauri-free; `cargo test --workspace` needs no WebView. The
+shell is the Tauri 2 package. For shell-only development on Linux or macOS:
 
 ```powershell
 cargo run -p bahamut-launcher-shell
 ```
 
-The frontend is vanilla HTML, CSS, and JavaScript with no separate frontend
-build step. The shell uses system WebView2 on Windows. If WebView2 is missing,
-the launcher downloads and runs its pinned bootstrapper at startup. Before game
-launch, it does the same for the x86 Visual C++ redistributable when missing.
+The frontend uses vanilla HTML, CSS, and JavaScript with no separate build
+step. On Windows, the shell uses system WebView2. If that runtime is missing,
+the launcher downloads and runs its pinned bootstrapper at startup. It does
+the same for a missing x86 Visual C++ redistributable before game launch.
 Release preparation verifies each pinned R2 installer without bundling it.
-On Linux, install the same packages used by CI:
+
+For Linux builds, install CI's development packages:
 
 ```bash
 sudo apt-get update
@@ -110,110 +111,116 @@ sudo apt-get install --no-install-recommends -y \
   librsvg2-dev
 ```
 
-That list is for building. A built launcher needs only WebKitGTK 4.1 and
-GTK 3 at runtime, with their GLib, libsoup, GStreamer, cairo, pango, Wayland,
-and X11 dependencies; its dynamic closure includes neither
-libayatana-appindicator nor librsvg.
-[`install-dependencies.sh`](../packaging/linux/install-dependencies.sh)
-checks a built launcher with `--check --launcher <path>`.
+A built launcher needs only WebKitGTK 4.1 and GTK 3 at runtime, plus their
+GLib, libsoup, GStreamer, cairo, pango, Wayland, and X11 dependencies. Its
+dynamic dependencies include neither libayatana-appindicator nor librsvg.
+Use [`install-dependencies.sh`](../packaging/linux/install-dependencies.sh)
+with `--check --launcher <path>` to check a built launcher.
 
-The install-strip preview opens the real frontend in nine isolated Chrome or
-Edge tabs. It uses mocked launcher commands and cannot change configuration,
-client files, or the download cache:
+Preview the install strip in nine isolated Chrome or Edge tabs:
 
 ```powershell
 node scripts/preview-install-strip.mjs
 ```
 
-Use Ctrl+Tab to move through the stage labels and close the preview browser to
-stop its temporary local server.
+The preview opens the real frontend with mocked launcher commands. It cannot
+change configuration, client files, or the download cache. Use Ctrl+Tab to
+move through stage labels. Closing the preview browser stops its temporary
+local server.
 
 ## Native client and browser checks
 
-The x86 client module builds with the Visual Studio generator on Windows and
-cross-compiles with llvm-mingw on macOS and Linux. Both use CTest. Cross-built
-tests run under Wine only when configured with
-`-DCMAKE_CROSSCOMPILING_EMULATOR` pointing at `client/tools/run-under-wine.sh`,
-as shown in [Tests under Wine](../client/README.md#tests-under-wine). The full
-commands and test coverage limits are in [client/README.md](../client/README.md).
-Wine results apply only to the selected Wine build, prefix, and bundled stub
-client. They do not establish retail client behavior or support for another
-Wine build.
+Build the x86 client module with the Visual Studio generator on Windows or
+llvm-mingw on Linux and macOS. Both use CTest. Cross-built tests run under
+Wine only when `-DCMAKE_CROSSCOMPILING_EMULATOR` points to
+`client/tools/run-under-wine.sh`; see
+[Tests under Wine](../client/README.md#tests-under-wine).
 
-The browser checks run with Node.js:
+[client/README.md](../client/README.md) has the full commands and coverage
+limits. Wine results apply only to the selected build, prefix, and bundled
+stub client. They do not establish retail behavior or support for other Wine
+builds.
+
+Run browser checks with Node.js:
 
 ```powershell
 node --test src-tauri/ui/browser-test.mjs
 ```
 
-The publisher for game content uses Python 3.10 or later and only its standard
-library. Its synthetic tests need no game files or storage credentials:
+The game content publisher needs Python 3.10 or later and only the standard
+library. Its synthetic tests need neither game files nor storage credentials:
 
 ```powershell
 python scripts/test-package-game-content.py
 python scripts/test-intake-full-client.py
 ```
 
-On Linux or macOS, test package publication with synthetic build and staging
-inputs. This checks destination links and file preservation, not compilation
-or game launch:
+On Linux or macOS, check package publication with synthetic build and staging
+inputs:
 
 ```bash
 python3 scripts/test-unix-package.py
 ```
 
-Full-client intake is optional because it reads the complete retail ZIP. Use
-`python scripts/intake-full-client.py --help` for its archive, output, and
-staging inputs. A live reqwest test uses `BAHAMUT_LIVE_CONTENT_CACHE` to name a
-local cache directory.
+This tests destination links and file preservation. It does not compile code
+or launch the game.
 
-See the [game content delivery reference](content-delivery.md) for the
-separate optional production download check.
+Full-client intake is optional because it reads the entire retail ZIP. Run
+`python scripts/intake-full-client.py --help` for archive, output, and staging
+inputs. The live reqwest test takes its local cache directory from
+`BAHAMUT_LIVE_CONTENT_CACHE`. See the
+[game content delivery reference](content-delivery.md) for the separate,
+optional production download check.
 
-The Windows workflow also checks synthetic release archives and package updates.
-The fixture checks package contents, not game launch.
-The Linux CI job packages the Linux archive from a placeholder executable,
-installs it with `install.sh` and with `make DESTDIR=... PREFIX=/usr install`,
-and uninstalls it again. The repository job runs `shellcheck` on the Linux
-packaging scripts, `desktop-file-validate` on the desktop entry, and
-`python scripts/test-linux-package.py`.
-The macOS CI job cross-compiles the loader, `bahamut.dll`, and both plugins
-with llvm-mingw, stages the app bundle from a placeholder universal
-executable, and runs `python3 scripts/test-macos-app-package.py`, but does
-not run the client tests. See [Release process](releasing.md) for the
-workflow's artifact requirements.
+Platform CI adds these package checks:
+
+- Windows checks synthetic release ZIPs and package updates. The fixture
+  validates contents, not game launch.
+- Linux packages a placeholder executable, installs with `install.sh` and
+  `make DESTDIR=... PREFIX=/usr install`, then uninstalls it. The repository
+  job runs `shellcheck` on Linux packaging scripts,
+  `desktop-file-validate` on the desktop entry, and
+  `python scripts/test-linux-package.py`.
+- macOS cross-compiles the loader, `bahamut.dll`, and both plugins with
+  llvm-mingw. It stages an app bundle around a placeholder universal
+  executable and runs `python3 scripts/test-macos-app-package.py`, but does
+  not run client tests.
+
+See [Release process](releasing.md) for workflow artifact requirements.
 
 ## Staged Windows package
 
-Close the launcher and game, then choose one command from the repository root
-with the Windows native toolchain:
+Close the launcher and game. From the repository root, with the Windows native
+toolchain available, choose one command:
 
 ```powershell
 .\scripts\build-windows-package.ps1
 .\scripts\build-windows-package.ps1 -Configuration Release
 ```
 
-The default Debug build compiles the launcher and native payload, then stages
+Debug is the default. It builds the launcher and native payload, then stages
 `out/dev/bahamut-launcher.exe`. Release stages the same package at
-`out/release/<version>/bahamut-launcher.exe`. These commands produce a folder,
-not a ZIP, and retain local settings, custom packages, and existing
-`scripts/default.txt` commands. Use the staged executable for packaged launch
-validation. The unpackaged Cargo shell is not equivalent.
+`out/release/<version>/bahamut-launcher.exe`.
 
-The synthetic archive check can run without a build:
+Both produce a folder rather than a ZIP and preserve local settings, custom
+packages, and existing `scripts/default.txt` commands. Validate packaged
+launches with the staged executable. The unpackaged Cargo shell does not
+provide the same package.
+
+Run the synthetic archive check without a build:
 
 ```powershell
 .\scripts\windows_release_archive_manifest_and_cleanliness.ps1 -AllowDirtyWorktree
 ```
 
-`-AllowDirtyWorktree` permits local source edits during the check.
-`-KeepArtifacts` retains its generated archive and staging files for inspection.
-The fixture checks package contents, not game launch.
+`-AllowDirtyWorktree` permits local source edits during the check. Add
+`-KeepArtifacts` to retain the generated ZIP and staging files for inspection.
+This fixture checks package contents, not game launch.
 
 ## Staged Linux or macOS tree
 
-Close the launcher and game, then choose one command from the repository root
-with llvm-mingw installed:
+Close the launcher and game. From the repository root, with llvm-mingw
+installed, choose one command:
 
 ```bash
 ./scripts/build-unix-package.sh
@@ -221,19 +228,21 @@ with llvm-mingw installed:
 ```
 
 The default Debug build cross-compiles the client module into
-`out/client-mingw-debug`, builds the shell, and publishes `out/dev/bahamut-launcher`.
-Release uses `out/client-mingw` and publishes
-`out/release/<version>/bahamut-launcher`. Publishing keeps an existing
-`scripts/default.txt` and never deletes files. `--test` first runs the client
-module tests under Wine (the launcher's managed macOS or Linux engine when
-installed, otherwise `wine` on `PATH`, with the prefix under
-`out/wine-test-prefix`).
-`--skip-build` republishes existing build outputs. The script's header lists
-the toolchain lookup order and the remaining options.
-`scripts/build-and-run-unix.sh` takes the same options, then starts the
+`out/client-mingw-debug`, builds the shell, and publishes
+`out/dev/bahamut-launcher`. Release uses `out/client-mingw` and publishes
+`out/release/<version>/bahamut-launcher`. Publication preserves an existing
+`scripts/default.txt` and never deletes files.
+
+Add `--test` to run client tests under Wine first. The script uses the
+launcher's managed macOS or Linux engine if installed, otherwise `wine` on
+`PATH`, with a prefix at `out/wine-test-prefix`. Use `--skip-build` to
+republish existing outputs. The script's header lists the toolchain lookup
+order and remaining options.
+
+`scripts/build-and-run-unix.sh` accepts the same options, then starts the
 published launcher from its package directory.
 
-To stage the same release layout manually:
+To stage the release layout manually:
 
 ```bash
 cargo build --release --locked -p bahamut-launcher-shell
@@ -243,21 +252,21 @@ cargo build --release --locked -p bahamut-launcher-shell
   --destination <empty dir>
 ```
 
-Run `bahamut-launcher` from the staged folder. On macOS and Linux the tree
-carries the loader, `bahamut.dll`, and the plugins and addons maintained in this
-repository, so Play takes the extension launch. The bare Cargo shell has none
-of them. The staged tree has no package marker, so it keeps the
+Run `bahamut-launcher` from the staged folder. On Linux and macOS, this tree
+includes the loader, `bahamut.dll`, plugins, and addons maintained in the
+repository, so Play uses the extension launch. The bare Cargo shell includes
+none of them. Without a package marker, the staged tree uses the
 [portable layout](configuration.md#portable-launcher-tree).
 
 ## Linux archive
 
-[`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh) builds the
-release archive from a launcher binary and a client build. It stages through
+Use [`package-linux-tarball.sh`](../scripts/package-linux-tarball.sh) to create
+the release tar.gz from a launcher binary and client build. It stages through
 `stage-unix-release.sh`, adds the package marker, install scripts, desktop
-entry, and icons, asserts the exact file manifest and modes, and writes the
-archive with GNU tar. The archive's `README.md` is
-[`packaging/linux/README.md`](../packaging/linux/README.md), which replaces the
-`docs/getting-started.md` copy that the stage script writes:
+entry, and icons, checks the exact file manifest and modes, then writes the
+tar.gz with GNU tar. Its `README.md` comes from
+[`packaging/linux/README.md`](../packaging/linux/README.md), replacing the
+stage script's copy of `docs/getting-started.md`:
 
 ```bash
 cargo build --release --locked -p bahamut-launcher-shell
@@ -268,36 +277,36 @@ cargo build --release --locked -p bahamut-launcher-shell
   --output out/linux-dist
 ```
 
-The script writes `<output>/<label>.tar.gz` and its `.sha256` sidecar. File
-times come from `SOURCE_DATE_EPOCH`, or from the last commit when it is unset.
-The script is the canonical record of the archive manifest.
+Output is `<output>/<label>.tar.gz` with a `.sha256` sidecar. File timestamps
+come from `SOURCE_DATE_EPOCH`, or the last commit if unset. The script defines
+the exact archive manifest.
 
-[`test-linux-package.py`](../scripts/test-linux-package.py) builds an archive
-from a placeholder executable and synthetic client artifacts, installs it
-into a temporary prefix and a `DESTDIR` staging root, and uninstalls it:
+[`test-linux-package.py`](../scripts/test-linux-package.py) packages a
+placeholder executable and synthetic client artifacts, installs into a
+temporary prefix and `DESTDIR` staging root, then uninstalls:
 
 ```bash
 python3 scripts/test-linux-package.py
 ```
 
-Both run directly on a Linux host without a container, and the test needs no
-Cargo build. The test is skipped on other platforms. It checks package
-contents and the install scripts, not the launcher binary or game launch.
+Both scripts run directly on a Linux host without a container. The test needs
+no Cargo build and skips other platforms. It validates package contents and
+install scripts, not the launcher binary or game launch.
 
-[`install.sh`](../packaging/linux/install.sh) takes `--prefix`, `--pkgdir`,
-and `--destdir`, and also reads `PREFIX` and `DESTDIR` from the environment.
-The payload directory comes only from `--pkgdir`, so an exported `PKGDIR`,
-such as the one Portage sets, does not redirect it. The archive's
-[`Makefile`](../packaging/linux/Makefile) runs `./install.sh` from its own
-directory, so run it as `make -C <extracted dir> install`; for example
-`make -C bahamut-launcher DESTDIR=<root> PREFIX=/usr install` stages a
-package root, and a command-line `PKGDIR=<dir>` sets the payload directory.
+[`install.sh`](../packaging/linux/install.sh) accepts `--prefix`, `--pkgdir`,
+and `--destdir`, plus environment variables `PREFIX` and `DESTDIR`. Only
+`--pkgdir` selects the payload directory; an exported `PKGDIR`, such as
+Portage's, cannot redirect it.
+
+The package's [`Makefile`](../packaging/linux/Makefile) runs `./install.sh`
+from its own directory. Use `make -C <extracted dir> install`. For example,
+`make -C bahamut-launcher DESTDIR=<root> PREFIX=/usr install` stages a package
+root; a command-line `PKGDIR=<dir>` selects the payload directory.
 
 ## Staged macOS app
 
-Build the universal launcher binary the way
-[`release-binaries.yml`](../.github/workflows/release-binaries.yml) does,
-then package and zip it the way the release does:
+Build and package a universal launcher using the release workflow's steps in
+[`release-binaries.yml`](../.github/workflows/release-binaries.yml):
 
 ```bash
 cargo build --release --locked --target aarch64-apple-darwin -p bahamut-launcher-shell
@@ -313,52 +322,53 @@ ditto -c -k --norsrc --keepParent "out/macos-app/Bahamut Launcher.app" out/macos
 ./scripts/check-macos-app-zip.sh --zip out/macos-app.zip
 ```
 
-Omitting `--sign` signs the app ad hoc, the same as a release build without
-the signing secrets. `./scripts/build-unix-package.sh` still publishes the
-bare portable tree, without an app bundle, for the dev loop.
+Without `--sign`, packaging signs the app ad hoc, as a release build does
+without signing secrets. For local development,
+`./scripts/build-unix-package.sh` still publishes the bare portable tree
+without an app bundle.
 
 ## Additional launcher logs
 
-To enable debug detail in a staged Windows package, run from the repository root:
+Enable debug detail in a staged Windows package from the repository root:
 
 ```powershell
 $env:RUST_LOG = "bahamut_launcher=debug,wry=warn"
 .\out\dev\bahamut-launcher.exe
 ```
 
-Use the complete staged package, not the unpackaged Cargo shell. Review logs
-for private paths and account information before sharing them.
+Use the complete staged package. The unpackaged Cargo shell is not equivalent.
+Before sharing logs, review them for private paths and account information.
 
 ## Exact-binary checks
 
-The manually dispatched [`Retail Checks`](../.github/workflows/retail-checks.yml)
-workflow verifies the manifest-pinned `ffxivgame.exe` identity, the expected
-original bytes at supported patch sites, and the bytes produced by applying the
-patches. This is exact-binary validation, not proof of live client behavior. The
-input identity is declared in
-[`manifests/retail-inputs.json`](../manifests/retail-inputs.json). The binary
-itself is not part of this repository.
+Manually dispatch [`Retail Checks`](../.github/workflows/retail-checks.yml)
+to verify the manifest-pinned `ffxivgame.exe` identity, original bytes at
+supported patch sites, and bytes produced by applying the patches. This
+validates the exact binary but does not establish live client behavior.
+
+[`manifests/retail-inputs.json`](../manifests/retail-inputs.json) declares the
+input identity. The binary itself is not in the repository.
 
 ## Generated icon assets
 
-The application icon is generated from `src-tauri/icons/icon-source.png`. After
-replacing the source artwork, run:
+After replacing `src-tauri/icons/icon-source.png`, regenerate the application
+icons:
 
 ```powershell
 cargo run --release --manifest-path tools/icon-gen/Cargo.toml
 ```
 
-This regenerates PNG, the six-size Windows ICO, the macOS ICNS with its
-transparent icon-grid padding, and the Linux hicolor icons at
+This creates the PNG, six-size Windows ICO, macOS ICNS with transparent
+icon-grid padding, and Linux hicolor icons at
 `packaging/linux/icons/hicolor/{48x48,128x128,256x256}/apps/bahamut-launcher.png`.
-The macOS app bundle consumes `src-tauri/icons/icon.icns` as
-`Contents/Resources/icon.icns`. The Linux archive ships the hicolor icons
-under `share/icons/hicolor/`.
+The macOS bundle uses `src-tauri/icons/icon.icns` at
+`Contents/Resources/icon.icns`. The Linux tar.gz ships hicolor icons under
+`share/icons/hicolor/`.
 
 ## What the checks cover
 
-Tests and implementation in this tree describe the launcher's current behavior.
-They do not prove retail client behavior, server behavior, or compatibility on
-every Wine and operating system combination. Limit compatibility, protocol,
-launch patch, and platform claims to the versions and environments named by their
-source.
+Tests and implementation describe the launcher's current behavior. They do
+not prove retail client or server behavior, or compatibility across every
+Wine and operating system combination. Keep compatibility, protocol, launch
+patch, and platform claims limited to the versions and environments named
+by their sources.

@@ -312,6 +312,23 @@ mod tests {
     }
 
     #[test]
+    fn targetlines_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("addons");
+        let packages = discover_addons(&root).unwrap();
+        let targetlines = packages
+            .iter()
+            .find(|package| package.id == "targetlines")
+            .expect("targetlines package should be shipped");
+
+        assert_eq!(targetlines.name, "Targetlines");
+        assert_eq!(targetlines.author, "Aeshur");
+        assert_eq!(targetlines.version, "0.1.0");
+        assert_eq!(targetlines.capabilities, ["ui.draw"]);
+        assert!(targetlines.commands.is_empty());
+        assert!(select_addon_manifests(std::slice::from_ref(targetlines), &[]).is_empty());
+    }
+
+    #[test]
     fn packetlogger_is_a_discoverable_opt_in_addon() {
         let manifest =
             toml::from_str::<AddonManifest>(include_str!("../../addons/packetlogger/addon.toml"))

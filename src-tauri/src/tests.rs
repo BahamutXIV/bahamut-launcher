@@ -17,7 +17,8 @@ use bahamut_launcher::content::manifest::{ArchiveLayout, BaseArchive, BasePackag
 use bahamut_launcher::content::worker::InstallRequest;
 use bahamut_launcher::content::{InstallShared, Phase};
 use bahamut_launcher::install_check::InstallState;
-use bahamut_launcher::platform::LaunchedGame;
+use bahamut_launcher::launcher::pe_patch::PePatchError;
+use bahamut_launcher::platform::{LaunchError, LaunchedGame};
 use bahamut_launcher::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
 use sha2::{Digest, Sha256};
 
@@ -34,7 +35,7 @@ use crate::commands::window::{
 use crate::presentation::{
     AUTH_KIND_INVALID_CREDENTIALS, AUTH_KIND_RATE_LIMITED, AuthOp, GameSettingsPayload,
     GraphicsSettingsPayload, HomeLifecycleState, game_settings_view, home_presentation,
-    replace_game_settings, resolve_home_lifecycle,
+    map_launch_error, replace_game_settings, resolve_home_lifecycle,
 };
 use crate::state::{BackupIpcState, ContentIpcState, GameIpcState, InstallRun};
 
@@ -509,7 +510,7 @@ fn addon_inventory_uses_persisted_state_order_and_compatibility() {
 }
 
 #[test]
-fn overlay_inventory_reports_persisted_order_and_conflicting_payloads() {
+fn overlay_inventory_reports_persisted_order_for_overlapping_packages() {
     let config = ExtensionsConfig::default();
     let dat_config = bahamut_launcher::config::extension_config::DatsConfig {
         packages: vec![
@@ -541,15 +542,6 @@ fn overlay_inventory_reports_persisted_order_and_conflicting_payloads() {
         vec!["beta", "alpha"]
     );
     assert!(inventory.overlays.iter().all(|package| package.enabled));
-    assert_eq!(inventory.overlay_conflicts.len(), 1);
-    assert_eq!(
-        inventory.overlay_conflicts[0].relative_path,
-        "data/shared.DAT"
-    );
-    assert_eq!(
-        inventory.overlay_conflicts[0].package_ids,
-        vec!["beta", "alpha"]
-    );
 }
 
 #[test]
@@ -796,6 +788,21 @@ fn registration_server_error_uses_stable_create_failure_kind() {
     );
 
     assert_eq!(mismatched.kind, "server");
+}
+
+#[test]
+fn launch_translation_uses_preparation_for_known_setup_failures() {
+    let error = map_launch_error(LaunchError::PatchPlanning(
+        PePatchError::LobbyHostHasInteriorNul,
+    ));
+
+    assert_eq!(error.kind, "preparation");
+    assert_ne!(error.kind, "lobby");
+    assert!(error.message.unwrap().contains("interior NUL"));
+
+    let missing_config =
+        map_launch_error(LaunchError::MissingConfigBinary(PathBuf::from("C:/game")));
+    assert_eq!(missing_config.kind, "preparation");
 }
 
 fn fixture_file(path: &str, contents: &[u8]) -> InstallFile {

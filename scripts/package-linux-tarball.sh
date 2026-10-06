@@ -150,7 +150,7 @@ tree="$work/root/$top"
 mkdir -p "$tree"
 
 # The expected manifest is independent of what the stage produced.
-addon_ids=(chatlogs zonename packetlogger combatparser distance targethp fps pos wiki)
+addon_ids=(chatlogs zonename packetlogger combatparser distance targethp fps pos wiki targetlines)
 license_files=(
     MinHook-LICENSE.txt Dear-ImGui-LICENSE.txt Lua-COPYRIGHT.txt Miniz-LICENSE.txt
     Inter-OFL.txt Cinzel-OFL.txt JetBrainsMono-OFL.txt MinGW-w64-runtime-COPYING.txt

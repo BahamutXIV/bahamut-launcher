@@ -4,6 +4,7 @@
 #include "native_plugin_host.h"
 #include "player_state.h"
 #include "render_boundary.h"
+#include "targetlines_probe.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
@@ -735,6 +736,45 @@ void DrawAddonRawText(void* context, const char* addonId, const char* text, floa
     ImGui::End();
 }
 
+void DrawAddonTargetlines(void* context, const char* addonId)
+{
+    UNREFERENCED_PARAMETER(context);
+    if (std::string_view(addonId) != "targetlines")
+    {
+        return;
+    }
+    const auto targetlines = bahamut_client::TargetlinesFrame();
+    const auto displaySize = ImGui::GetIO().DisplaySize;
+    // Projection uses back-buffer pixels; draw only at a matching display size.
+    if (targetlines && displaySize.x == static_cast<float>(targetlines->backBufferWidth) &&
+        displaySize.y == static_cast<float>(targetlines->backBufferHeight))
+    {
+        auto* draw = ImGui::GetBackgroundDrawList();
+        for (std::size_t arcIndex = 0; arcIndex < targetlines->count; ++arcIndex)
+        {
+            const auto& arc   = targetlines->arcs[arcIndex];
+            const int   red   = arc.friendly ? 42 : 255;
+            const int   green = arc.friendly ? 255 : 48;
+            const int   blue  = arc.friendly ? 112 : 72;
+            const auto  color = [&](int alpha)
+            {
+                return IM_COL32(red, green, blue, static_cast<int>(alpha * arc.opacity));
+            };
+            // Layered strokes provide a soft beam without a texture asset.
+            for (std::size_t pieceIndex = 0; pieceIndex < arc.pieces.count; ++pieceIndex)
+            {
+                const auto&  piece = arc.pieces.segments[pieceIndex];
+                const ImVec2 source{ piece.source.x, piece.source.y };
+                const ImVec2 target{ piece.target.x, piece.target.y };
+                draw->AddLine(source, target, color(28), 7.0F);
+                draw->AddLine(source, target, color(76), 4.0F);
+                draw->AddLine(source, target, color(230), 1.8F);
+                draw->AddLine(source, target, IM_COL32(255, 240, 238, static_cast<int>(170.0F * arc.opacity)), 0.65F);
+            }
+        }
+    }
+}
+
 void RecordFillModeTestResult(IDirect3DDevice9* device)
 {
     if (!IsWireframeEnabled() || InterlockedCompareExchange(&gFillModeTestRecorded, 1, 0) != 0)
@@ -898,7 +938,7 @@ void DrawOverlay(IDirect3DDevice9*                   device,
     if (addonHost != nullptr)
     {
         gNextAddonWindowY = ImGui::GetMainViewport()->WorkPos.y + 16.0f;
-        addonHost->Draw({ nullptr, &DrawAddonWindow, &DrawAddonRawText, &DrawAddonCombatMeter });
+        addonHost->Draw({ nullptr, &DrawAddonWindow, &DrawAddonRawText, &DrawAddonCombatMeter, &DrawAddonTargetlines });
     }
     InterlockedExchange(&gOverlayDrawing, 1);
     device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);

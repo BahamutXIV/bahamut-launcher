@@ -207,7 +207,6 @@ impl LauncherConfig {
                 "game_location",
                 "content_root",
                 "download_cache_dir",
-                "patch_download_dir",
                 "borderless_monitor",
             ],
         )?;
@@ -228,11 +227,7 @@ impl LauncherConfig {
             };
         preferences.launcher.game_location = optional_path(launcher, "game_location");
         preferences.launcher.content_root = optional_string(launcher, "content_root");
-        preferences.launcher.download_cache_dir = if launcher.get("download_cache_dir").is_none() {
-            optional_path(launcher, "patch_download_dir")
-        } else {
-            optional_path(launcher, "download_cache_dir")
-        };
+        preferences.launcher.download_cache_dir = optional_path(launcher, "download_cache_dir");
         preferences.launcher.borderless_monitor = optional_string(launcher, "borderless_monitor");
         preferences.developer.enable_verbose_wine_debug =
             parse_bool(developer, "developer", "enable_verbose_wine_debug")?;
@@ -1012,18 +1007,14 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_cache_key_is_read_and_rewritten_under_the_current_name() {
+    fn obsolete_patch_download_key_is_rejected() {
         let defaults = LauncherConfig::defaults().to_ini_string();
-        assert!(defaults.contains("download_cache_dir = \n"));
         let text = defaults.replace("download_cache_dir = \n", "patch_download_dir = C:/Cache\n");
-        let config = LauncherConfig::from_ini_str(&text).unwrap();
-        assert_eq!(
-            config.preferences.launcher.download_cache_dir,
-            Some(PathBuf::from("C:/Cache"))
-        );
-        let rewritten = config.to_ini_string();
-        assert!(rewritten.contains("download_cache_dir = C:/Cache\n"));
-        assert!(!rewritten.contains("patch_download_dir"));
+        assert!(matches!(
+            LauncherConfig::from_ini_str(&text),
+            Err(LauncherConfigError::UnknownKey { section, key })
+                if section == "launcher" && key == "patch_download_dir"
+        ));
     }
 
     #[test]

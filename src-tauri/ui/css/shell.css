@@ -154,7 +154,7 @@
       border-radius:var(--card-radius);
       background:var(--panel);
       box-shadow:var(--card-shadow);
-      backdrop-filter:blur(18px);
+      backdrop-filter:blur(4px);
     }
     .glass-panel:focus-visible,
     body:is([data-input-mode="gamepad"],[data-input-mode="keyboard"]) .glass-panel:focus { box-shadow:var(--focus), var(--card-shadow); }

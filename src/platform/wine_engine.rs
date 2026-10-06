@@ -166,7 +166,7 @@ fn remove_abandoned_staging(cache_root: &Path) {
     }
 }
 
-/// The tool `tar -xJf` lacks: bsdtar decodes xz itself, GNU tar runs the `xz` program.
+/// Find the missing unpacking tool: bsdtar decodes xz itself; GNU tar needs `xz`.
 fn missing_unpack_tool(tar_version: Option<&str>, xz_present: bool) -> Option<&'static str> {
     match tar_version {
         None => Some("tar"),

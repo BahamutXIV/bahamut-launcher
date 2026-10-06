@@ -32,7 +32,6 @@ pub use launch_plan::{
 };
 pub use layout::ExtensionLayout;
 pub use overlay_packages::{
-    OVERLAY_MANIFEST_FILE_NAME, OverlayConflict, OverlayDiscoveryError, OverlayPackage,
-    OverlaySelection, discover_overlay_packages, discover_overlay_packages_layered,
-    select_overlay_packages,
+    OVERLAY_MANIFEST_FILE_NAME, OverlayDiscoveryError, OverlayPackage, OverlaySelection,
+    discover_overlay_packages, discover_overlay_packages_layered, select_overlay_packages,
 };

@@ -18,7 +18,7 @@ pub struct RegisterResponse {
     pub created_at: String,
 }
 
-/// `POST /api/v1/sessions` request with the [`RegisterRequest`] password-zeroization posture.
+/// `POST /api/v1/sessions` request; password handling matches [`RegisterRequest`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoginRequest {
     pub username: String,

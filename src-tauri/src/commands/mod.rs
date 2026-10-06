@@ -35,6 +35,7 @@ pub(crate) use settings::{
     set_selected_server,
 };
 pub(crate) use support::{
-    create_backup, get_launcher_log, open_external, open_launcher_log, restore_backup,
+    create_backup, get_launcher_log, open_external, open_launcher_log, record_ui_failure,
+    restore_backup,
 };
 pub(crate) use window::{control_window, fit_window_to_work_area};

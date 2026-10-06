@@ -30,7 +30,7 @@ assets. Third-party material retains the licenses and notices below.
 The following files under `src-tauri/ui/assets/` remain the property of
 Square Enix and are outside the MIT grant:
 
-- `background-day.png` and `background-night.jpg`
+- `background-day.png` and `background-night.png`
 - `news-placeholder.jpg`
 - `theme-day.png` and `theme-night.png`
 

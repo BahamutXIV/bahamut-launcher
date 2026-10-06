@@ -1,4 +1,5 @@
 import { home, settingsState, tauriInvoke, invoke, serverOptions } from './runtime.js';
+import { feedbackToken, feedbackCurrent, clearFeedback, showFeedback, reportFailure, recordFailure } from './feedback.js';
 
 let gameSettingsSaveQueue = Promise.resolve();
 let launcherBehaviorSaveQueue = Promise.resolve();
@@ -10,6 +11,26 @@ let launcherBehaviorRevision = 0;
 let borderlessMonitorRevision = 0;
 let objectDistanceRevision = 0;
 let cameraZoomRevision = 0;
+
+const GAME_SETTINGS_WARNING = 'Game settings require a valid retail config.sys.';
+const BORDERLESS_MONITOR_WARNING = 'Borderless monitor selection is unavailable. Copy logs from the Help page for support.';
+const OBJECT_DISTANCE_WARNING = 'Extended draw distance is unavailable. Copy logs from the Help page for support.';
+const CAMERA_ZOOM_WARNING = 'Extended camera zoom is unavailable. Copy logs from the Help page for support.';
+
+function activeSettingsCard() {
+  return document.querySelector('[data-settings-pane][data-active] .settings-card')
+    || document.querySelector('[data-screen="settings"] .settings-card');
+}
+
+function settingLabel(target, fallback = 'game settings') {
+  const element = typeof target === 'string' ? document.querySelector(target) : target;
+  const label = element?.closest?.('.settings-field')?.querySelector('.settings-label, label')?.textContent?.trim();
+  return label || fallback;
+}
+
+function settingAction(target, fallback = 'game settings') {
+  return `save ${settingLabel(target, fallback)}`;
+}
 
 function renderChoice(selector, value, dataKey) {
   document.querySelectorAll(selector).forEach(button => button.setAttribute('aria-pressed', String(button.dataset[dataKey] === String(value))));
@@ -43,8 +64,6 @@ function renderGameSettings(view) {
   settingsState.gameSettings = view;
   populateGameSettingOptions(view);
   const settings = view.settings;
-  const status = document.querySelector('#game-settings-status');
-  status.textContent = view.available ? '' : 'Game settings require a valid retail config.sys.';
   document.querySelectorAll('[data-game-setting]').forEach(control => {
     const path = control.dataset.gameSetting;
     const value = path === 'resolution' ? `${settings.width}x${settings.height}` : gameSettingValue(settings, path);
@@ -67,8 +86,7 @@ function renderBorderlessMonitorSettings(view) {
   settingsState.borderlessMonitors = view;
   const row = document.querySelector('#borderless-monitor-row');
   const select = document.querySelector('#borderless-monitor');
-  const status = document.querySelector('#borderless-monitor-status');
-  row.hidden = !view.supported;
+  if (row) row.hidden = !view.supported;
   const currentValue = view.selected || '';
   const options = [new Option('Default Monitor', '')];
   if (currentValue && !view.monitors.some(monitor => monitor.id === currentValue)) {
@@ -78,12 +96,13 @@ function renderBorderlessMonitorSettings(view) {
     const details = `${monitor.width} x ${monitor.height}${monitor.primary ? ', Primary' : ''}`;
     options.push(new Option(`${monitor.name} (${details})`, monitor.id));
   }
-  select.replaceChildren(...options);
-  select.value = currentValue;
+  if (select) {
+    select.replaceChildren(...options);
+    select.value = currentValue;
+  }
   const borderless = settingsState.gameSettings?.available
     && settingsState.gameSettings.settings?.display_mode === 'borderless';
-  select.disabled = !view.supported || !borderless;
-  status.textContent = '';
+  if (select) select.disabled = !view.supported || !borderless;
 }
 
 function renderObjectDistanceSelection(selection) {
@@ -93,16 +112,17 @@ function renderObjectDistanceSelection(selection) {
 }
 
 function queueObjectDistanceSelection(selection) {
+  const token = feedbackToken('#object-distance-range');
+  const action = 'save Extended Draw Distance';
+  clearFeedback(token);
   graphicsSaveQueue = graphicsSaveQueue.then(async () => {
     const previous = settingsState.objectDistanceSelection;
     if (previous === undefined) return;
-    const status = document.querySelector('#object-distance-status');
-    status.textContent = '';
     try {
       renderObjectDistanceSelection(await invoke('set_object_distance_selection', { percent: selection }));
     } catch (error) {
       renderObjectDistanceSelection(previous);
-      status.textContent = error.message || String(error);
+      reportFailure(token, action, error, { context:'set_object_distance_selection' });
     }
   });
   return graphicsSaveQueue;
@@ -135,32 +155,34 @@ function renderGraphicsSelection(range, selection) {
 }
 
 function queueCameraZoomSelection(selection) {
+  const token = feedbackToken('#camera-zoom-range');
+  const action = 'save Extended Camera Zoom';
+  clearFeedback(token);
   graphicsSaveQueue = graphicsSaveQueue.then(async () => {
     const previous = settingsState.cameraZoomSelection;
     if (previous === undefined) return;
-    const status = document.querySelector('#camera-zoom-status');
-    status.textContent = '';
     try {
       renderCameraZoomSelection(await invoke('set_camera_zoom_selection', { limit: selection }));
     } catch (error) {
       renderCameraZoomSelection(previous);
-      status.textContent = error.message || String(error);
+      reportFailure(token, action, error, { context:'set_camera_zoom_selection' });
     }
   });
   return graphicsSaveQueue;
 }
 
 function queueBorderlessMonitorUpdate(monitorId) {
+  const token = feedbackToken('#borderless-monitor');
+  const action = 'save Borderless Monitor';
+  clearFeedback(token);
   borderlessMonitorSaveQueue = borderlessMonitorSaveQueue.then(async () => {
     const previous = settingsState.borderlessMonitors;
     if (!previous?.supported) return;
-    const status = document.querySelector('#borderless-monitor-status');
-    status.textContent = '';
     try {
       renderBorderlessMonitorSettings(await invoke('set_borderless_monitor', { monitorId }));
     } catch (error) {
       renderBorderlessMonitorSettings(previous);
-      status.textContent = error.message || String(error);
+      reportFailure(token, action, error, { context:'set_borderless_monitor' });
     }
   });
   return borderlessMonitorSaveQueue;
@@ -176,47 +198,65 @@ function renderLauncherBehavior(view) {
   });
 }
 
-function queueGameSettingsUpdate(update) {
+function queueGameSettingsUpdate(update, target) {
+  const token = feedbackToken(target || activeSettingsCard());
+  const action = settingAction(target);
+  clearFeedback(token);
   gameSettingsSaveQueue = gameSettingsSaveQueue.then(async () => {
     if (!settingsState.gameSettings?.available) return;
     const previous = settingsState.gameSettings;
     const next = structuredClone(previous.settings);
     update(next);
-    const status = document.querySelector('#game-settings-status');
-    status.textContent = '';
     try {
       renderGameSettings(await invoke('set_game_settings', { settings:next }));
     } catch (error) {
       renderGameSettings(previous);
-      status.textContent = error.message || String(error);
+      reportFailure(token, action, error, { context:'set_game_settings' });
     }
   });
   return gameSettingsSaveQueue;
 }
-function queueLauncherBehaviorUpdate(closeOnGameStart) {
-  return queueLauncherSettingUpdate(() => invoke('set_close_on_game_start', { closeOnGameStart }));
+function queueLauncherBehaviorUpdate(closeOnGameStart, target) {
+  return queueLauncherSettingUpdate(
+    () => invoke('set_close_on_game_start', { closeOnGameStart }),
+    target,
+    'save Close Launcher on Game Start',
+    'set_close_on_game_start',
+  );
 }
-function queueNativeResolutionOverrideUpdate(nativeResolutionOverride) {
-  return queueLauncherSettingUpdate(() => invoke('set_native_resolution_override', { nativeResolutionOverride }));
+function queueNativeResolutionOverrideUpdate(nativeResolutionOverride, target) {
+  return queueLauncherSettingUpdate(
+    () => invoke('set_native_resolution_override', { nativeResolutionOverride }),
+    target,
+    'save Native Resolution Override',
+    'set_native_resolution_override',
+  );
 }
-function queueLauncherSettingUpdate(save) {
+function queueLauncherSettingUpdate(save, target, action, context) {
+  const token = feedbackToken(target || activeSettingsCard());
+  clearFeedback(token);
   launcherBehaviorSaveQueue = launcherBehaviorSaveQueue.then(async () => {
     const previous = settingsState.launcherBehavior;
-    const status = document.querySelector('#game-settings-status');
-    const gameSettingsWarning = settingsState.gameSettings?.available === false ? status.textContent : '';
-    status.textContent = '';
     try {
       renderLauncherBehavior(await save());
-      status.textContent = gameSettingsWarning;
+      if (settingsState.gameSettings?.available === false && feedbackCurrent(token)) {
+        showFeedback(token, GAME_SETTINGS_WARNING, 'warning');
+      }
     } catch (error) {
       if (previous) renderLauncherBehavior(previous);
-      status.textContent = error.message || String(error);
+      reportFailure(token, action, error, { context });
     }
   });
   return launcherBehaviorSaveQueue;
 }
-async function hydrateSettings() {
+async function hydrateSettings(lifetimeToken) {
   if (!tauriInvoke) return;
+  const token = feedbackToken(activeSettingsCard());
+  const monitorToken = feedbackToken('#borderless-monitor');
+  const objectDistanceToken = feedbackToken('#object-distance-range');
+  const cameraZoomToken = feedbackToken('#camera-zoom-range');
+  const canShow = candidate => feedbackCurrent(candidate) && (!lifetimeToken || feedbackCurrent(lifetimeToken));
+  if (canShow(token)) clearFeedback(token);
   const revision = ++settingsHydrationRevision;
   const gameRevision = gameSettingsRevision;
   const launcherRevision = launcherBehaviorRevision;
@@ -230,13 +270,22 @@ async function hydrateSettings() {
       invoke('get_launcher_behavior'),
       invoke('get_borderless_monitors')
         .then(view => ({ view, error:null }))
-        .catch(error => ({ view:{ supported:false, monitors:[], selected:null }, error })),
+        .catch(error => {
+          void recordFailure(monitorToken.scope, 'load borderless monitor settings', error, BORDERLESS_MONITOR_WARNING, 'get_borderless_monitors');
+          return { view:{ supported:false, monitors:[], selected:null }, error };
+        }),
       invoke('get_object_distance_selection')
         .then(selection => ({ selection, error:null }))
-        .catch(error => ({ selection:undefined, error })),
+        .catch(error => {
+          void recordFailure(objectDistanceToken.scope, 'load Extended Draw Distance', error, OBJECT_DISTANCE_WARNING, 'get_object_distance_selection');
+          return { selection:undefined, error };
+        }),
       invoke('get_camera_zoom_selection')
         .then(selection => ({ selection, error:null }))
-        .catch(error => ({ selection:undefined, error })),
+        .catch(error => {
+          void recordFailure(cameraZoomToken.scope, 'load Extended Camera Zoom', error, CAMERA_ZOOM_WARNING, 'get_camera_zoom_selection');
+          return { selection:undefined, error };
+        }),
     ]);
     if (revision !== settingsHydrationRevision) return;
     const gamePath = document.querySelector('#settings-game-path');
@@ -245,25 +294,34 @@ async function hydrateSettings() {
     const operationActive = Boolean(home.installSnapshot?.is_running);
     document.querySelector('[data-settings-action="browse-game"]').disabled = operationActive;
     const monitorResultIsCurrent = monitorRevision === borderlessMonitorRevision;
+    const gameResultIsCurrent = gameRevision === gameSettingsRevision;
     if (monitorResultIsCurrent) renderBorderlessMonitorSettings(monitorResult.view);
-    if (gameRevision === gameSettingsRevision) renderGameSettings(gameSettings);
+    if (gameResultIsCurrent) renderGameSettings(gameSettings);
     if (launcherRevision === launcherBehaviorRevision) renderLauncherBehavior(launcherBehavior);
-    if (monitorResultIsCurrent && monitorResult.error) document.querySelector('#game-settings-status').textContent = `Borderless monitor selection is unavailable: ${monitorResult.error.message || monitorResult.error}`;
+    if (gameResultIsCurrent && !gameSettings.available && canShow(token)) {
+      showFeedback(token, GAME_SETTINGS_WARNING, 'warning');
+    }
+    if (monitorResultIsCurrent && monitorResult.error && canShow(monitorToken)) {
+      showFeedback(monitorToken, BORDERLESS_MONITOR_WARNING, 'warning');
+    }
     if (distanceRevision === objectDistanceRevision) {
       renderObjectDistanceSelection(objectDistanceResult.selection);
-      document.querySelector('#object-distance-status').textContent = objectDistanceResult.error
-        ? objectDistanceResult.error.message || String(objectDistanceResult.error)
-        : '';
+      if (objectDistanceResult.error && canShow(objectDistanceToken)) {
+        showFeedback(objectDistanceToken, OBJECT_DISTANCE_WARNING, 'warning');
+      }
     }
     if (zoomRevision === cameraZoomRevision) {
       renderCameraZoomSelection(cameraZoomResult.selection);
-      document.querySelector('#camera-zoom-status').textContent = cameraZoomResult.error
-        ? cameraZoomResult.error.message || String(cameraZoomResult.error)
-        : '';
+      if (cameraZoomResult.error && canShow(cameraZoomToken)) {
+        showFeedback(cameraZoomToken, CAMERA_ZOOM_WARNING, 'warning');
+      }
     }
   } catch (error) {
-    if (revision !== settingsHydrationRevision) return;
-    document.querySelector('#settings-misc-status').textContent = error.message || String(error);
+    if (revision !== settingsHydrationRevision || !canShow(token)) {
+      void recordFailure(token.scope, 'load settings', error, `Couldn't load settings. Copy logs from the Help page for support.`, 'hydrate_settings');
+      return;
+    }
+    reportFailure(token, 'load settings', error, { context:'hydrate_settings' });
   }
 }
 function renderServerSettings(serverSettings) {
@@ -283,10 +341,7 @@ function renderServerSettings(serverSettings) {
   document.querySelector('#profile-auth-port').value = profile.auth_port;
   document.querySelector('#profile-lobby-port').value = profile.lobby_port;
   document.querySelector('#profile-https').checked = profile.use_https;
-  const status = document.querySelector('#profile-server-select-status');
-  status.textContent = home.token ? 'Log out before changing server profiles.' : '';
-  if (home.token) status.dataset.tone = 'error';
-  else delete status.dataset.tone;
+  if (home.token) showFeedback(feedbackToken('#profile-server-select'), 'Log out before changing server profiles.');
 }
 
 export { renderChoice, setNestedValue, renderGameSettings, renderBorderlessMonitorSettings, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, renderLauncherBehavior, renderGameSettingProgress, queueGameSettingsUpdate, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, hydrateSettings, renderServerSettings };

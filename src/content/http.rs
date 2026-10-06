@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Bounded, identity-checked HTTP object downloads for the R2 content lane.
+//! Bounded HTTP downloads verified against pinned content identities.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};

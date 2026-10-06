@@ -2,28 +2,26 @@
 
 [Back to the documentation index](README.md)
 
-The launcher uses this HTTP interface for registration, login, session
-validation, and logout. Bahamut owns storage, password hashing, account
-lockout, and rate-limit policy.
+Use this HTTP API to register accounts, log in, validate sessions, and log out.
+Bahamut handles storage, password hashing, account lockout, and rate limits.
 
-The launcher presents registration and login inside its own window. It does not
-use an external browser or an `ffxiv://login_success` callback.
+Registration and login run inside the launcher window. There is no external
+browser flow or `ffxiv://login_success` callback.
 
 ## Transport
 
-The selected server profile provides `host`, `auth_port`, and `use_https`. The
-launcher forms an `/api/v1/` base URL and accepts plain HTTP only for the
-loopback hosts `127.0.0.1`, `localhost`, and `[::1]`.
+The selected server profile supplies `host`, `auth_port`, and `use_https`.
+The launcher builds an `/api/v1/` base URL. It permits plain HTTP only for
+the loopback hosts `127.0.0.1`, `localhost`, and `[::1]`.
 
-Registration and login send JSON with `Content-Type: application/json`. The
-launcher decodes their success bodies and error envelopes. Session validation
-uses the HTTP status only, and logout has no request body. Each request has a
-10-second timeout. The launcher rejects HTTP redirects and does not follow
-`Location` responses.
+Registration and login send JSON with `Content-Type: application/json` and
+decode both success bodies and error envelopes. Session validation reads only
+the HTTP status. Logout sends no body. Each request times out after 10 seconds.
+The launcher rejects redirects and never follows `Location` responses.
 
 ## Error handling
 
-Action endpoints return this envelope on failure:
+Action endpoints return this error envelope:
 
 ```json
 {
@@ -38,15 +36,15 @@ The launcher recognizes these codes:
 
 | Code | Expected status | Launcher behavior |
 |---|---:|---|
-| `validation_error` | 400 | Shows the server validation message. |
+| `validation_error` | 400 | Shows the server's validation message. |
 | `username_taken` | 409 | Shows the registration conflict. |
-| `invalid_credentials` | 401 | Shows one generic credential failure. |
+| `invalid_credentials` | 401 | Shows a generic credential failure. |
 | `rate_limited` | 429 | Shows the wait and temporarily disables submission. |
 | `server_error` | 500 | Shows a generic server failure. |
 
-Only a 429 response may supply a client-visible `Retry-After` value. Unknown or
-malformed responses are reported as server errors. A request that obtains no
-HTTP response is reported as a network error.
+Only a 429 response can provide a client-visible `Retry-After` value. Unknown
+or malformed responses become server errors. A request that receives no HTTP
+response becomes a network error.
 
 ## Registration
 
@@ -59,12 +57,12 @@ HTTP response is reported as a network error.
 }
 ```
 
-The registration page constrains usernames to 3 to 32 characters and passwords
-to 8 to 128 characters before submission. The server remains authoritative for
-validation. The launcher sends the password only to the selected auth endpoint
-and zeroizes its owned credential buffer on drop.
+Before submission, the registration page requires a username of 3 to 32
+characters and a password of 8 to 128 characters. The server makes the final
+validation decision. The launcher sends the password only to the selected
+auth endpoint and zeroizes its own credential buffer when dropped.
 
-Success is `201 Created`:
+Return `201 Created` on success:
 
 ```json
 {
@@ -73,8 +71,8 @@ Success is `201 Created`:
 }
 ```
 
-`created_at` is RFC 3339 UTC. Registration does not return a session id, so the
-launcher follows a successful registration with an explicit login request.
+`created_at` must be RFC 3339 UTC. Registration returns no session ID, so the
+launcher makes a separate login request after registration succeeds.
 
 ## Login
 
@@ -87,7 +85,7 @@ launcher follows a successful registration with an explicit login request.
 }
 ```
 
-Success is `200 OK`:
+Return `200 OK` on success:
 
 ```json
 {
@@ -97,22 +95,23 @@ Success is `200 OK`:
 }
 ```
 
-The launcher accepts exactly 56 lowercase hexadecimal session ID characters
-and an RFC 3339 UTC expiry. This is a Bahamut API interface. It does not
-establish that the retail service used the same token shape. See the
+The launcher requires exactly 56 lowercase hexadecimal characters in the
+session ID and an RFC 3339 UTC expiry. These are Bahamut API requirements;
+the retail service's token shape is unverified. See
 [Handshake](handshake.md#session-token).
 
 ## Session validation
 
 `GET /api/v1/sessions/current`
 
-The launcher sends the retained session id only as a bearer token:
+The launcher sends the retained session ID only as a bearer token:
 
 ```text
 Authorization: Bearer <session_id>
 ```
 
-There is no request body. The HTTP status is authoritative:
+The request has no body. The launcher ignores the response body and uses the
+status alone:
 
 | Status | Launcher result |
 |---|---|
@@ -120,35 +119,35 @@ There is no request body. The HTTP status is authoritative:
 | `401 Unauthorized` | Invalid. Return to login. |
 | Any other status or transport failure | Unknown. Keep the retained login. |
 
-The launcher does not parse this endpoint's body. An inconclusive validation
-never logs the user out.
+An inconclusive validation never logs the user out.
 
-The launcher stores the issuing authentication endpoint with a remembered
-session. Its backend normalizes the URL's scheme, host, effective port, and API
-base path. Before validation or game launch, it resolves the saved profile by
-its exact display name and compares its current endpoint with that binding.
-A removed profile, changed endpoint, or missing binding clears the retained
-login without transmitting the token. Login then uses the currently selected
-profile. These local invalidations are distinct from a network failure.
+A remembered session includes its issuing authentication endpoint. The backend
+normalizes the URL's scheme, host, effective port, and API base path. Before
+validation or game launch, it finds the saved profile by its exact display name
+and compares the current endpoint with that binding. If the profile was removed,
+the endpoint changed, or the binding is missing, it clears the retained login
+without sending the token. The next login uses the currently selected profile.
+These local invalidations are separate from network failures.
 
-Login captures the selected profile and the endpoint that receives the
-credentials. If the selected profile, its name, or its authentication endpoint
-changes while login is pending, the launcher discards the successful response
-and requires a new login. A session is never rebound to a later selection.
+Login captures the selected profile and the endpoint receiving the credentials.
+If the selection, profile name, or authentication endpoint changes while login
+is pending, the launcher discards a successful response and requires another
+login. It never rebinds a session to a later selection.
 
 ## Logout
 
 `DELETE /api/v1/sessions/<session_id>`
 
-Logout has no request body. Any 2xx response succeeds, but revocation is not
-guaranteed. The launcher completes local logout even when the endpoint returns
-an error, is unavailable, or is not implemented.
-The backend checks the issuing endpoint binding before revocation too. A
-missing or mismatched binding skips the request while local logout succeeds.
+Logout sends no body. Any 2xx response succeeds, although revocation is not
+guaranteed. Local logout completes even if the endpoint fails, is unavailable,
+or is unimplemented.
+
+Before requesting revocation, the backend checks the issuing endpoint binding.
+If the binding is missing or mismatched, it skips the request and completes
+local logout.
 
 ## Launcher rate-limit behavior
 
-The launcher does not implement server rate-limit policy. When login or
-registration returns 429, it honors `Retry-After`, displays the remaining wait,
-and re-enables submission when the countdown reaches zero. It does not submit a
-second request automatically.
+The server sets rate-limit policy. When login or registration returns 429, the
+launcher honors `Retry-After`, shows the remaining wait, and re-enables
+submission at zero. It never resubmits automatically.

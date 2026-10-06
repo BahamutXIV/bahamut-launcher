@@ -177,6 +177,18 @@ add_library(bahamut SHARED
     src/packet_observer.h
     src/target_distance.cpp
     src/target_distance.h
+    src/targetlines.cpp
+    src/targetlines.h
+    src/targetlines_arc.cpp
+    src/targetlines_arc.h
+    src/targetlines_mobs.cpp
+    src/targetlines_mobs.h
+    src/targetlines_probe.cpp
+    src/targetlines_probe.h
+    src/targetlines_projection.cpp
+    src/targetlines_projection.h
+    src/world_projection.cpp
+    src/world_projection.h
     src/render_boundary.cpp
     src/render_boundary.h
     src/overlay.cpp
@@ -204,6 +216,15 @@ target_link_libraries(bahamut PRIVATE
     bcrypt d3d9 dwmapi imgui lua51 minhook miniz ole32 shell32 user32 windowscodecs ws2_32
 )
 set_target_properties(bahamut PROPERTIES PREFIX "")
+
+option(BAHAMUT_TARGETLINES_PROBE "Build the optional Targetlines scene camera diagnostic" OFF)
+if(BAHAMUT_TARGETLINES_PROBE)
+    target_sources(bahamut PRIVATE
+        src/targetlines_capture.cpp
+        src/targetlines_capture.h
+    )
+    target_compile_definitions(bahamut PRIVATE BAHAMUT_TARGETLINES_PROBE)
+endif()
 
 add_library(screenshot SHARED
     api/native_plugin_api.h
@@ -371,6 +392,54 @@ add_executable(bahamut-startup-script-tests
 target_include_directories(bahamut-startup-script-tests PRIVATE src)
 bahamut_unicode_entry(bahamut-startup-script-tests)
 
+add_executable(bahamut-world-projection-tests
+    src/world_projection.cpp
+    src/world_projection.h
+    tests/world_projection_tests.cpp
+)
+target_include_directories(bahamut-world-projection-tests PRIVATE src)
+
+add_executable(bahamut-targetlines-arc-tests
+    src/targetlines_arc.cpp
+    src/targetlines_arc.h
+    src/world_projection.cpp
+    tests/targetlines_arc_tests.cpp
+)
+target_include_directories(bahamut-targetlines-arc-tests PRIVATE src)
+
+add_executable(bahamut-targetlines-tests
+    src/actor_name.cpp
+    src/player_state.cpp
+    src/target_distance.cpp
+    src/targetlines.cpp
+    src/targetlines_mobs.cpp
+    tests/targetlines_tests.cpp
+)
+target_include_directories(bahamut-targetlines-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-targetlines-tests PRIVATE minhook)
+
+add_executable(bahamut-targetlines-mobs-tests
+    src/targetlines_mobs.cpp
+    tests/targetlines_mobs_tests.cpp
+)
+target_include_directories(bahamut-targetlines-mobs-tests PRIVATE src)
+
+if(BAHAMUT_TARGETLINES_PROBE)
+    add_executable(bahamut-targetlines-capture-tests
+        src/targetlines_capture.cpp
+        src/targetlines_capture.h
+        tests/targetlines_capture_tests.cpp
+    )
+    target_include_directories(bahamut-targetlines-capture-tests PRIVATE src)
+endif()
+add_executable(bahamut-targetlines-projection-tests
+    src/targetlines_projection.cpp
+    src/targetlines_projection.h
+    src/world_projection.cpp
+    tests/targetlines_projection_tests.cpp
+)
+target_include_directories(bahamut-targetlines-projection-tests PRIVATE src)
+
 add_executable(bahamut-dat-overlay-tests
     src/dat_overlay.cpp
     src/dat_overlay.h
@@ -448,9 +517,18 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/distance/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targethp/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/combatparser/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targetlines/addon.toml
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-settings
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )
 add_test(NAME bahamut-command-boundary COMMAND bahamut-command-boundary-tests)
 add_test(NAME bahamut-player-state COMMAND bahamut-player-state-tests)
 add_test(NAME bahamut-target-distance COMMAND bahamut-target-distance-tests)
+add_test(NAME bahamut-world-projection COMMAND bahamut-world-projection-tests)
+add_test(NAME bahamut-targetlines-arc COMMAND bahamut-targetlines-arc-tests)
+add_test(NAME bahamut-targetlines COMMAND bahamut-targetlines-tests)
+add_test(NAME bahamut-targetlines-mobs COMMAND bahamut-targetlines-mobs-tests)
+add_test(NAME bahamut-targetlines-projection COMMAND bahamut-targetlines-projection-tests)
+if(BAHAMUT_TARGETLINES_PROBE)
+    add_test(NAME bahamut-targetlines-capture COMMAND bahamut-targetlines-capture-tests)
+endif()

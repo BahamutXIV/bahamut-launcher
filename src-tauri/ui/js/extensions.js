@@ -1,16 +1,17 @@
 import { extensionState, tauriInvoke, invoke, escapeHtml } from './runtime.js';
+import { feedbackToken, feedbackCurrent, clearFeedback, reportFailure, recordFailure } from './feedback.js';
 
 const extensionGroupDefinitions = Object.freeze([
-  { key:'overlays', label:'Overlays', empty:'No installed overlays.' },
-  { key:'plugins', label:'Plugins', empty:'No installed plugins.' },
-  { key:'addons', label:'Addons', empty:'No installed addons.' },
+  { key:'overlays', label:'Overlays', empty:'No overlays installed.' },
+  { key:'plugins', label:'Plugins', empty:'No plugins installed.' },
+  { key:'addons', label:'Addons', empty:'No addons installed.' },
 ]);
 const datsOverlayItem = Object.freeze({
   id:'dats-overlay',
   name:'Dats-Overlay',
   author:'',
   version:'',
-  description:'Rearrange installed overlays to set DAT load priority.',
+  description:'Move overlays up or down. Higher overlays take priority.',
   commands:[],
   enabled:true,
   group:'overlays',
@@ -19,13 +20,31 @@ const plannedExtensionCommands = Object.freeze({
   'addons:fps':['/fps'],
 });
 const OFFICIAL_OVERLAY_ID = 'bahamut-dats-overlay';
-let extensionInventoryError = '';
-let extensionActionError = '';
+const EXTENSION_INVENTORY_FAILURE = 'Could not load extensions. Copy logs from the Help page for support.';
+let extensionHydrationRevision = 0;
 
-function extensionActionErrorMarkup() {
-  return extensionActionError
-    ? `<p class="extension-action-error" role="alert">Unable to save extension settings: ${escapeHtml(extensionActionError)}</p>`
-    : '';
+function syncExtensionInventory(inventory) {
+  extensionHydrationRevision += 1;
+  extensionState.inventory = inventory;
+  if (document.querySelector('[data-screen="extensions"][data-active]')) renderExtensionLibrary();
+}
+
+function extensionActionName(group, id, verb) {
+  const item = installedItems(group).find(candidate => candidate.id === id);
+  return `${verb} ${item?.name || id}`;
+}
+
+function detailDescriptionMarkup(description) {
+  return `<p class="extension-description">${escapeHtml(description)}</p>`;
+}
+
+function focusExtensionControl(selector, fallbackSelector = '') {
+  const control = selector ? document.querySelector(selector) : null;
+  if (control && !control.disabled) {
+    control.focus({ preventScroll:true });
+    return;
+  }
+  if (fallbackSelector) document.querySelector(fallbackSelector)?.focus({ preventScroll:true });
 }
 
 function extensionItems() {
@@ -47,7 +66,7 @@ function extensionItemKey(item) {
 function renderExtensionDetail(item) {
   const detail = document.querySelector('#extension-detail');
   if (!item) {
-    detail.innerHTML = '<article class="extension-detail-header glass-panel"><h2>No extension selected</h2><p class="extension-description">Select an installed plugin or addon.</p></article>';
+    detail.innerHTML = `<article class="extension-detail-header glass-panel"><h2>No extension selected</h2>${detailDescriptionMarkup('Select an installed plugin or addon.')}</article>`;
     return;
   }
   if (item.group === 'overlays' && item.id === datsOverlayItem.id) {
@@ -71,28 +90,13 @@ function renderExtensionDetail(item) {
     versionLabel ? `<span class="extension-meta-item">Version: ${escapeHtml(versionLabel)}</span>` : '',
   ].filter(Boolean).join('');
   const meta = metaItems ? `<div class="extension-meta">${metaItems}</div>` : '';
-  const description = item.description ? `<p class="extension-description">${escapeHtml(item.description)}</p>` : '';
+  const description = detailDescriptionMarkup(item.description || '');
   detail.innerHTML = `
         <article class="extension-detail-header glass-panel">
           <header class="extension-detail-title"><h2>${escapeHtml(item.name)}</h2>${meta}</header>
           ${description}
-          ${extensionActionErrorMarkup()}
           ${commands}
         </article>`;
-}
-
-function overlayConflictSummary() {
-  const conflicts = extensionState.inventory && extensionState.inventory.overlay_conflicts;
-  if (!Array.isArray(conflicts) || !conflicts.length) return '';
-  const rows = conflicts.map(conflict => {
-    const path = conflict && conflict.relative_path;
-    const packageIds = conflict && conflict.package_ids;
-    if (!path || !Array.isArray(packageIds) || !packageIds.length) return '';
-    return `<li><code>${escapeHtml(path)}</code><span>${escapeHtml(packageIds.join(', '))}</span></li>`;
-  }).filter(Boolean).join('');
-  return rows
-    ? `<section class="extension-overlay-conflict-summary" data-dat-conflict-summary><h3>File conflicts</h3><p>These files are claimed by more than one enabled package; first-hit order decides which package wins.</p><ul>${rows}</ul></section>`
-    : '';
 }
 
 function renderDatsOverlayDetail(detail) {
@@ -121,25 +125,20 @@ function renderDatsOverlayDetail(detail) {
             <span class="extension-overlay-order-label" aria-hidden="true">#${index + 1}</span>
           </li>`;
   }).join('');
-  const packageBody = packageRows || (extensionInventoryError
-    ? '<li class="extension-empty">Installed package details are unavailable.</li>'
-    : '<li class="extension-empty">No installed DAT overlay packages.</li>');
+  const packageBody = packageRows || '<li class="extension-empty">No DAT overlay packages installed.</li>';
   detail.innerHTML = `
         <article class="extension-detail-header glass-panel extension-overlay-detail" data-extension-detail="dats-overlay">
           <header class="extension-detail-title"><h2>Dats-Overlay</h2></header>
-          <p class="extension-description">${escapeHtml(datsOverlayItem.description)}</p>
+          ${detailDescriptionMarkup(datsOverlayItem.description)}
           <section class="extension-overlay-editor" aria-label="Overlay package controls">
-            ${extensionActionErrorMarkup()}
-            ${extensionInventoryError ? `<p class="extension-description" role="alert">Extension inventory unavailable: ${escapeHtml(extensionInventoryError)}</p>` : ''}
             <ol class="extension-overlay-packages">${packageBody}</ol>
-            ${overlayConflictSummary()}
           </section>
         </article>`;
   detail.querySelectorAll('[data-dat-package-enabled]').forEach(checkbox => {
-    checkbox.addEventListener('change', () => setDatPackageEnabled(checkbox.dataset.datPackageEnabled, checkbox.checked, document.activeElement === checkbox));
+    checkbox.addEventListener('change', () => setDatPackageEnabled(checkbox.dataset.datPackageEnabled, checkbox.checked));
   });
   detail.querySelectorAll('[data-dat-move]').forEach(button => {
-    button.addEventListener('click', () => setDatPackageOrder(button.dataset.datPackageId, button.dataset.datMove, document.activeElement === button));
+    button.addEventListener('click', () => setDatPackageOrder(button.dataset.datPackageId, button.dataset.datMove));
   });
 }
 function renderExtensionLibrary() {
@@ -147,10 +146,17 @@ function renderExtensionLibrary() {
   const focused = document.activeElement;
   const focusedRow = focused?.closest?.('.extension-row');
   const focusedKey = focusedRow?.querySelector('[data-extension-item]')?.dataset.extensionItem || '';
+  const focusedDatPackage = focused?.matches?.('[data-dat-move]')
+    ? `[data-dat-package-enabled="${CSS.escape(focused.dataset.datPackageId)}"]`
+    : '';
   const focusedControl = focused?.matches?.('[data-addon-enabled]')
     ? `[data-addon-enabled="${CSS.escape(focused.dataset.addonEnabled)}"]`
     : focused?.matches?.('[data-plugin-enabled]')
       ? `[data-plugin-enabled="${CSS.escape(focused.dataset.pluginEnabled)}"]`
+      : focused?.matches?.('[data-dat-package-enabled]')
+        ? `[data-dat-package-enabled="${CSS.escape(focused.dataset.datPackageEnabled)}"]`
+        : focused?.matches?.('[data-dat-move]')
+          ? `[data-dat-move="${CSS.escape(focused.dataset.datMove)}"][data-dat-package-id="${CSS.escape(focused.dataset.datPackageId)}"]`
       : focusedKey ? `[data-extension-item="${CSS.escape(focusedKey)}"]` : '';
   const query = extensionState.query.trim().toLowerCase();
   let firstVisible = null;
@@ -196,7 +202,6 @@ function renderExtensionLibrary() {
     button.setAttribute('aria-current', String(current));
     button.addEventListener('click', () => {
       extensionState.selectedKey = button.dataset.extensionItem;
-      extensionActionError = '';
       groups.querySelectorAll('[data-extension-item]').forEach(candidate => {
         const selected = candidate.dataset.extensionItem === extensionState.selectedKey;
         candidate.closest('.extension-row').dataset.current = String(selected);
@@ -206,17 +211,20 @@ function renderExtensionLibrary() {
     });
   });
   groups.querySelectorAll('[data-addon-enabled]').forEach(checkbox => {
-    checkbox.addEventListener('change', () => setAddonEnabled(checkbox.dataset.addonEnabled, checkbox.checked, document.activeElement === checkbox));
+    checkbox.addEventListener('change', () => setAddonEnabled(checkbox.dataset.addonEnabled, checkbox.checked));
   });
   groups.querySelectorAll('[data-plugin-enabled]').forEach(checkbox => {
-    checkbox.addEventListener('change', () => setPluginEnabled(checkbox.dataset.pluginEnabled, checkbox.checked, document.activeElement === checkbox));
+    checkbox.addEventListener('change', () => setPluginEnabled(checkbox.dataset.pluginEnabled, checkbox.checked));
   });
   renderExtensionDetail(extensionItems().find(item => extensionItemKey(item) === extensionState.selectedKey));
-  if (focusedControl) groups.querySelector(focusedControl)?.focus({ preventScroll:true });
+  if (focusedControl) focusExtensionControl(focusedControl, focusedDatPackage);
 }
 
-async function setPluginEnabled(id, enabled, restoreFocus = false) {
+async function setPluginEnabled(id, enabled) {
   extensionState.selectedKey = `plugins:${id}`;
+  const token = feedbackToken('#extension-groups');
+  const action = extensionActionName('plugins', id, enabled ? 'enable' : 'disable');
+  clearFeedback(token);
   try {
     const commands = {
       screenshot: 'set_screenshot_enabled',
@@ -224,87 +232,82 @@ async function setPluginEnabled(id, enabled, restoreFocus = false) {
     };
     const command = commands[id];
     if (!command) throw new Error(`Unknown plugin ${id}`);
-    extensionState.inventory = await invoke(command, { enabled });
-    extensionActionError = '';
-    renderExtensionLibrary();
-    if (restoreFocus) document.querySelector(`[data-plugin-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    syncExtensionInventory(await invoke(command, { enabled }));
   } catch (error) {
-    console.error(`Unable to update ${id} state.`, error);
-    extensionActionError = error?.message || String(error);
-    await hydrateExtensions();
-    if (restoreFocus) document.querySelector(`[data-plugin-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    await hydrateExtensions(token);
+    reportFailure(token, action, error, { context:`set_plugin_enabled:${id}` });
   }
 }
 
-async function setAddonEnabled(id, enabled, restoreFocus = false) {
+async function setAddonEnabled(id, enabled) {
   extensionState.selectedKey = `addons:${id}`;
+  const token = feedbackToken('#extension-groups');
+  const action = extensionActionName('addons', id, enabled ? 'enable' : 'disable');
+  clearFeedback(token);
   try {
-    extensionState.inventory = await invoke('set_addon_enabled', { id, enabled });
-    extensionActionError = '';
-    renderExtensionLibrary();
-    if (restoreFocus) document.querySelector(`[data-addon-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    syncExtensionInventory(await invoke('set_addon_enabled', { id, enabled }));
   } catch (error) {
-    console.error('Unable to update addon state.', error);
-    extensionActionError = error?.message || String(error);
-    await hydrateExtensions();
-    if (restoreFocus) document.querySelector(`[data-addon-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    await hydrateExtensions(token);
+    reportFailure(token, action, error, { context:`set_addon_enabled:${id}` });
   }
 }
 
-async function setDatPackageEnabled(id, enabled, restoreFocus = false) {
+async function setDatPackageEnabled(id, enabled) {
   extensionState.selectedKey = 'overlays:dats-overlay';
+  const token = feedbackToken('#extension-detail');
+  const action = extensionActionName('overlays', id, enabled ? 'enable' : 'disable');
+  clearFeedback(token);
   try {
-    extensionState.inventory = await invoke('set_dat_package_enabled', { id, enabled });
-    extensionActionError = '';
-    renderExtensionLibrary();
-    if (restoreFocus) document.querySelector(`[data-dat-package-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    syncExtensionInventory(await invoke('set_dat_package_enabled', { id, enabled }));
   } catch (error) {
-    console.error('Unable to update DAT overlay package state.', error);
-    extensionActionError = error?.message || String(error);
-    await hydrateExtensions();
-    if (restoreFocus) document.querySelector(`[data-dat-package-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+    await hydrateExtensions(token);
+    reportFailure(token, action, error, { context:`set_dat_package_enabled:${id}` });
   }
 }
 
-async function setDatPackageOrder(id, direction, restoreFocus = false) {
+async function setDatPackageOrder(id, direction) {
   extensionState.selectedKey = 'overlays:dats-overlay';
   const packages = installedItems('overlays');
   const index = packages.findIndex(packageItem => packageItem.id === id);
   const position = direction === 'earlier' ? index - 1 : direction === 'later' ? index + 1 : -1;
   if (index < 0 || position < 0 || position >= packages.length) return;
+  const token = feedbackToken('#extension-detail');
+  const packageItem = packages.find(candidate => candidate.id === id);
+  const action = `move ${packageItem?.name || id} ${direction}`;
+  clearFeedback(token);
   try {
-    extensionState.inventory = await invoke('reorder_dat_package', { id, position });
-    extensionActionError = '';
-    renderExtensionLibrary();
-    if (restoreFocus) focusDatPackage(id, direction);
+    syncExtensionInventory(await invoke('reorder_dat_package', { id, position }));
   } catch (error) {
-    console.error('Unable to reorder DAT overlay package.', error);
-    extensionActionError = error?.message || String(error);
-    await hydrateExtensions();
-    if (restoreFocus) focusDatPackage(id, direction);
+    await hydrateExtensions(token);
+    reportFailure(token, action, error, { context:`reorder_dat_package:${id}:${direction}` });
   }
 }
 
-function focusDatPackage(id, direction) {
-  const selector = `[data-dat-move="${CSS.escape(direction)}"][data-dat-package-id="${CSS.escape(id)}"]`;
-  const control = document.querySelector(selector);
-  if (control && !control.disabled) {
-    control.focus({ preventScroll:true });
+async function hydrateExtensions(lifetimeToken) {
+  if (!tauriInvoke) return;
+  const token = feedbackToken('#extension-groups');
+  const revision = ++extensionHydrationRevision;
+  const canShow = candidate => feedbackCurrent(candidate) && (!lifetimeToken || feedbackCurrent(lifetimeToken));
+  if (canShow(token)) clearFeedback(token);
+  try {
+    const inventory = await invoke('get_extension_inventory');
+    if (revision !== extensionHydrationRevision) return;
+    extensionState.inventory = inventory;
+    if (!canShow(token)) return;
+    renderExtensionLibrary();
+  } catch (error) {
+    if (revision !== extensionHydrationRevision || !canShow(token)) {
+      void recordFailure(token.scope, 'load extension inventory', error, EXTENSION_INVENTORY_FAILURE, 'get_extension_inventory');
+      return;
+    }
+    extensionState.inventory = { overlays:[], plugins:[], addons:[] };
+    renderExtensionLibrary();
+    reportFailure(token, 'load extension inventory', error, {
+      message:EXTENSION_INVENTORY_FAILURE,
+      context:'get_extension_inventory',
+    });
     return;
   }
-  document.querySelector(`[data-dat-package-enabled="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
-}
-
-async function hydrateExtensions() {
-  if (!tauriInvoke) return;
-  try {
-    extensionState.inventory = await invoke('get_extension_inventory');
-    extensionInventoryError = '';
-  } catch (error) {
-    extensionInventoryError = error?.message || String(error);
-    extensionState.inventory = { overlays:[], plugins:[], addons:[], overlay_conflicts:[] };
-  }
-  renderExtensionLibrary();
 }
 
 export { hydrateExtensions, renderExtensionLibrary };

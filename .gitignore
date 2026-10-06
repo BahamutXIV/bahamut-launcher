@@ -1,6 +1,7 @@
 /target/
 /tools/icon-gen/target/
 /out/
+/.flatpak-builder/
 /.idea/
 /.vscode/
 *.log

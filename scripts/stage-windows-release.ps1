@@ -38,6 +38,7 @@ $targetHpAddonDestination = Join-Path $destinationPath 'addons\targethp'
 $fpsAddonDestination = Join-Path $destinationPath 'addons\fps'
 $posAddonDestination = Join-Path $destinationPath 'addons\pos'
 $wikiAddonDestination = Join-Path $destinationPath 'addons\wiki'
+$targetLinesAddonDestination = Join-Path $destinationPath 'addons\targetlines'
 New-Item -ItemType Directory -Force -Path $licenseDestination | Out-Null
 foreach ($directory in @(
     $chatlogsAddonDestination
@@ -49,6 +50,7 @@ foreach ($directory in @(
     $fpsAddonDestination
     $posAddonDestination
     $wikiAddonDestination
+    $targetLinesAddonDestination
     (Join-Path $destinationPath 'plugins\dats')
     (Join-Path $destinationPath 'config\addons')
     (Join-Path $destinationPath 'config\plugins')
@@ -95,6 +97,8 @@ $copies = @(
     @{ Source = Join-Path $repositoryRoot 'addons/pos/pos.lua'; Destination = Join-Path $posAddonDestination 'pos.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/wiki/addon.toml'; Destination = Join-Path $wikiAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/wiki/wiki.lua'; Destination = Join-Path $wikiAddonDestination 'wiki.lua' }
+    @{ Source = Join-Path $repositoryRoot 'addons/targetlines/addon.toml'; Destination = Join-Path $targetLinesAddonDestination 'addon.toml' }
+    @{ Source = Join-Path $repositoryRoot 'addons/targetlines/targetlines.lua'; Destination = Join-Path $targetLinesAddonDestination 'targetlines.lua' }
     @{ Source = Join-Path $repositoryRoot 'scripts/default.txt'; Destination = Join-Path $destinationPath 'scripts\default.txt' }
 )
 

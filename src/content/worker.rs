@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -49,12 +49,20 @@ pub struct InstallShared {
     pub file_idx: AtomicUsize,
     phase: AtomicU8,
     error_message: Mutex<Option<String>>,
+    failure_context: Mutex<Option<FailureContext>>,
     pause_requested: AtomicBool,
     paused: AtomicBool,
     pause_lock: Mutex<()>,
     pause_changed: Condvar,
     pub total_download_bytes: u64,
     pub total_files: AtomicUsize,
+}
+
+#[derive(Clone)]
+struct FailureContext {
+    destination: String,
+    cache: String,
+    content_root: String,
 }
 
 impl InstallShared {
@@ -70,6 +78,7 @@ impl InstallShared {
             file_idx: AtomicUsize::new(0),
             phase: AtomicU8::new(Phase::Starting as u8),
             error_message: Mutex::new(None),
+            failure_context: Mutex::new(None),
             pause_requested: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             pause_lock: Mutex::new(()),
@@ -138,6 +147,17 @@ impl InstallShared {
         matches!(self.phase(), Phase::Done | Phase::Error | Phase::Cancelled)
     }
 
+    fn set_failure_context(&self, destination: &Path, cache: &Path, content_root: &str) {
+        *self
+            .failure_context
+            .lock()
+            .expect("install failure context mutex poisoned") = Some(FailureContext {
+            destination: destination.display().to_string(),
+            cache: cache.display().to_string(),
+            content_root: content_root.to_owned(),
+        });
+    }
+
     pub(crate) fn set_phase(&self, phase: Phase) {
         self.phase.store(phase as u8, Ordering::Release);
         if self.is_terminal() {
@@ -146,7 +166,26 @@ impl InstallShared {
     }
 
     pub fn fail(&self, message: impl Into<String>) {
-        *self.lock_error() = Some(message.into());
+        let message = message.into();
+        let context = self
+            .failure_context
+            .lock()
+            .expect("install failure context mutex poisoned")
+            .clone()
+            .unwrap_or_else(|| FailureContext {
+                destination: "<unknown>".into(),
+                cache: "<unknown>".into(),
+                content_root: "<unknown>".into(),
+            });
+        tracing::error!(
+            action = "install",
+            destination = %context.destination,
+            cache = %context.cache,
+            content_root = %context.content_root,
+            diagnostic = %message,
+            "client install failed"
+        );
+        *self.lock_error() = Some(message);
         self.set_phase(Phase::Error);
     }
 
@@ -164,6 +203,11 @@ pub struct InstallRequest {
 }
 
 pub fn drive(shared: Arc<InstallShared>, request: InstallRequest) {
+    shared.set_failure_context(
+        &request.destination,
+        &request.cache_dir,
+        &request.content_root,
+    );
     match super::installer::install(
         &shared,
         &request.destination,

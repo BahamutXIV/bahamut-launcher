@@ -4,7 +4,8 @@ members = ["src-tauri"]
 exclude = ["tools/icon-gen"]
 resolver = "3"
 
-# release.yml sets this version and src-tauri/tauri.conf.json's version from the release tag; workspace fields inherit via `<field>.workspace = true`.
+# release.yml sets this version and src-tauri/tauri.conf.json from the release tag.
+# Members inherit workspace fields with `<field>.workspace = true`.
 [workspace.package]
 version = "1.0.1"
 edition = "2024"
@@ -21,7 +22,7 @@ name = "bahamut-launcher"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Companion launcher for the BahamutXIV FFXIV 1.23b preservation server"
+description = "Launcher for the BahamutXIV Final Fantasy XIV 1.23b emulation server"
 license.workspace = true
 publish.workspace = true
 
@@ -70,7 +71,7 @@ object = { version = "0.36", features = ["read"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# macOS bundles Sikarugir Wine, downloading and extracting it to a temp dir on first launch.
+# macOS downloads Sikarugir Wine and extracts it to a temporary directory on first launch.
 [target.'cfg(target_os = "macos")'.dependencies]
 tempfile = "3"
 

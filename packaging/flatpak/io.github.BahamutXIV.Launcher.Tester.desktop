@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Bahamut Launcher S0 Tester
+GenericName=Game Launcher
+Comment=BahamutXIV Flatpak runtime tester
+Exec=bahamut-launcher
+TryExec=bahamut-launcher
+Icon=io.github.BahamutXIV.Launcher.Tester
+Terminal=false
+Categories=Game;RolePlaying;
+Keywords=FFXIV;Final Fantasy;Bahamut;
+StartupNotify=false
+SingleMainWindow=true

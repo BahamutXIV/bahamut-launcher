@@ -18,6 +18,7 @@ constexpr std::uint16_t kSetActorTargetAnimated = 0x00D3u;
 constexpr std::uint16_t kMoveActor              = 0x00CFu;
 constexpr std::uint16_t kSetActorPosition       = 0x00CEu;
 constexpr std::uint16_t kSetMap                 = 0x0005u;
+constexpr std::uint16_t kAddActor               = 0x00CAu;
 constexpr std::uint16_t kActorDespawn           = 0x0114u;
 constexpr std::uint16_t kRemoveActor            = 0x00CBu;
 constexpr std::uint16_t kDeleteAllActors        = 0x0007u;
@@ -123,8 +124,7 @@ bool ReadFloat(const std::vector<std::uint8_t>& data, std::size_t offset, float&
 
 bool ReadActorPosition(const packet_observer::GameMessage& message,
                        std::uint32_t&                      actorId,
-                       float&                              x,
-                       float&                              z)
+                       bahamut_client::WorldPosition&      position)
 {
     actorId = message.sourceId;
     if (message.opcode == kSetActorPosition)
@@ -144,8 +144,11 @@ bool ReadActorPosition(const packet_observer::GameMessage& message,
         return false;
     }
 
-    return IsActorId(actorId) && ReadFloat(message.payload, 8u, x) &&
-           ReadFloat(message.payload, 16u, z);
+    // The wire offsets and binary observation are recorded in
+    // target_distance.h.
+    return IsActorId(actorId) && ReadFloat(message.payload, 8u, position.x) &&
+           ReadFloat(message.payload, 12u, position.y) &&
+           ReadFloat(message.payload, 16u, position.z);
 }
 
 } // namespace
@@ -240,7 +243,13 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
         return;
     }
 
-    if (message.opcode == kActorDespawn || message.opcode == kRemoveActor)
+    // Bahamut's spawn writer emits AddActor before CE position and CC init.
+    // Clear reused IDs before the subsequent fresh position update.
+    if (message.opcode == kAddActor && message.payload.size() != 8u)
+    {
+        return;
+    }
+    if (message.opcode == kActorDespawn || message.opcode == kRemoveActor || message.opcode == kAddActor)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (IsActorId(localActorId_) && message.sourceId == localActorId_)
@@ -274,11 +283,10 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
             pendingZoneId_ = 0;
         }
         std::uint32_t actorId = 0;
-        float         x       = 0.0F;
-        float         z       = 0.0F;
-        if (pendingPositionsAllowed_ && ReadActorPosition(message, actorId, x, z))
+        Position      position;
+        if (pendingPositionsAllowed_ && ReadActorPosition(message, actorId, position))
         {
-            StorePosition(pendingPositions_, actorId, Position{ x, z });
+            StorePosition(pendingPositions_, actorId, position);
         }
         return;
     }
@@ -313,13 +321,12 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
     }
 
     std::uint32_t actorId = 0;
-    float         x       = 0.0F;
-    float         z       = 0.0F;
-    if (!ReadActorPosition(message, actorId, x, z))
+    Position      position;
+    if (!ReadActorPosition(message, actorId, position))
     {
         return;
     }
-    StorePosition(positions_, actorId, Position{ x, z });
+    StorePosition(positions_, actorId, position);
 }
 
 std::optional<TargetDistanceSnapshot> TargetDistanceService::Snapshot()
@@ -354,6 +361,11 @@ std::optional<TargetDistanceSnapshot> TargetDistanceService::Snapshot()
         snapshot.currentHp = health->second.current;
         snapshot.maxHp     = health->second.maximum;
     }
+    // The local actor's wire position can lag its live client position.
+    if (targetActorId_ == localActorId_)
+    {
+        return snapshot;
+    }
     const auto found = positions_.find(targetActorId_);
     if (found == positions_.end())
     {
@@ -365,6 +377,49 @@ std::optional<TargetDistanceSnapshot> TargetDistanceService::Snapshot()
         return snapshot;
     }
     snapshot.yalms = distance;
+    return snapshot;
+}
+
+std::optional<TargetPositionSnapshot> TargetDistanceService::PositionSnapshot(
+    std::optional<std::uint32_t> actorId)
+{
+    const auto player = playerState_ != nullptr ? playerState_->Snapshot() : std::nullopt;
+    if (!player || !IsActorId(player->actorId) || player->zoneId == 0u ||
+        !std::isfinite(player->x) || !std::isfinite(player->y) ||
+        !std::isfinite(player->z))
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ClearActive();
+        if (hasSynchronizedPlayer_ && !pendingPositionsAllowed_)
+        {
+            pendingPositions_.clear();
+            pendingZoneId_ = 0;
+        }
+        return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    SyncPlayer(*player);
+    const auto resolvedTargetId = actorId.value_or(targetActorId_);
+    if (localActorId_ != player->actorId || zoneId_ != player->zoneId ||
+        !IsActorId(resolvedTargetId))
+    {
+        return std::nullopt;
+    }
+
+    const auto found = positions_.find(resolvedTargetId);
+    if (found == positions_.end() || !std::isfinite(found->second.x) ||
+        !std::isfinite(found->second.y) || !std::isfinite(found->second.z))
+    {
+        return std::nullopt;
+    }
+
+    TargetPositionSnapshot snapshot;
+    snapshot.sourceActorId = localActorId_;
+    snapshot.targetActorId = resolvedTargetId;
+    snapshot.zoneId        = zoneId_;
+    snapshot.source        = { player->x, player->y, player->z };
+    snapshot.target        = found->second;
     return snapshot;
 }
 
