@@ -320,7 +320,7 @@ mod tests {
             .find(|package| package.id == "targetlines")
             .expect("targetlines package should be shipped");
 
-        assert_eq!(targetlines.name, "Targetlines");
+        assert_eq!(targetlines.name, "targetlines");
         assert_eq!(targetlines.author, "Aeshur");
         assert_eq!(targetlines.version, "0.1.0");
         assert_eq!(targetlines.capabilities, ["ui.draw"]);
