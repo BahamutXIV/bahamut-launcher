@@ -95,13 +95,19 @@ jobs:
             packaging/linux/install.sh \
             packaging/linux/install-dependencies.sh \
             scripts/package-linux-tarball.sh \
-            scripts/stage-unix-release.sh
+            scripts/stage-unix-release.sh \
+            scripts/build-flatpak.sh
 
-      - name: Validate the desktop entry
-        run: desktop-file-validate packaging/linux/bahamut-launcher.desktop
+      - name: Validate the desktop entries
+        run: |
+          desktop-file-validate packaging/linux/bahamut-launcher.desktop
+          desktop-file-validate packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.desktop
 
       - name: Test Linux package
         run: python scripts/test-linux-package.py
+
+      - name: Test Flatpak archive packaging
+        run: python scripts/test-flatpak-archive.py
 
   workspace:
     name: Checks (Linux)

@@ -75,6 +75,7 @@ modules:
     build-options:
       append-path: /app/libexec/rust/bin
       env:
+        CARGO_BUILD_JOBS: "4"
         CARGO_NET_OFFLINE: "true"
         LLVM_MINGW_ROOT: /app/libexec/llvm-mingw
     sources:

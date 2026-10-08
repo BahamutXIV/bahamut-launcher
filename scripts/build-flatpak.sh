@@ -2,11 +2,16 @@
 # Build the S0 Flatpak tester from an exact committed source tree.
 #
 #   scripts/build-flatpak.sh [--source-ref <commit>] [--output <dir>]
+#                            [--label <asset name>] [--release-tag <tag>]
 #                            [--work-dir <empty dir>] [--keep-work]
 #
 # The source archive is made with git archive, so uncommitted UI files cannot
 # enter the package. The Flatpak bundle contains the app only; its runtime and
-# SDK must already be available from the configured Flatpak remote.
+# SDK must already be available from the configured Flatpak remote. The bundle
+# is <output>/<label>.flatpak with .sha256 and .identity.json sidecars; the
+# label defaults to bahamut-launcher-tester-s0-<version>. --release-tag
+# defaults to BAHAMUT_RELEASE_TAG and makes the packaged launcher report that
+# tag from --version.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname -- "$0")" && pwd -P)"
@@ -17,6 +22,8 @@ branch="s0"
 runtime_repo_url="https://flathub.org/repo/flathub.flatpakrepo"
 source_ref="HEAD"
 output="$repo_root/out/flatpak-s0"
+label=""
+release_tag="${BAHAMUT_RELEASE_TAG:-}"
 keep_work=0
 requested_work=""
 
@@ -37,6 +44,16 @@ while [[ $# -gt 0 ]]; do
             output="$2"
             shift 2
             ;;
+        --label)
+            [[ $# -ge 2 && -n "$2" ]] || fail "--label needs an asset name"
+            label="$2"
+            shift 2
+            ;;
+        --release-tag)
+            [[ $# -ge 2 ]] || fail "--release-tag needs a tag"
+            release_tag="$2"
+            shift 2
+            ;;
         --keep-work)
             keep_work=1
             shift
@@ -47,7 +64,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h | --help)
-            sed -n '2,10p' "$0" | sed 's/^# //'
+            sed -n '2,14p' "$0" | sed 's/^# //'
             exit 0
             ;;
         *)
@@ -55,6 +72,10 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$label" in
+    .* | -* | *[!A-Za-z0-9._-]*) fail "the label must be a file name of letters, digits, '.', '_', and '-', not starting with '.' or '-': $label" ;;
+esac
 
 for tool in git python3 cargo flatpak flatpak-builder sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"
@@ -93,18 +114,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 "$prepare_script" \
-    --repo-root "$repo_root" \
-    --source-ref "$source_commit" \
-    --work-dir "$work" \
+prepare_args=(
+    --repo-root "$repo_root"
+    --source-ref "$source_commit"
+    --work-dir "$work"
     --vendor-cargo
+)
+if [[ -n "$release_tag" ]]; then
+    prepare_args+=(--release-tag "$release_tag")
+fi
+python3 "$prepare_script" "${prepare_args[@]}"
 
 result_file="$work/prepare-result.json"
 version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$result_file")"
 manifest="$work/io.github.BahamutXIV.Launcher.Tester.yml"
 build_dir="$work/build"
 repo_dir="$work/repo"
-bundle="$output/bahamut-launcher-tester-s0-$version.flatpak"
+if [[ -z "$label" ]]; then
+    label="bahamut-launcher-tester-s0-$version"
+fi
+bundle="$output/$label.flatpak"
 identity="$bundle.identity.json"
 checksum="$bundle.sha256"
 
@@ -134,7 +163,7 @@ python3 "$prepare_script" \
     --runtime-commit "$runtime_commit" \
     --sdk-commit "$sdk_commit" \
     --toolchain-file "$toolchain_file"
-(cd "$output" && sha256sum "$(basename "$bundle")" > "$(basename "$checksum")")
+(cd "$output" && sha256sum -- "$(basename "$bundle")" > "$(basename "$checksum")")
 
 echo "Flatpak bundle: $bundle"
 echo "SHA-256 sidecar: $checksum"
