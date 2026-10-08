@@ -4,8 +4,8 @@
 
 The Flatpak package runs Bahamut Launcher on SteamOS and Steam Deck using the
 GNOME 50 runtime and the launcher's managed Wine engine. Use
-[Installation](#installation) to install a bundle or [Build](#build) to
-produce one from source.
+[Installation](#installation) to install the release bundle or [Build](#build)
+to produce one from source.
 
 The manifest uses app ID `io.github.BahamutXIV.Launcher.Tester` and branch
 `s0`. Its app payload is read from `/app/lib/bahamut-launcher`. The wrapper
@@ -57,15 +57,25 @@ point it at an existing non-empty directory.**
 
 The default output directory, `out/flatpak-s0/`, contains:
 
-- `bahamut-launcher-tester-s0-<version>.flatpak`
-- A `.sha256` checksum sidecar
-- A `.identity.json` file recording the source commit and tree, Cargo and Rust
-  inputs, llvm-mingw digest, runtime and SDK commits, and SDK toolchain receipt
+- `<label>.flatpak`, where the label defaults to
+  `bahamut-launcher-tester-s0-<version>`
+- A `<label>.flatpak.sha256` checksum sidecar
+- A `<label>.flatpak.identity.json` file recording the source commit and tree,
+  Cargo and Rust inputs, llvm-mingw digest, runtime and SDK commits, SDK
+  toolchain receipt, and the bundle digest
+
+`--label <name>` sets the bundle and sidecar names, and `--release-tag <tag>`
+(default: the `BAHAMUT_RELEASE_TAG` environment variable) makes the packaged
+launcher report that tag from `--version`.
+`scripts/package-flatpak-archive.py` wraps the bundle, its sidecars, and the
+[package README](../packaging/flatpak/README.md) into the release zip.
+[Release process](releasing.md) describes the pipeline that publishes it.
 
 The packaged source has no Git metadata. The launcher therefore reports
 `source.launcher_version` from the identity file in `--version`, the log, and
-its HTTP user agent. The bundle includes neither GNOME runtime nor SDK;
-install them from the configured remote before installing the bundle.
+its HTTP user agent. The bundle includes neither GNOME runtime nor SDK. It
+names Flathub as its runtime source, so `flatpak install` offers to add the
+remote and installs the runtime when it is missing.
 
 To inspect source identity without building a bundle, prepare an empty scratch
 directory:
@@ -82,16 +92,32 @@ directory.
 
 ## Installation
 
+Download `bahamut-launcher-vX.Y.Z-linux-flatpak.zip` from the
+[releases page](https://github.com/BahamutXIV/bahamut-launcher/releases). It
+unpacks into a single `bahamut-launcher-flatpak/` folder with four files:
+
+- `README.md`, the [package README](../packaging/flatpak/README.md)
+- `bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak`, the bundle
+- `bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak.sha256`, its checksum
+- `bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak.identity.json`, its build
+  identity
+
 Install the bundle for the current user. Check its checksum and version before
 opening the launcher:
 
 ```bash
-cd out/flatpak-s0
-sha256sum --check bahamut-launcher-tester-s0-<version>.flatpak.sha256
-flatpak install --user ./bahamut-launcher-tester-s0-<version>.flatpak
+unzip bahamut-launcher-vX.Y.Z-linux-flatpak.zip
+cd bahamut-launcher-flatpak
+sha256sum --check bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak.sha256
+flatpak install --user ./bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak
 flatpak run io.github.BahamutXIV.Launcher.Tester --version
 flatpak run io.github.BahamutXIV.Launcher.Tester
 ```
+
+The same install command with a newer bundle updates the package in place,
+because every release uses the same app ID and branch. To remove the package,
+run `flatpak uninstall --user io.github.BahamutXIV.Launcher.Tester`, and add
+`--delete-data` to remove its state folder as well.
 
 Launcher state is stored below
 `~/.var/app/io.github.BahamutXIV.Launcher.Tester/data/launcher`. Install or

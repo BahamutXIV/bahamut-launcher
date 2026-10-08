@@ -21,6 +21,7 @@ These guides are for developers, package maintainers, and testers.
 - [Win32 client module](../client/README.md): MSVC and llvm-mingw builds and native tests
 - [Release process](releasing.md): versioning, tags, release contents, and publishing
 - [Linux package README](../packaging/linux/README.md): instructions shipped with the Linux tar.gz
+- [Flatpak package README](../packaging/flatpak/README.md): instructions shipped with the Flatpak release zip
 - [Gentoo package template](../packaging/gentoo/README.md): install the Linux release through a local overlay
 - [Flatpak build](flatpak.md#build): produce a bundle and inspect its source identity
 
