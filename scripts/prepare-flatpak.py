@@ -126,7 +126,9 @@ def prepare(args: argparse.Namespace) -> None:
 
     commit = run_git(repo, "rev-parse", "--verify", f"{args.source_ref}^{{commit}}")
     tree = run_git(repo, "rev-parse", "--verify", f"{commit}^{{tree}}")
-    launcher_version = launcher_version_identity(repo, commit)
+    release_tag = args.release_tag or None
+    # A release build reports the tag verbatim, matching the other legs' BAHAMUT_RELEASE_TAG.
+    launcher_version = release_tag or launcher_version_identity(repo, commit)
     source = work / "source"
     extract_archive(repo, commit, work)
 
@@ -161,17 +163,20 @@ def prepare(args: argparse.Namespace) -> None:
         raise SystemExit("source archive is missing required inputs: " + ", ".join(missing))
 
     version = read_workspace_version(source / "Cargo.toml")
+    source_identity = {
+        "commit": commit,
+        "launcher_version": launcher_version,
+        "tree": tree,
+        "worktree_changes_excluded": True,
+    }
+    if release_tag:
+        source_identity["release_tag"] = release_tag
     identity = {
         "schema": 1,
         "app_id": APP_ID,
         "branch": BRANCH,
         "version": version,
-        "source": {
-            "commit": commit,
-            "launcher_version": launcher_version,
-            "tree": tree,
-            "worktree_changes_excluded": True,
-        },
+        "source": source_identity,
         "runtime": {
             "platform": RUNTIME,
             "version": RUNTIME_VERSION,
@@ -207,6 +212,7 @@ def prepare(args: argparse.Namespace) -> None:
                 "branch": BRANCH,
                 "commit": commit,
                 "launcher_version": launcher_version,
+                "release_tag": release_tag,
                 "tree": tree,
                 "version": version,
                 "manifest": str(work / manifest.name),
@@ -254,6 +260,7 @@ def main() -> None:
     parser.add_argument("--source-ref", default="HEAD")
     parser.add_argument("--work-dir")
     parser.add_argument("--vendor-cargo", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--release-tag", help="record this tag as the launcher version")
     parser.add_argument("--base-identity")
     parser.add_argument("--bundle")
     parser.add_argument("--output")

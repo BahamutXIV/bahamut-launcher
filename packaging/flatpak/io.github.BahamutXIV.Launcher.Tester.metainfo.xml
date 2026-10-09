@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>io.github.BahamutXIV.Launcher.Tester</id>
-  <name>Bahamut Launcher S0 Tester</name>
-  <summary>BahamutXIV launcher Flatpak runtime tester</summary>
+  <name>Bahamut Launcher</name>
+  <summary>Launcher for the BahamutXIV FINAL FANTASY XIV 1.23b server</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
+  <url type="homepage">https://github.com/BahamutXIV/bahamut-launcher</url>
   <launchable type="desktop-id">io.github.BahamutXIV.Launcher.Tester.desktop</launchable>
-  <developer id="io.github.BahamutXIV">
+  <developer id="io.github.bahamutxiv">
     <name>BahamutXIV</name>
   </developer>
   <description>
-    <p>Test package for the native BahamutXIV launcher on a GNOME Flatpak runtime.</p>
+    <p>Bahamut Launcher installs, repairs, and starts the FINAL FANTASY XIV 1.23b client for the BahamutXIV server. It downloads the game and its own Wine engine and signs you in to a server profile.</p>
   </description>
   <categories>
     <category>Game</category>

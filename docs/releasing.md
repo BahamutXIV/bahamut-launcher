@@ -18,8 +18,10 @@ to `main` and:
    notes.
 
 The tag push starts [Release Binaries](../.github/workflows/release-binaries.yml),
-which builds and publishes the platform downloads. Windows uses MSVC for the
-x86 client module. Linux and macOS use the workflow's pinned llvm-mingw release.
+which builds and publishes the platform downloads and the Linux
+[Flatpak](flatpak.md) bundle. Windows uses MSVC for the x86 client module.
+Linux and macOS use the workflow's pinned llvm-mingw release. The Flatpak
+build compiles inside the GNOME 50 SDK.
 
 Use the default Windows helper/runtime path for player releases. Never include
 the build-only `diagnostic-no-injection` feature: it selects a separate direct
@@ -90,6 +92,11 @@ versions are package metadata; the runtime identity follows the rules above.
 The [signed release metadata](release-metadata.md) version is separate and
 ordered independently per product and target.
 
+The Flatpak package has no Git metadata, so its runtime version comes from
+`source.launcher_version` in the build identity file: the release tag for a
+tag build, otherwise the latest reachable tag and short commit hash. See
+[Flatpak](flatpak.md#build).
+
 On every platform, `--version` or `-V` prints the runtime version, and
 `--help` or `-h` prints usage before any window opens, logs are written, or
 state is created. The Windows release build uses the windows subsystem, so
@@ -142,12 +149,12 @@ Prerelease suffixes can contain letters, digits, dots, and hyphens. Hyphenated
 tags are marked as prereleases.
 
 Release Binaries resolves the tag to a build ref, runs the full checks, and
-builds all three platforms. It verifies each ZIP or tar.gz and SHA-256 sidecar,
-then checks that the remote tag resolves to the commit every platform built,
-including for annotated tags. It attaches the assets to the tag's GitHub
-Release, replacing same-named files on reruns.
+builds all three platforms and the Flatpak bundle. It verifies each ZIP or
+tar.gz and SHA-256 sidecar, then checks that the remote tag resolves to the
+commit every build leg built, including for annotated tags. It attaches the
+assets to the tag's GitHub Release, replacing same-named files on reruns.
 
-Each release publishes exactly six assets:
+Each release publishes exactly eight assets:
 
 ```text
 bahamut-launcher-vX.Y.Z-windows-x86_64.zip
@@ -156,6 +163,8 @@ bahamut-launcher-vX.Y.Z-linux-x86_64.tar.gz
 bahamut-launcher-vX.Y.Z-linux-x86_64.tar.gz.sha256
 bahamut-launcher-vX.Y.Z-macos-universal.zip
 bahamut-launcher-vX.Y.Z-macos-universal.zip.sha256
+bahamut-launcher-vX.Y.Z-linux-flatpak.zip
+bahamut-launcher-vX.Y.Z-linux-flatpak.zip.sha256
 ```
 
 Publishing to GitHub does not authorize an in-app stable update. The owner
@@ -170,14 +179,17 @@ Open Actions -> Release Binaries -> Run workflow to build without a tag push.
 
 - Leave `tag` empty to build the selected branch. Downloads use the label
   `dev-<commit>`, with the first seven characters of the built commit's SHA.
-  The workflow uploads `dist-Windows`, `dist-Linux`, and `dist-macOS`
-  artifacts and skips publication. It creates or updates no GitHub Release.
+  The workflow uploads `dist-Windows`, `dist-Linux`, `dist-macOS`, and
+  `dist-linux-flatpak` artifacts and skips publication. It creates or updates
+  no GitHub Release.
 - Enter an existing `vMAJOR.MINOR.PATCH[-PRERELEASE]` tag to rebuild and
   replace its same-named release assets. This does not send a Discord
   announcement.
 
-The tagged tree must contain `scripts/package-macos-app.sh`. Rebuilding older
-tags fails in the macOS build leg.
+The tagged tree must contain `scripts/package-macos-app.sh`,
+`scripts/build-flatpak.sh`, `scripts/package-flatpak-archive.py`, and
+`packaging/flatpak/README.md`. Rebuilding older tags fails in the macOS or
+Flatpak build leg.
 
 ## Archive contents
 
@@ -186,14 +198,18 @@ tags fails in the macOS build leg.
 | Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the empty official DAT overlay, and update helper. |
 | Linux x86_64 tar.gz | One top-level `bahamut-launcher/` folder containing the executable and the Windows payload without the update helper. The Win32 loader, runtime, and plugins use llvm-mingw, with the MinGW-w64 runtime notice added. Also includes `.bahamut-launcher-package`, `install.sh`, `install-dependencies.sh`, a `Makefile`, the desktop entry under `share/applications/`, and hicolor icons under `share/icons/`. Built on `ubuntu-22.04`; requires glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. First game launch downloads the [Linux Wine engine](configuration.md#linux-wine-engine). |
 | macOS universal ZIP | One `Bahamut Launcher.app` for Apple Silicon and Intel. The launcher is at `Contents/MacOS/bahamut-launcher`. `Contents/Resources` holds the Windows payload without the update helper, plus the MinGW-w64 runtime notice and `icon.icns`. `Info.plist` is at `Contents/Info.plist`. First game launch downloads managed Sikarugir Wine; Apple Silicon requires Rosetta 2 to run it. |
+| Linux Flatpak ZIP | One top-level `bahamut-launcher-flatpak/` folder containing `README.md`, the `.flatpak` bundle, its `.flatpak.sha256` sidecar, and its `.flatpak.identity.json` build identity. The bundle installs app ID `io.github.BahamutXIV.Launcher.Tester` on branch `s0` and needs `org.gnome.Platform//50` from Flathub. See [Flatpak](flatpak.md). |
 
-Every download includes `README.md`, `LICENSE.md`, and notices for MinHook,
-Dear ImGui, Lua, Miniz, and bundled fonts under `licenses/`. In the macOS
-app, those notices are under `Contents/Resources/licenses/`. Linux and macOS
-also include the MinGW-w64 runtime notice.
+The Windows, Linux tar.gz, and macOS downloads include `README.md`,
+`LICENSE.md`, and notices for MinHook, Dear ImGui, Lua, Miniz, and bundled
+fonts under `licenses/`. In the macOS app, those notices are under
+`Contents/Resources/licenses/`. Linux and macOS also include the MinGW-w64
+runtime notice. The Flatpak bundle carries the same payload inside the
+package.
 
-The Linux README comes from `packaging/linux/README.md`. Windows and macOS
-use `docs/getting-started.md`. Each ZIP or tar.gz has a published SHA-256
+The Linux README comes from `packaging/linux/README.md` and the Flatpak
+README from `packaging/flatpak/README.md`. Windows and macOS use
+`docs/getting-started.md`. Each ZIP or tar.gz has a published SHA-256
 sidecar. See [Platform support](extensions.md#platform-support) for client
 module availability and status.
 
@@ -220,9 +236,12 @@ On every push and pull request against `develop` or `main`, the
 [Checks workflow](../.github/workflows/ci.yml) validates the Linux package:
 
 - `Repository checks` runs `shellcheck` on the Linux install scripts,
-  `package-linux-tarball.sh`, and `stage-unix-release.sh`;
-  `desktop-file-validate` on `packaging/linux/bahamut-launcher.desktop`;
-  and [`test-linux-package.py`](../scripts/test-linux-package.py).
+  `package-linux-tarball.sh`, `stage-unix-release.sh`, and
+  `build-flatpak.sh`. It runs `desktop-file-validate` on
+  `packaging/linux/bahamut-launcher.desktop` and
+  `packaging/flatpak/io.github.BahamutXIV.Launcher.Tester.desktop`. It runs
+  [`test-linux-package.py`](../scripts/test-linux-package.py) and
+  `test-flatpak-archive.py`.
 - `Checks (Linux)` packages a placeholder executable, installs it into a
   temporary prefix with `install.sh`, stages it with
   `make DESTDIR=... PREFIX=/usr install`, and removes it with the installed
@@ -231,8 +250,31 @@ On every push and pull request against `develop` or `main`, the
 Release Binaries builds the real Linux launcher on `ubuntu-22.04`, packages
 and extracts it, then runs `bahamut-launcher/bahamut-launcher --version`.
 If `BAHAMUT_RELEASE_TAG` is set, the printed version must match or the build
-leg fails. This checks that the packaged binary loads on the build host;
-it does not test game launch.
+leg fails. This checks that the packaged binary loads on the build host.
+It does not test game launch.
+
+### Flatpak leg
+
+The `Build (Flatpak)` job runs on `ubuntu-24.04` with the distribution
+`flatpak` and `flatpak-builder` packages. It adds the Flathub remote to the
+user installation, installs `org.gnome.Platform//50` and `org.gnome.Sdk//50`,
+and runs `rustup show` so the host Cargo can vendor dependencies. It then
+runs `scripts/build-flatpak.sh --label <asset name>` with
+`BAHAMUT_RELEASE_TAG` in the environment, so the bundle is named
+`bahamut-launcher-vX.Y.Z-linux-flatpak.flatpak` and the packaged launcher
+reports the tag. `scripts/package-flatpak-archive.py` wraps the bundle, its
+sidecars, and `packaging/flatpak/README.md` into
+`bahamut-launcher-vX.Y.Z-linux-flatpak.zip` with a SHA-256 sidecar.
+
+The job extracts the zip, checks that it holds exactly the four expected
+files, checks the bundle against its sidecar, installs the bundle with
+`flatpak install --user`, and runs
+`flatpak run io.github.BahamutXIV.Launcher.Tester --version`. If
+`BAHAMUT_RELEASE_TAG` is set, the printed version must match or the leg
+fails. Branch dispatch builds use the `dev-<commit>` label and skip the
+version comparison. The job uploads `dist-linux-flatpak` and
+`commit-linux-flatpak` artifacts, and publication checks the Flatpak
+commit against the tag like every other leg.
 
 ## Portable updates
 
