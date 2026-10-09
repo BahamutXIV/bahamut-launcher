@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Bahamut Launcher S0 Tester
+Name=Bahamut Launcher
 GenericName=Game Launcher
-Comment=BahamutXIV Flatpak runtime tester
+Comment=Install and play FINAL FANTASY XIV 1.23b on the BahamutXIV server
 Exec=bahamut-launcher
 TryExec=bahamut-launcher
 Icon=io.github.BahamutXIV.Launcher.Tester

@@ -8,9 +8,10 @@ include game files; a fresh game installation needs an Internet connection.
 
 ## First launch
 
-For SteamOS or Steam Deck, follow the [Flatpak guide](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/flatpak.md) to install
+For SteamOS or Steam Deck, download the `linux-flatpak.zip` release and
+follow the [Flatpak guide](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/flatpak.md) to install
 the launcher bundle and choose a game directory. The steps below cover the
-release archives.
+other release archives.
 
 1. Get the latest download for your system from the
    [releases page](https://github.com/BahamutXIV/bahamut-launcher/releases).
@@ -44,7 +45,7 @@ If installation fails, see [Install failures](https://github.com/BahamutXIV/baha
 | Linux x86_64 | WebKitGTK 4.1, GTK 3, and glibc 2.35 or newer. The tar.gz does not bundle system libraries. The first game launch downloads Wine; see [Linux Wine engine](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/configuration.md#linux-wine-engine). |
 | macOS, Apple Silicon or Intel | Universal `Bahamut Launcher.app`, supplied as a ZIP. Sikarugir Wine downloads on first game launch. Apple Silicon needs Rosetta 2 for Wine. |
 
-SteamOS and Steam Deck use the [Flatpak package](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/flatpak.md).
+SteamOS and Steam Deck use the [Flatpak package](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/flatpak.md), the `linux-flatpak.zip` download.
 macOS game launch and client extensions remain unverified against a live client.
 Check [Platform support](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/extensions.md#platform-support) for
 the current limitations. Linux releases require a glibc-based distribution;

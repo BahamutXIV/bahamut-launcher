@@ -1,8 +1,9 @@
 name: Release Binaries
 
-# Builds the launcher archive for each platform at a vX.Y.Z tag (normally the
-# tag release.yml pushes), verifies every archive against its SHA-256 sidecar,
-# and attaches the six files to that tag's GitHub Release. A manual run either
+# Builds the launcher archive for each platform and the Linux Flatpak bundle
+# at a vX.Y.Z tag (normally the tag release.yml pushes), verifies every archive
+# against its SHA-256 sidecar, and attaches the eight files to that tag's
+# GitHub Release. A manual run either
 # rebuilds and re-attaches an existing tag or builds the selected branch
 # without publishing. macOS ships a zipped universal app bundle: Developer ID
 # signed, notarized and stapled when the signing secrets are set, ad hoc signed
@@ -443,9 +444,118 @@ jobs:
           path: ${{ runner.temp }}/commit/*
           if-no-files-found: error
 
+  flatpak:
+    name: Build (Flatpak)
+    needs: [resolve, checks]
+    # 24.04's flatpak-builder 1.4 composes AppStream with appstreamcli, the only
+    # composer the GNOME 50 SDK ships; 22.04's 1.2 needs the retired appstream-compose.
+    runs-on: ubuntu-24.04
+    env:
+      ASSET_NAME: bahamut-launcher-${{ needs.resolve.outputs.label }}-linux-flatpak
+      TARGET: linux-flatpak
+      # build-flatpak.sh stamps the packaged launcher's runtime identity from this tag.
+      BAHAMUT_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+          # git archive and git describe need the history and tags.
+          fetch-depth: 0
+
+      - name: Record the built commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/commit"
+          git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
+          cat "$RUNNER_TEMP/commit/$TARGET"
+
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            flatpak \
+            flatpak-builder \
+            elfutils \
+            desktop-file-utils \
+            appstream
+
+      # build-flatpak.sh vendors the Cargo dependencies with the host cargo.
+      - name: Install Rust toolchain (from rust-toolchain.toml)
+        run: rustup show
+
+      - name: Install the GNOME 50 runtime and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+
+      - name: Build the Flatpak bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-flatpak.sh --label "$ASSET_NAME" --output "$RUNNER_TEMP/flatpak-out"
+
+      - name: Package the Flatpak archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python3 scripts/package-flatpak-archive.py \
+            --bundle "$RUNNER_TEMP/flatpak-out/$ASSET_NAME.flatpak" \
+            --readme packaging/flatpak/README.md \
+            --label "$ASSET_NAME" \
+            --output dist
+
+      - name: Check the Flatpak archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum --check "$ASSET_NAME.zip.sha256" )
+          check="$RUNNER_TEMP/flatpak-check"
+          rm -rf "$check"
+          mkdir -p "$check"
+          unzip -q "dist/$ASSET_NAME.zip" -d "$check"
+          expected=(
+            "bahamut-launcher-flatpak/README.md"
+            "bahamut-launcher-flatpak/$ASSET_NAME.flatpak"
+            "bahamut-launcher-flatpak/$ASSET_NAME.flatpak.sha256"
+            "bahamut-launcher-flatpak/$ASSET_NAME.flatpak.identity.json"
+          )
+          mapfile -t actual < <(cd "$check" && find . -mindepth 1 -printf '%P\n' | sort)
+          if ! diff -u <(printf '%s\n' "${expected[@]}" bahamut-launcher-flatpak | sort) <(printf '%s\n' "${actual[@]}"); then
+            echo "$ASSET_NAME.zip does not contain exactly the four expected files" >&2
+            exit 1
+          fi
+          bundle_dir="$check/bahamut-launcher-flatpak"
+          ( cd "$bundle_dir" && sha256sum --check "$ASSET_NAME.flatpak.sha256" )
+          flatpak install --user --noninteractive "$bundle_dir/$ASSET_NAME.flatpak"
+          printed="$(flatpak run io.github.BahamutXIV.Launcher.Tester --version)"
+          echo "launcher --version: $printed"
+          if [[ -n "${BAHAMUT_RELEASE_TAG:-}" && "$printed" != "$BAHAMUT_RELEASE_TAG" ]]; then
+            echo "launcher reports $printed but the release tag is $BAHAMUT_RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-flatpak
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload the built commit
+        uses: actions/upload-artifact@v4
+        with:
+          name: commit-linux-flatpak
+          path: ${{ runner.temp }}/commit/*
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub release
-    needs: [resolve, build]
+    needs: [resolve, build, flatpak]
     if: needs.resolve.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -478,17 +588,20 @@ jobs:
             "$prefix-linux-x86_64.tar.gz.sha256"
             "$prefix-macos-universal.zip"
             "$prefix-macos-universal.zip.sha256"
+            "$prefix-linux-flatpak.zip"
+            "$prefix-linux-flatpak.zip.sha256"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if ! diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}" | sort); then
-            echo "release artifact set does not contain exactly the expected six files" >&2
+            echo "release artifact set does not contain exactly the expected eight files" >&2
             exit 1
           fi
 
           for archive in \
             "$prefix-windows-x86_64.zip" \
             "$prefix-linux-x86_64.tar.gz" \
-            "$prefix-macos-universal.zip"; do
+            "$prefix-macos-universal.zip" \
+            "$prefix-linux-flatpak.zip"; do
             checksum="$(sha256sum "release-assets/$archive" | cut -d' ' -f1)"
             expected_line="$checksum  $archive"
             actual_line="$(<"release-assets/$archive.sha256")"

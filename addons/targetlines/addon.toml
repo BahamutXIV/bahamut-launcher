@@ -1,7 +1,7 @@
 manifest_schema_version = 1
 id = "targetlines"
 kind = "addon"
-name = "Targetlines"
+name = "targetlines"
 author = "Aeshur"
 version = "0.1.0"
 description = "Draws red curves to selected mobs and green curves during ally heal or buff casts."
