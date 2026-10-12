@@ -174,7 +174,6 @@ fn parse_error_line(line: &str) -> Option<HelperFailure> {
         "ProcessHandleTransferFailed" => HelperErrorCode::ProcessHandleTransferFailed,
         "TargetTerminationFailed" => HelperErrorCode::TargetTerminationFailed,
         code if code.contains("Patch") => HelperErrorCode::PatchApplyFailed,
-        code if code.ends_with("Failed") => HelperErrorCode::Unknown,
         _ => HelperErrorCode::Unknown,
     };
     Some(HelperFailure {

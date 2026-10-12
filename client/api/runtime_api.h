@@ -31,8 +31,8 @@ struct BahamutRuntimeTelemetry
     volatile LONG timingSequence;
 };
 
-// The 64-bit launcher reads this block out of the mapping by offset, so the
-// x86 layout is pinned by the compiler here rather than inferred by a reader.
+// The native helper reads this block from the shared mapping; the compiler
+// pins the x86 layout rather than leaving it to the reader to infer.
 static_assert(sizeof(BahamutRuntimeTelemetry) == 80,
               "BahamutRuntimeTelemetry size is part of the launcher-facing contract");
 static_assert(offsetof(BahamutRuntimeTelemetry, firstFrameCounter) == 40,

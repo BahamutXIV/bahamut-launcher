@@ -203,7 +203,7 @@ divider. The panel appears for six seconds, fading in over 0.4 seconds and out
 over the final 1.4 seconds. It uses Georgia when installed, or the overlay
 font otherwise. Shift-dragging moves the panel.
 
-Unknown area names are not displayed. Local subarea labels are deferred.
+Unknown area names are not displayed. Local subarea labels are unavailable.
 
 ### Wiki
 

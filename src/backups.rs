@@ -175,81 +175,6 @@ pub fn restore_latest_backup(target: BackupTarget) -> Result<PathBuf, BackupErro
     restore_latest_backup_in(target, &BackupLayout::resolve(target)?)
 }
 
-/// Back up the current User Settings files, then remove each regular per-character HUD layout.
-///
-/// The client recreates these `ui` files with its retail defaults on the next launch. No backup
-/// or filesystem mutation occurs when there are no matching layout files.
-pub fn reset_hud_layouts() -> Result<usize, BackupError> {
-    reset_hud_layouts_in(&BackupLayout::resolve(BackupTarget::UserSettings)?)
-}
-
-fn reset_hud_layouts_in(layout: &BackupLayout) -> Result<usize, BackupError> {
-    let files = collect_hud_layout_files(layout)?;
-    if files.is_empty() {
-        return Ok(0);
-    }
-
-    create_backup_in(BackupTarget::UserSettings, layout, &backup_timestamp())?;
-
-    let mut removed = 0_usize;
-    for path in files {
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(io_error("reading HUD layout metadata", &path, error)),
-        };
-        if metadata_is_link(&metadata) || !metadata.is_file() {
-            continue;
-        }
-        fs::remove_file(&path).map_err(|error| io_error("removing a HUD layout", &path, error))?;
-        removed += 1;
-    }
-    Ok(removed)
-}
-
-fn collect_hud_layout_files(layout: &BackupLayout) -> Result<Vec<PathBuf>, BackupError> {
-    let user_root = layout.user_settings_root.join(USER_DIRECTORY);
-    let metadata = match fs::symlink_metadata(&user_root) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(io_error(
-                "reading the user settings directory",
-                &user_root,
-                error,
-            ));
-        }
-    };
-    if metadata_is_link(&metadata) || !metadata.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut files = Vec::new();
-    for character in read_sorted_dir(&user_root)? {
-        let character_name = character.file_name();
-        let metadata = fs::symlink_metadata(character.path()).map_err(|error| {
-            io_error("reading character data metadata", &character.path(), error)
-        })?;
-        if metadata_is_link(&metadata)
-            || !metadata.is_dir()
-            || !is_character_directory_name(&character_name)
-        {
-            continue;
-        }
-
-        let path = character.path().join("ui");
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(io_error("reading HUD layout metadata", &path, error)),
-        };
-        if !metadata_is_link(&metadata) && metadata.is_file() {
-            files.push(path);
-        }
-    }
-    Ok(files)
-}
-
 fn create_backup_in(
     target: BackupTarget,
     layout: &BackupLayout,
@@ -1221,52 +1146,6 @@ mod tests {
             zip_names(&archive_path),
             ["config.pad", "config.sys", "user/00000001/game"]
         );
-    }
-
-    #[test]
-    fn hud_layout_reset_backs_up_then_removes_only_matching_regular_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let layout = fixture_layout(&temp);
-        let valid_character = layout.user_settings_root.join("user/0aBc1234");
-        let invalid_character = layout.user_settings_root.join("user/gggggggg");
-        let short_character = layout.user_settings_root.join("user/1234567");
-        let directory_layout = layout.user_settings_root.join("user/deadbeef/ui");
-        fs::create_dir_all(&valid_character).unwrap();
-        fs::create_dir_all(&invalid_character).unwrap();
-        fs::create_dir_all(&short_character).unwrap();
-        fs::create_dir_all(&directory_layout).unwrap();
-        fs::write(valid_character.join("ui"), b"custom HUD").unwrap();
-        fs::write(valid_character.join("game"), b"game").unwrap();
-        fs::write(invalid_character.join("ui"), b"keep").unwrap();
-        fs::write(short_character.join("ui"), b"keep").unwrap();
-
-        assert_eq!(reset_hud_layouts_in(&layout).unwrap(), 1);
-        assert!(!valid_character.join("ui").exists());
-        assert_eq!(fs::read(valid_character.join("game")).unwrap(), b"game");
-        assert_eq!(fs::read(invalid_character.join("ui")).unwrap(), b"keep");
-        assert_eq!(fs::read(short_character.join("ui")).unwrap(), b"keep");
-        assert!(directory_layout.is_dir());
-
-        let archive = latest_backup(BackupTarget::UserSettings, &layout.backups_root)
-            .unwrap()
-            .expect("reset should leave a recoverable User Settings backup");
-        assert_eq!(
-            zip_names(&archive),
-            ["user/0aBc1234/game", "user/0aBc1234/ui"]
-        );
-    }
-
-    #[test]
-    fn hud_layout_reset_without_matching_files_does_not_mutate() {
-        let temp = tempfile::tempdir().unwrap();
-        let layout = fixture_layout(&temp);
-        let invalid_layout = layout.user_settings_root.join("user/not-a-character");
-        fs::create_dir_all(&invalid_layout).unwrap();
-        fs::write(invalid_layout.join("ui"), b"keep").unwrap();
-
-        assert_eq!(reset_hud_layouts_in(&layout).unwrap(), 0);
-        assert_eq!(fs::read(invalid_layout.join("ui")).unwrap(), b"keep");
-        assert!(!layout.backups_root.exists());
     }
 
     #[test]

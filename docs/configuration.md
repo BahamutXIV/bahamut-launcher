@@ -422,9 +422,9 @@ confirmation. It cannot run while this launcher owns a starting or running
 game, and it reserves the operation until it finishes. Close games and
 configuration utilities started outside this launcher before restoring.
 
-Backup, restore, and HUD reset run on workers so the window stays responsive.
-Only one can run at a time. HUD reset also blocks game launch. Closing the
-launcher waits for these operations and launch preparation to finish.
+Backup and restore run on workers so the window stays responsive. Only one
+can run at a time. Closing the launcher waits for these operations and launch
+preparation to finish.
 
 Restore stages files on the same volume, rejects entries outside the
 allowlist, validates owned files, and keeps rollback storage until replacement

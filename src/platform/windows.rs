@@ -1,8 +1,7 @@
 //! Native Windows backend for the 64-bit launcher and 32-bit FFXIV 1.23b client:
 //! spawn suspended, read the image base with WOW64 APIs, patch and verify it, then resume.
 //!
-//! Authored from `docs/handshake.md` and the public Win32
-//! documentation set.
+//! Launch contract: `docs/handshake.md` and the public Win32 documentation.
 //! The 64-bit launcher uses `Wow64GetThreadContext`; 32-bit builds are unsupported.
 
 use std::ffi::CString;

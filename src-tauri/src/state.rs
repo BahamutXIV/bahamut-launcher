@@ -233,7 +233,7 @@ struct BackupOperation {
     closing: bool,
 }
 
-/// Archive creation, restore, and HUD reset share paths and must finish before exit.
+/// Backup and restore share paths and must finish before exit.
 #[derive(Default)]
 pub(crate) struct BackupIpcState {
     operation: Arc<Mutex<BackupOperation>>,
@@ -250,7 +250,7 @@ impl BackupIpcState {
             return Err("The launcher is closing. Wait for it to finish.".to_owned());
         }
         if operation.active {
-            return Err("A backup or HUD reset is in progress. Wait for it to finish.".to_owned());
+            return Err("A backup or restore is in progress. Wait for it to finish.".to_owned());
         }
         operation.active = true;
         Ok(BackupReservation {

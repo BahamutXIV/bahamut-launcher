@@ -186,10 +186,9 @@ fn read_existing(path: &Path) -> Result<Option<Vec<u8>>, RetailGameError> {
 
 /// Apply mapped settings while preserving every other byte in `config.sys`.
 ///
-/// The replacement is staged and flushed in the same directory.  On Windows,
-/// `ReplaceFileW` performs the replacement and creates the `.bak` sidecar as a
-/// single OS operation.  Other platforms stage the backup first and then use
-/// the platform's same-directory atomic `rename` primitive.
+/// The replacement is staged and flushed in the same directory. The `.bak`
+/// sidecar is staged before replacement via `MoveFileExW` on Windows or atomic
+/// `rename` on other platforms.
 fn apply_image_for_preparation(
     path: &Path,
     original: &[u8],
