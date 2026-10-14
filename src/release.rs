@@ -549,6 +549,8 @@ const CLIENT_EXTENSION_PATHS: &[&str] = &[
     "addons/targethp/targethp.lua",
     "addons/wiki/addon.toml",
     "addons/wiki/wiki.lua",
+    "addons/targetlines/addon.toml",
+    "addons/targetlines/targetlines.lua",
 ];
 
 const MACOS_APP_CONTENTS: &str = "Bahamut Launcher.app/Contents/";
@@ -1267,6 +1269,7 @@ fn validate_archive_directory(
                 | "addons/pos"
                 | "addons/targethp"
                 | "addons/wiki"
+                | "addons/targetlines"
                 | "plugins"
                 | "plugins/dats"
                 | "config"
@@ -1498,6 +1501,8 @@ mod tests {
         "addons/pos/pos.lua",
         "addons/wiki/addon.toml",
         "addons/wiki/wiki.lua",
+        "addons/targetlines/addon.toml",
+        "addons/targetlines/targetlines.lua",
         "scripts/default.txt",
         "LICENSE.md",
         "README.md",
@@ -2646,6 +2651,45 @@ mod tests {
                 &entries,
             );
             assert!(verify_release(&metadata, &artifact).is_err(), "{alias}");
+        }
+    }
+
+    // Every addon the stage script ships must be an allowed managed path, or an
+    // update carrying it is refused.
+    #[test]
+    fn staged_first_party_addons_are_allowed_release_paths() {
+        let script = include_str!("../scripts/stage-unix-release.sh");
+        let names = script
+            .lines()
+            .find_map(|line| line.strip_prefix("addon_names=\""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("stage script lists addon_names");
+        let directory = tempfile::tempdir().unwrap();
+        let (metadata, _) = launcher_release(
+            directory.path(),
+            "2.0.0",
+            Target::WindowsX86_64,
+            b"windows launcher",
+        );
+        for name in names.split_whitespace() {
+            for file in [
+                format!("addons/{name}/addon.toml"),
+                format!("addons/{name}/{name}.lua"),
+            ] {
+                assert!(
+                    allowed_launcher_managed_path(&file, Target::WindowsX86_64),
+                    "{file} on Windows"
+                );
+                assert!(
+                    allowed_launcher_managed_path(
+                        &format!("{MACOS_APP_CONTENTS}Resources/{file}"),
+                        Target::MacosUniversal
+                    ),
+                    "{file} on macOS"
+                );
+            }
+            validate_archive_directory(&metadata, &[], &format!("addons/{name}"))
+                .unwrap_or_else(|_| panic!("addons/{name} directory on Windows"));
         }
     }
 
