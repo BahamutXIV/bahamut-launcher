@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,21 @@ SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent
 PACKAGER = SCRIPTS / "package-flatpak-archive.py"
 SHIPPED_README = REPO / "packaging" / "flatpak" / "README.md"
+MANIFEST = REPO / "packaging" / "flatpak" / "io.github.BahamutXIV.Launcher.Tester.yml"
+BUILD_SCRIPT = SCRIPTS / "build-flatpak.sh"
+RELEASE_WORKFLOW = REPO / ".github" / "workflows" / "release-binaries.yml"
+FINISH_ARGS = [
+    "--require-version=1.15.6",
+    "--share=network",
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--device=input",
+    "--allow=multiarch",
+    "--filesystem=~/Games:create",
+]
 TOP = "bahamut-launcher-flatpak"
 LABEL = "bahamut-launcher-test-linux-flatpak"
 BUNDLE = "bahamut-launcher-test-linux-flatpak.flatpak"
@@ -222,6 +238,77 @@ class FlatpakArchiveTests(unittest.TestCase):
         self.assert_ok(self.package(output, readme=SHIPPED_README))
         with zipfile.ZipFile(output / f"{LABEL}.zip") as zipped:
             self.assertEqual(zipped.read(f"{TOP}/README.md"), SHIPPED_README.read_bytes())
+
+
+class FlatpakPermissionTests(unittest.TestCase):
+    """The manifest permissions and the Flatpak minimum version, read as text."""
+
+    def manifest_finish_args(self, text=None):
+        lines = (MANIFEST.read_text(encoding="utf-8") if text is None else text).splitlines()
+        start = lines.index("finish-args:")
+        args = []
+        for line in lines[start + 1:]:
+            if line.strip().startswith("#"):
+                continue
+            match = re.fullmatch(r"  - (--\S+)", line)
+            if not match:
+                break
+            args.append(match.group(1))
+        return args
+
+    def test_finish_args_are_exact(self):
+        args = self.manifest_finish_args()
+        self.assertEqual(args, FINISH_ARGS)
+        for forbidden in ["--device=all", "--filesystem=home", "--filesystem=host"]:
+            self.assertNotIn(forbidden, args)
+
+    def test_input_grant_removal_is_detected(self):
+        text = MANIFEST.read_text(encoding="utf-8").replace("  - --device=input\n", "", 1)
+        self.assertNotEqual(self.manifest_finish_args(text), FINISH_ARGS)
+
+    def test_minimum_flatpak_version_matches_everywhere(self):
+        required = [arg for arg in self.manifest_finish_args() if arg.startswith("--require-version=")]
+        self.assertEqual(len(required), 1)
+        version = required[0].split("=", 1)[1]
+        script = re.search(r'^readonly min_flatpak_version="([^"]+)"$', BUILD_SCRIPT.read_text(encoding="utf-8"), re.M)
+        self.assertIsNotNone(script, "build-flatpak.sh does not define min_flatpak_version")
+        self.assertEqual(script.group(1), version)
+        workflow = re.findall(r"^\s+minimum=(\S+)$", RELEASE_WORKFLOW.read_text(encoding="utf-8"), re.M)
+        self.assertEqual(workflow, [version])
+
+    def run_build_script(self, flatpak_version, *arguments):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name).resolve()
+        stubs = root / "bin"
+        stubs.mkdir()
+        for name, body in {
+            "flatpak": f'echo "Flatpak {flatpak_version}"',
+            "flatpak-builder": "exit 0",
+            "cargo": "exit 0",
+        }.items():
+            stub = stubs / name
+            stub.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+            stub.chmod(0o755)
+        output = root / "out"
+        env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}")
+        result = run("bash", BUILD_SCRIPT, "--output", output, *arguments, env=env)
+        return result, output
+
+    def test_build_script_rejects_an_old_flatpak(self):
+        result, output = self.run_build_script("1.14.6")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Flatpak 1.15.6 or newer is required", result.stderr)
+        self.assertIn("found 1.14.6", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_build_script_accepts_the_minimum_flatpak(self):
+        for version in ["1.15.6", "1.16.6", "1.18.4"]:
+            with self.subTest(version=version):
+                result, _ = self.run_build_script(version, "--source-ref", "no-such-ref-for-this-test")
+                self.assertEqual(result.returncode, 1)
+                self.assertNotIn("or newer is required", result.stderr)
+                self.assertIn("source ref is not a commit", result.stderr)
 
 
 if __name__ == "__main__":

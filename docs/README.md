@@ -8,6 +8,7 @@ Start with [Getting started](getting-started.md). It covers system
 requirements, installation, and first launch.
 
 - [Flatpak](flatpak.md): SteamOS and Steam Deck installation, game directories, package permissions, and builds
+- [Steam controller layouts](steam-controller.md): build a keyboard and mouse layout for Gaming Mode and avoid the Default action-set trap
 - [Configuration](configuration.md): change settings, find your files, and back up or restore data
 - [Troubleshooting](troubleshooting.md): fix startup, installation, login, and launch problems
 - [Extensions](extensions.md): use addons and plugins, and check platform support

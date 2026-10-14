@@ -17,6 +17,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname -- "$0")" && pwd -P)"
 repo_root="$(cd "$script_dir/.." && pwd -P)"
 prepare_script="$script_dir/prepare-flatpak.py"
+# Keep in step with --require-version in the manifest; scripts/test-flatpak-archive.py checks it.
+readonly min_flatpak_version="1.15.6"
 app_id="io.github.BahamutXIV.Launcher.Tester"
 branch="s0"
 runtime_repo_url="https://flathub.org/repo/flathub.flatpakrepo"
@@ -80,6 +82,13 @@ esac
 for tool in git python3 cargo flatpak flatpak-builder sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"
 done
+
+# --device=input needs Flatpak 1.15.6 or newer, both to build and to install the bundle.
+flatpak_version="$(flatpak --version 2>/dev/null | awk '{print $2}')" || flatpak_version=""
+if [[ -z "$flatpak_version" ]] ||
+    [[ "$(printf '%s\n%s\n' "$min_flatpak_version" "$flatpak_version" | sort -V | head -n 1)" != "$min_flatpak_version" ]]; then
+    fail "Flatpak $min_flatpak_version or newer is required for controller input; found ${flatpak_version:-unknown}"
+fi
 
 source_commit="$(git -C "$repo_root" rev-parse --verify "$source_ref^{commit}")" ||
     fail "source ref is not a commit: $source_ref"

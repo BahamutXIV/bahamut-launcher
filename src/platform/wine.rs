@@ -124,6 +124,7 @@ mod system {
                 cmd.current_dir(cwd);
             }
             self.configure_env(&mut cmd, wine_debug);
+            log_controller_environment();
 
             // Scope `WINEDLLOVERRIDES` to this launch; `n,b` prefers DXVK and falls back to builtin DLLs.
             if let Some(overrides) = dxvk_overrides {
@@ -177,6 +178,7 @@ mod system {
             let wine_log = wine_log_path()?;
             let mut cmd = Command::new(&self.wine_bin);
             self.configure_env(&mut cmd, verbose_wine_debug.then_some(WINEDEBUG_VERBOSE));
+            log_controller_environment();
             if let Some(overrides) = dxvk_overrides {
                 tracing::info!(overrides, "WINEDLLOVERRIDES");
                 cmd.env("WINEDLLOVERRIDES", overrides);
@@ -188,6 +190,14 @@ mod system {
                 super::extension_launch::WINE_HELPER_READINESS_DEADLINE,
             )
         }
+    }
+
+    /// Allowlisted SDL and Steam variables only; the launch environment carries a session token.
+    fn log_controller_environment() {
+        tracing::info!(
+            "Controller env at launch = {}",
+            crate::diagnostics::process_controller_environment_lines().join(" | ")
+        );
     }
 
     const WINE_LOG_TAIL_LINES: usize = 12;

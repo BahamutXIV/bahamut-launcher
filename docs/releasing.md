@@ -255,9 +255,15 @@ It does not test game launch.
 
 ### Flatpak leg
 
-The `Build (Flatpak)` job runs on `ubuntu-24.04` with the distribution
-`flatpak` and `flatpak-builder` packages. It adds the Flathub remote to the
-user installation, installs `org.gnome.Platform//50` and `org.gnome.Sdk//50`,
+The `Build (Flatpak)` job runs on `ubuntu-24.04`. The package needs Flatpak
+1.15.6 or newer for `--device=input`, which the distribution's Flatpak is
+older than, so the job enables the Flatpak PPA (`ppa:flatpak/stable`) and
+installs `flatpak` and `flatpak-builder` with apt. Apt takes both from the PPA
+when it publishes a newer version; the PPA is not pinned. The job prints
+`flatpak --version` and `flatpak-builder --version`, and fails early when the
+Flatpak version is older than 1.15.6. The `flatpak-builder` version is
+recorded but not checked. The job adds the Flathub remote to the user
+installation, installs `org.gnome.Platform//50` and `org.gnome.Sdk//50`,
 and runs `rustup show` so the host Cargo can vendor dependencies. It then
 runs `scripts/build-flatpak.sh --label <asset name>` with
 `BAHAMUT_RELEASE_TAG` in the environment, so the bundle is named
