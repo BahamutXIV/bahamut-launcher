@@ -66,6 +66,13 @@ pub(crate) fn log_support_diagnostics(log_path: Option<&Path>) {
     } else {
         tracing::info!("GPU = {}", system.gpus.join(" | "));
     }
+    #[cfg(target_os = "linux")]
+    {
+        tracing::info!("Controller input = begin");
+        for line in bahamut_launcher::diagnostics::controller_diagnostics() {
+            tracing::info!("Controller input = {line}");
+        }
+    }
 
     log_free_disk("install root", &roots.install);
     log_free_disk("state root", &roots.state);

@@ -6,12 +6,14 @@ sdk: org.gnome.Sdk
 command: bahamut-launcher
 
 finish-args:
+  - --require-version=1.15.6
   - --share=network
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri
+  - --device=input
   # Without multiarch the WoW64 Wine engine creates a 64-bit-only prefix and PE32 executables do not start.
   - --allow=multiarch
   # Installation needs the game folder and its sibling staging directory.
