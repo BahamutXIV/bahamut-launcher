@@ -16,12 +16,18 @@ share. The wrapper does not change `HOME`. It also suppresses Wine's optional
 Mono and Gecko installers because the native S0 client and helper do not use
 those components.
 
+Installing the package requires Flatpak 1.15.6 or newer, which provides
+`--device=input`.
+
 ## Build
 
-Use Linux with `flatpak`, `flatpak-builder`, `elfutils`, `desktop-file-utils`,
+Use Linux with `flatpak` 1.15.6 or newer, `flatpak-builder`, `elfutils`, `desktop-file-utils`,
 Python 3, Cargo, and remotes that provide GNOME Platform and SDK 50. The SDK
 must include GTK 3, WebKitGTK 4.1, and CMake. The manifest supplies official
 Rust 1.95.0 components and checks Rust and Cargo versions before compiling.
+
+`scripts/build-flatpak.sh` stops before creating any output when the host
+Flatpak is older than 1.15.6.
 
 Add Flathub to the user installation and install the runtime:
 
@@ -139,8 +145,16 @@ The package declares these runtime permissions:
 | `--socket=wayland` | Wayland display |
 | `--socket=pulseaudio` | game audio |
 | `--device=dri` | runtime graphics device access |
+| `--device=input` | makes input device nodes under `/dev/input`, including keyboards and mice, visible inside the sandbox; the host's permissions on each node still apply |
 | `--allow=multiarch` | 32-bit PE execution (game and `bahamut-loader.exe`) under the WoW64 Wine engine; without it the Wine prefix is 64-bit only |
 | `--filesystem=~/Games:create` | writable game destinations and sibling staging directories under `~/Games`; Flatpak creates `~/Games` when absent |
+
+The input grant is a prerequisite for controller access. It has not been shown
+on hardware to make the game's Gamepad option available. A tester reported no
+change when input access was added for one launch; that comparison is
+inconclusive. See
+[Troubleshooting](troubleshooting.md#controller-not-detected-in-gaming-mode)
+and [Steam controller layouts](steam-controller.md).
 
 Host filesystem access is limited to `~/Games` and its subdirectories.
 Flatpak applies this declared permission when starting the installed package;
@@ -195,3 +209,7 @@ grants or denies filesystem access. If `~/Games` was absent before starting
 the package, confirm that Flatpak created it. Select an empty destination
 under `~/Games`, complete installation, and confirm that the launcher retains
 the installed client after exit and restart.
+
+The installed permissions list `input` on the `devices=` line, for example
+`devices=dri;input;`. An override that removes `input` removes the sandbox's
+access to input device nodes.

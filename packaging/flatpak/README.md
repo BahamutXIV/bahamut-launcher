@@ -9,7 +9,7 @@ download the game.
 
 ## Requirements
 
-- Flatpak, which SteamOS normally provides.
+- Flatpak 1.15.6 or newer (SteamOS normally provides Flatpak).
 - The GNOME 50 runtime, `org.gnome.Platform//50`, from Flathub. The bundle
   names Flathub as its runtime source, so the install command below offers to
   add the Flathub remote and downloads the runtime when it is missing.
@@ -96,8 +96,11 @@ Install and set up the launcher in Desktop Mode. To start it from Game Mode,
 add the Bahamut Launcher entry to Steam with Steam's own Add to Steam flow,
 for example from the entry's right-click menu in the application launcher.
 It then appears in the Steam library like any other non-Steam application.
-Adding it to Steam and the controller layout it gets are Steam features
-outside the launcher.
+Adding it to Steam is a Steam feature outside the launcher. Steam keeps
+controller layouts per shortcut; community reports say they are filed under
+the shortcut's name. For a keyboard and mouse layout and the action-set check,
+see the
+[Steam controller layouts guide](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/steam-controller.md).
 
 ## Update and uninstall
 
@@ -147,6 +150,7 @@ The package declares these permissions:
 | `--socket=fallback-x11`, `--socket=wayland` | Display. |
 | `--socket=pulseaudio` | Game audio. |
 | `--device=dri` | Graphics device access. |
+| `--device=input` | Makes input device nodes under `/dev/input`, including keyboards and mice, visible inside the sandbox; the host's permissions on each node still apply. Controller availability in the game is not established; see the [Steam controller layouts guide](https://github.com/BahamutXIV/bahamut-launcher/blob/main/docs/steam-controller.md). |
 | `--allow=multiarch` | 32-bit game and loader execution under the WoW64 Wine engine. |
 | `--filesystem=~/Games:create` | Game folders and their staging directories under `~/Games`. |
 

@@ -10,6 +10,7 @@ Choose the problem you are seeing:
 - [The game closes after Play](#game-closes-after-play)
 - [Settings or backups fail](#configuration)
 - [Extensions are missing under Wine](#wine-extension-launch)
+- [The controller is not detected in Gaming Mode](#controller-not-detected-in-gaming-mode)
 
 For setup, see [Getting started](getting-started.md). For help, use the
 [Bahamut Discord](https://discord.gg/PxK5RJYQjm). Build and test instructions
@@ -355,6 +356,52 @@ Close the retail configuration utility and game before restoring.
 - **Retained rollback directory:** stop and preserve the named directory.
   It holds prior live files that could not be restored automatically.
 
+## Controller not detected in Gaming Mode
+
+This section applies to the Flatpak package started from Steam. The cause of
+the game's Gamepad option being unavailable there is not established, so these
+steps collect information and rule out known traps rather than fix it.
+
+- Check which Steam action set is active. A gamepad-style template's Default
+  set outputs gamepad buttons and is active at launch. See
+  [Steam controller layouts](steam-controller.md).
+- Check the installed permissions and overrides with the commands in
+  [Checking package permissions](flatpak.md#checking-package-permissions).
+  The permissions output should list `input` on the `devices=` line; an
+  override that removes it removes access to input device nodes.
+- Open the launcher's Gamepad Settings screen from the gamepad icon in the
+  top bar. It shows `Gamepad detected: <family>` or `No gamepad detected.`
+  This reflects what the launcher window sees, not what the game sees.
+  Include that text in a report. Whether it distinguishes a sandbox problem
+  from a Wine problem is unverified.
+- To collect controller details, start the launcher from Steam, open **Help**,
+  and choose **Copy Logs** soon after it starts, before a long session. Copy
+  Logs keeps only the newest part of a long launcher log, so the startup
+  block can be cut off. Include the lines that
+  contain `Controller input =`, and any line that contains
+  `Controller env at launch =` from a Play attempt. They contain the Flatpak
+  device permissions, host-reported input device vendor and product IDs with
+  handler names for devices that could be game controllers (keyboards and mice
+  are counted but not listed), whether each input node can be read inside the
+  sandbox, and the values of selected SDL and Steam variables. They contain no
+  device names, serial numbers, or physical paths. The log is shared when you
+  paste it, so review it first.
+- Advanced: to record Wine input tracing for one run, add
+  `--env=WINEDEBUG=err+all,fixme-all,+hid,+dinput,+xinput,+wbemprox` before the
+  application ID `io.github.BahamutXIV.Launcher.Tester` in the shortcut's
+  Steam launch options, then restore the original options afterward. Wine's
+  controller bus channel is named `hid`. The tracing applies only while
+  `enable_verbose_wine_debug` is `false`, its default, because that setting
+  supplies its own filter. The logs grow quickly while the controller is used.
+  They are written to `wine.log`, which Copy Logs does not include; share the
+  relevant part of that file separately. See
+  [Wine runtime and exit logs](#wine-runtime-and-exit-logs).
+- The retail game also stores a `config.pad` file beside `config.sys`. The
+  **User Settings and Macros** backup includes it when present; see
+  [User Settings and Macros](configuration.md#user-settings-and-macros).
+  Whether its presence or contents affect controller availability is
+  unverified.
+
 ## Retail game settings
 
 If `config.sys` is invalid, move it aside so Play can recreate it from the INI,
@@ -436,6 +483,14 @@ target-specific `RUST_LOG` directives can request more detail.
 Frontend failures synchronously append ERROR events with the page, action,
 displayed message, diagnostic, UI context, launcher version, and platform.
 Redaction happens both before persistence and before Help receives the log.
+
+On Linux each startup also records the Flatpak device permissions, the
+host-reported input device vendor and product IDs with their handlers for
+devices that could be game controllers (no device names), whether each input
+node in the sandbox can be opened for reading, whether libSDL2 is present, and
+the values of selected SDL and Steam controller variables. It records no
+device serial numbers, physical paths, or full environment. These lines contain `Controller input =`; see
+[Controller not detected in Gaming Mode](#controller-not-detected-in-gaming-mode).
 
 Visible feedback behaves as follows:
 
