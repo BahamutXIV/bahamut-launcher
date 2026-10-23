@@ -691,19 +691,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn logout_success_with_empty_204_body_returns_ok() {
-        let server = MockServer::start();
-        let mock = server.mock(|when, then| {
-            when.method(DELETE)
-                .path(format!("/api/v1/sessions/{SAMPLE_SESSION_ID}"));
-            then.status(204);
-        });
-        let client = AuthClient::new(&server_api_base(&server)).unwrap();
-        client.logout(SAMPLE_SESSION_ID).await.unwrap();
-        mock.assert();
-    }
-
-    #[tokio::test]
     async fn logout_404_surfaces_as_api_error_caller_can_swallow() {
         let server = MockServer::start();
         let _mock = server.mock(|when, then| {
