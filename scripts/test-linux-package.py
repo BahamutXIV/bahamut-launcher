@@ -716,6 +716,12 @@ class LinuxPackageTests(unittest.TestCase):
 class DependencyClassificationTests(unittest.TestCase):
     """Feed install-dependencies.sh a stub ldd listing for a real ELF file."""
 
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.filtered_path = path_without(Path(temporary.name).resolve() / "filtered", "wine", "tar", "xz")
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -890,7 +896,7 @@ class DependencyClassificationTests(unittest.TestCase):
     LIBS_OK = "\tlibc.so.6 => /lib/libc.so.6\n"
     LIBS_MISSING = "\tlibwebkit2gtk-4.1.so.0 => not found\n"
 
-    def simulate_host(self, arch="x86_64", exclude=(), missing_tools=()):
+    def simulate_host(self, arch="x86_64", missing_tools=()):
         """Make the launcher and `uname -m` report ARCH, with a PATH that has no Wine unless a test adds one."""
         data = bytearray(self.elf.read_bytes())
         data[18:20] = b"\x3e\x00" if arch == "x86_64" else b"\xb7\x00"
@@ -901,12 +907,11 @@ class DependencyClassificationTests(unittest.TestCase):
             encoding="utf-8",
         )
         uname.chmod(0o755)
-        filtered = path_without(self.root / "filtered", "wine", "tar", "xz", *exclude)
         for tool in ("tar", "xz"):
             if tool not in missing_tools:
                 (self.tools / tool).write_text(PLACEHOLDER, encoding="utf-8")
                 (self.tools / tool).chmod(0o755)
-        self.env["PATH"] = f"{self.tools}{os.pathsep}{filtered}"
+        self.env["PATH"] = f"{self.tools}{os.pathsep}{self.filtered_path}"
         self.env.pop("BAHAMUT_WINE", None)
 
     ENGINE_LIBS = [
