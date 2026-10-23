@@ -1880,12 +1880,18 @@ mod tests {
         wrong_archive.artifact.length += 1;
         assert!(validate_metadata(&wrong_archive, Some(&manifest_bytes)).is_err());
 
-        let ReleaseInventory::GameDelivery { target_version, .. } = &mut wrong_archive.inventory
+        let mut wrong_version = metadata.clone();
+        let ReleaseInventory::GameDelivery { target_version, .. } = &mut wrong_version.inventory
         else {
             unreachable!();
         };
         *target_version = "different-game-version".into();
-        assert!(validate_metadata(&wrong_archive, Some(&manifest_bytes)).is_err());
+        assert_eq!(
+            validate_metadata(&wrong_version, Some(&manifest_bytes))
+                .unwrap_err()
+                .to_string(),
+            "Game release target version does not match its delivery manifest."
+        );
     }
 
     #[test]
