@@ -180,6 +180,37 @@ async function connectDevTools(port) {
   throw new Error('Timed out waiting for the browser DevTools endpoint.');
 }
 
+async function setupBrowserTest(t) {
+  const server = createServer(serveUiFixture);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const httpPort = server.address().port;
+  const debugPort = await freePort();
+  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
+  const browser = spawn(browserPath(), [
+    '--headless=new', '--disable-gpu', '--no-sandbox',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
+    'about:blank',
+  ], { stdio: 'ignore' });
+  let devtools = null;
+
+  t.after(async () => {
+    if (devtools) {
+      await devtools.send('Browser.close').catch(() => {});
+      devtools.socket.close();
+    }
+    await stopChild(browser);
+    await delay(1000);
+    await new Promise(resolve => server.close(resolve));
+    removeTempRoot(profileDir);
+  });
+
+  devtools = await connectDevTools(debugPort);
+  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
+  await devtools.send('Page.enable');
+  await devtools.send('Runtime.enable');
+  return { devtools, httpPort };
+}
+
 function evaluateScript() {
   return `(() => {
     const state = {
@@ -718,25 +749,7 @@ async function exposeFrontendModules(devtools) {
 }
 
 test('failure_feedback_stays_in_cards_and_logs_after_navigation', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), ['--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`, 'about:blank'], { stdio:'ignore' });
-  const devtools = await connectDevTools(debugPort);
-  t.after(async () => {
-    await devtools.send('Browser.close').catch(() => {});
-    devtools.socket.close();
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source:evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort: port } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', { width:1280, height:900, screenWidth:1280, screenHeight:900, deviceScaleFactor:1, mobile:false });
   await devtools.send('Page.navigate', { url:`http://127.0.0.1:${port}/index.html` });
   await evaluate(devtools, `new Promise(resolve => { const check = () => document.querySelector('#launcher-version')?.textContent === 'browser-test' ? resolve() : setTimeout(check, 10); check(); })`);
@@ -1078,33 +1091,7 @@ test('failure_feedback_stays_in_cards_and_logs_after_navigation', async t => {
 });
 
 test('home_auth_and_terminal_install_states', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width: 1280,
     height: 800,
@@ -1807,31 +1794,7 @@ test('home_auth_and_terminal_install_states', async t => {
 });
 
 test('settings_keyboard_and_accessibility_tree', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Accessibility.enable');
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width:1280, height:800, screenWidth:1280, screenHeight:800,
@@ -1936,33 +1899,7 @@ test('settings_keyboard_and_accessibility_tree', async t => {
 });
 
 test('flat_settings_and_extensions_match_backend_contract', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width: 1280,
     height: 800,
