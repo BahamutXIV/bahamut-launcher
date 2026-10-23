@@ -206,6 +206,29 @@ class LinuxPackageTests(unittest.TestCase):
             (LINUX / "bahamut-launcher.desktop").read_bytes(),
         )
 
+        result = run(self.payload / "install-dependencies.sh", "--bogus", env=self.env)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+
+        desktop = LINUX / "bahamut-launcher.desktop"
+        self.assertEqual(desktop.stem, "bahamut-launcher")
+        self.assertEqual(desktop_values(desktop)["StartupWMClass"], "bahamut-launcher")
+        self.assertTrue((self.payload / "bahamut-launcher").is_file())
+
+        def keys(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    yield key
+                    yield from keys(value)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from keys(value)
+
+        config = json.loads((REPO / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertNotIn("enableGTKAppId", set(keys(config)))
+
+        if shutil.which("desktop-file-validate"):
+            self.assert_ok(run("desktop-file-validate", self.payload / "share/applications/bahamut-launcher.desktop"))
+
     def test_user_install_and_payload_uninstall(self):
         prefix = self.root / "prefix"
         self.assert_ok(self.install(prefix))
@@ -687,32 +710,6 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertIn("cannot check the libraries; nothing to install", result.stdout)
         self.assertNotIn("+ ", result.stdout)
-
-    def test_dependency_script_rejects_unknown_argument(self):
-        result = run(self.payload / "install-dependencies.sh", "--bogus", env=self.env)
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-
-    def test_window_class_names_agree(self):
-        desktop = LINUX / "bahamut-launcher.desktop"
-        self.assertEqual(desktop.stem, "bahamut-launcher")
-        self.assertEqual(desktop_values(desktop)["StartupWMClass"], "bahamut-launcher")
-        self.assertTrue((self.payload / "bahamut-launcher").is_file())
-
-        def keys(node):
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    yield key
-                    yield from keys(value)
-            elif isinstance(node, list):
-                for value in node:
-                    yield from keys(value)
-
-        config = json.loads((REPO / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
-        self.assertNotIn("enableGTKAppId", set(keys(config)))
-
-    @unittest.skipUnless(shutil.which("desktop-file-validate"), "desktop-file-validate is not installed")
-    def test_shipped_desktop_entry_validates(self):
-        self.assert_ok(run("desktop-file-validate", self.payload / "share/applications/bahamut-launcher.desktop"))
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "the dependency check reads ELF files on a Linux host")
@@ -1358,15 +1355,11 @@ cp -R "$repo/plugins/dats/bahamut-dats-overlay" "$destination/plugins/dats/"
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
             members = archive.getmembers()
+            packaged = archive.extractfile(f"{TOP}/README.md").read()
         names = {m.name for m in members if m.isfile()}
         self.assertIn(f"{TOP}/scripts/default.txt", names)
         self.assertIn(f"{TOP}/plugins/dats/bahamut-dats-overlay/data/a b.txt", names)
         self.assertNotIn(f"{TOP}/config", {m.name.rstrip("/") for m in members})
-
-    def test_staged_readme_is_replaced_by_the_linux_readme(self):
-        self.assertEqual(self.package().returncode, 0)
-        with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
-            packaged = archive.extractfile(f"{TOP}/README.md").read()
         self.assertEqual(packaged, (LINUX / "README.md").read_bytes())
         self.assertNotEqual(packaged, b"synthetic README.md")
 
