@@ -53,3 +53,5 @@ evidence locators when they are part of the current launcher contract.
   compatibility wording, and citation rules.
 - [Comments and prose](comments-and-prose.md) defines the repository's source
   comment and public prose style.
+- [Test authoring](test-authoring.md) defines fixture cost, assertions, and
+  coverage boundaries.
