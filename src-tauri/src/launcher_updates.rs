@@ -2131,35 +2131,6 @@ mod tests {
     }
 
     #[test]
-    fn verified_monotonic_offer_is_persisted_with_its_signed_receipt() {
-        let root = crate::test_support::tempdir().unwrap();
-        let fixture = SignedFixture::new();
-        fixture.prepare_root(root.path(), "1.0.0");
-        let next = fixture.release("1.1.0");
-        let (url, server) = fixture.serve(&[next.metadata.clone(), next.signature.clone()]);
-        fixture.write_config(root.path(), &url, Some("1.0.0"));
-
-        let status = check_launcher_update(root.path()).unwrap();
-        assert_eq!(status.state, "update_available");
-        assert_eq!(status.installed_version.as_deref(), Some("1.0.0"));
-        assert_eq!(status.offered_version.as_deref(), Some("1.1.0"));
-        let pointer = read_pointer(&root.path().join(OFFER_FILE), "test offer")
-            .unwrap()
-            .unwrap();
-        let key = fixture.key.public_key();
-        let receipt = load_receipt(root.path(), key.as_ref(), &pointer.metadata_sha256).unwrap();
-        let artifact_path = root.path().join("candidate.zip");
-        fs::write(&artifact_path, next.artifact).unwrap();
-        release::verify_artifact_file(&receipt.verified.metadata, &artifact_path).unwrap();
-        assert_eq!(
-            release::accepted_state_summary(&root.path().join(STATE_FILE), launcher_scope())
-                .unwrap(),
-            ("1.1.0".into(), Some("1.0.0".into()))
-        );
-        server.join().unwrap();
-    }
-
-    #[test]
     fn metadata_check_is_download_free_and_apply_downloads_before_handoff() {
         let root = crate::test_support::tempdir().unwrap();
         let fixture = SignedFixture::new();
@@ -2178,6 +2149,19 @@ mod tests {
         assert_eq!(status.state, "update_available");
         assert_eq!(status.installed_version.as_deref(), Some("1.0.0"));
         assert_eq!(status.offered_version.as_deref(), Some("1.1.0"));
+        let pointer = read_pointer(&root.path().join(OFFER_FILE), "test offer")
+            .unwrap()
+            .unwrap();
+        let key = fixture.key.public_key();
+        let receipt = load_receipt(root.path(), key.as_ref(), &pointer.metadata_sha256).unwrap();
+        let artifact_path = root.path().join("candidate.zip");
+        fs::write(&artifact_path, &next.artifact).unwrap();
+        release::verify_artifact_file(&receipt.verified.metadata, &artifact_path).unwrap();
+        assert_eq!(
+            release::accepted_state_summary(&root.path().join(STATE_FILE), launcher_scope())
+                .unwrap(),
+            ("1.1.0".into(), Some("1.0.0".into()))
+        );
         assert!(!root.path().join(ARTIFACT_CACHE).exists());
 
         let expected_artifact = next.artifact.clone();
