@@ -713,6 +713,13 @@ async function exposeFrontendModules(devtools) {
       import('/js/extensions.js'),
       import('/js/game-repair.js'),
     ]);
+    window.waitForBrowserReady = async (predicate, description) => {
+      const deadline = performance.now() + 5000;
+      while (!predicate()) {
+        if (performance.now() >= deadline) throw new Error('Timed out after 5000ms waiting for ' + description);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    };
     window.__launcherModules = { main, homeModule, extensions, gameRepair };
     window.__launcherHome = runtime.home;
     window.__launcherSettings = runtime.settingsState;
@@ -1950,7 +1957,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const monitorFixture = state.borderlessMonitors;
     if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent,gameSettingsError:document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="borderless"]').click();
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'borderless' && window.__launcherSettings.gameSettings.settings.display_mode === 'borderless' && !monitorSelect.disabled, "Borderless display mode save");
     if (state.gameSettings.settings.display_mode !== 'borderless' || monitorSelect.disabled || monitorSelect.value !== 'removed-display-id') throw new Error('Borderless mode did not enable the retained monitor identity');
     const monitorRegion = generalCards[1];
     monitorRegion.focus();
@@ -1959,21 +1966,21 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     window.runControllerAction('confirm');
     if (document.activeElement !== monitorSelect) throw new Error('gamepad confirm did not focus the monitor selector');
     window.runControllerAction('confirm');
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === 'display-primary-id' && window.__launcherSettings.borderlessMonitors.selected === 'display-primary-id', "gamepad primary monitor save");
     if (state.borderlessMonitors.selected !== 'display-primary-id' || !state.calls.some(call => call.command === 'set_borderless_monitor' && call.args.monitorId === 'display-primary-id')) throw new Error('gamepad monitor selection did not round-trip its OS identity');
     monitorSelect.value = 'display-secondary-id';
     monitorSelect.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === 'display-secondary-id' && window.__launcherSettings.borderlessMonitors.selected === 'display-secondary-id', "secondary monitor save");
     if (state.borderlessMonitors.selected !== 'display-secondary-id' || monitorSelect.value !== 'display-secondary-id' || !state.calls.some(call => call.command === 'set_borderless_monitor' && call.args.monitorId === 'display-secondary-id')) throw new Error('monitor selection did not round-trip the selected display identity');
     monitorSelect.value = '';
     monitorSelect.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === null && window.__launcherSettings.borderlessMonitors.selected === null, "default monitor save");
     if (state.borderlessMonitors.selected !== null || monitorSelect.value !== '') throw new Error('Default Monitor did not clear the persisted display identity');
     monitorFixture.selected = 'unavailable-after-reopen';
     window.renderBorderlessMonitorSettings(structuredClone(monitorFixture));
     if (monitorSelect.value !== 'unavailable-after-reopen' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)') throw new Error('missing display identity was not preserved after re-render');
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="windowed"]').click();
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'windowed' && window.__launcherSettings.gameSettings.settings.display_mode === 'windowed' && monitorSelect.disabled, "Windowed display mode save");
     await window.queueGameSettingsUpdate(() => {});
     if (state.gameSettings.settings.display_mode !== 'windowed' || !monitorSelect.disabled) throw new Error('monitor selector remained enabled outside Borderless mode');
     window.renderBorderlessMonitorSettings({ supported:false, monitors:[], selected:null });
@@ -2131,23 +2138,23 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
 
     state.calls.length = 0;
     closeOff.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.launcherBehavior.close_on_game_start === false && closeOff.getAttribute('aria-pressed') === 'true', "Close Launcher on Game Start save");
     if (!state.calls.some(call => call.command === 'set_close_on_game_start' && call.args.closeOnGameStart === false) || state.launcherBehavior.close_on_game_start || closeOff.getAttribute('aria-pressed') !== 'true') throw new Error('close-on-launch did not persist through its launcher-owned command');
 
     state.calls.length = 0;
     nativeResolutionOn.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.launcherBehavior.native_resolution_override === true && nativeResolutionOn.getAttribute('aria-pressed') === 'true', "Native Resolution Override save");
     if (!state.calls.some(call => call.command === 'set_native_resolution_override' && call.args.nativeResolutionOverride === true) || !state.launcherBehavior.native_resolution_override || nativeResolutionOn.getAttribute('aria-pressed') !== 'true') throw new Error('native resolution override did not persist through its launcher-owned command');
 
     state.calls.length = 0;
     borderless.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'borderless' && borderless.getAttribute('aria-pressed') === 'true', "strict Borderless settings save");
     let save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.display_mode !== 'borderless' || state.gameSettings.settings.display_mode !== 'borderless' || 'initialized' in save.args.settings) throw new Error('borderless display mode did not persist through the strict typed save contract');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="fullscreen"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'fullscreen' && window.__launcherSettings.gameSettings.settings.display_mode === 'fullscreen', "Fullscreen settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.display_mode !== 'fullscreen' || 'initialized' in save.args.settings) throw new Error('display mode did not use the strict typed save contract');
     if (state.gameSettings.settings.display_mode !== 'fullscreen' || document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent) throw new Error('display mode did not persist silently');
@@ -2155,25 +2162,25 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.calls.length = 0;
     resolution.value = '1920x1080';
     resolution.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.width === 1920 && state.gameSettings.settings.height === 1080 && window.__launcherSettings.gameSettings.settings.width === 1920 && window.__launcherSettings.gameSettings.settings.height === 1080, "resolution settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.width !== 1920 || save.args.settings.height !== 1080) throw new Error('resolution did not persist as its verified width/height pair');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="graphics.hardware_mouse"][data-game-setting-value="false"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.hardware_mouse === false && window.__launcherSettings.gameSettings.settings.graphics.hardware_mouse === false, "Hardware Mouse settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.graphics.hardware_mouse !== false || state.gameSettings.settings.graphics.hardware_mouse !== false) throw new Error('Hardware Mouse did not persist its typed value');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="audio.enabled"][data-game-setting-value="false"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.audio.enabled === false && window.__launcherSettings.gameSettings.settings.audio.enabled === false, "Sound settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.audio.enabled !== false || state.gameSettings.settings.audio.enabled !== false) throw new Error('Sound did not persist its typed value');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="audio.play_in_background"][data-game-setting-value="true"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.audio.play_in_background === true && window.__launcherSettings.gameSettings.settings.audio.play_in_background === true, "Always Play Sound settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.audio.play_in_background !== true || state.gameSettings.settings.audio.play_in_background !== true || 'initialized' in save.args.settings) throw new Error('Always Play Sound did not persist its typed value');
 
@@ -2189,30 +2196,30 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (!state.calls.some(call => call.command === 'get_object_distance_selection') || distanceRange.disabled || distanceRange.value !== '0' || distanceRange.getAttribute('aria-valuetext') !== 'Off') throw new Error('Draw Distance did not hydrate to Off');
     state.calls.length = 0;
     chooseGraphicsStep(distanceRange, 2);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.objectDistanceEnabled && state.objectDistancePercent === 150 && window.__launcherSettings.objectDistanceSelection === 150, "Draw Distance multiplier save");
     if (state.calls.filter(call => call.command === 'set_object_distance_selection').length !== 1 || state.calls.find(call => call.command === 'set_object_distance_selection').args.percent !== 150 || !state.objectDistanceEnabled || state.objectDistancePercent !== 150 || distanceRange.value !== '2' || distanceRange.getAttribute('aria-valuetext') !== '1.5x') throw new Error('Draw Distance bar did not save its multiplier');
     await hydrateSettings();
     if (distanceRange.value !== '2') throw new Error('Draw Distance did not retain its saved selection after hydration');
     state.failObjectDistanceWrite = true;
     chooseGraphicsStep(distanceRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.failObjectDistanceWrite && document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Draw Distance"), "Draw Distance failed save");
     if (!state.objectDistanceEnabled || distanceRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Draw Distance")) throw new Error('failed Draw Distance write did not restore the saved selection');
     chooseGraphicsStep(distanceRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.objectDistanceEnabled && window.__launcherSettings.objectDistanceSelection === null, "Draw Distance Off save");
     if (state.objectDistanceEnabled || distanceRange.value !== '0' || state.objectDistancePercent !== 150) throw new Error('Draw Distance Off did not disable the hook and retain the saved multiplier');
     if (!state.calls.some(call => call.command === 'get_camera_zoom_selection') || zoomRange.disabled || zoomRange.value !== '0' || zoomRange.getAttribute('aria-valuetext') !== 'Off') throw new Error('Camera Zoom did not hydrate to Off');
     state.calls.length = 0;
     chooseGraphicsStep(zoomRange, 2);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.cameraZoomEnabled && state.cameraZoomLimit === 12 && window.__launcherSettings.cameraZoomSelection === 12, "Camera Zoom cap save");
     if (state.calls.filter(call => call.command === 'set_camera_zoom_selection').length !== 1 || state.calls.find(call => call.command === 'set_camera_zoom_selection').args.limit !== 12 || !state.cameraZoomEnabled || state.cameraZoomLimit !== 12 || zoomRange.value !== '2' || zoomRange.getAttribute('aria-valuetext') !== '12') throw new Error('Camera Zoom bar did not save its cap');
     await hydrateSettings();
     if (zoomRange.value !== '2') throw new Error('Camera Zoom did not retain its saved selection after hydration');
     state.failCameraZoomWrite = true;
     chooseGraphicsStep(zoomRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.failCameraZoomWrite && document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Camera Zoom"), "Camera Zoom failed save");
     if (!state.cameraZoomEnabled || zoomRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Camera Zoom")) throw new Error('failed Camera Zoom write did not restore the saved selection');
     chooseGraphicsStep(zoomRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.cameraZoomEnabled && window.__launcherSettings.cameraZoomSelection === null, "Camera Zoom Off save");
     if (state.cameraZoomEnabled || zoomRange.value !== '0' || state.cameraZoomLimit !== 12) throw new Error('Camera Zoom Off did not disable the hook and retain the saved cap');
     const textureQuality = settingsScreen.querySelector('[data-game-setting-choice="graphics.texture_quality"][data-game-setting-value="low"]');
     const textureFiltering = settingsScreen.querySelector('[data-game-setting="graphics.texture_filtering"]');
@@ -2222,12 +2229,12 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     textureFiltering.value = '3';
     textureFiltering.dispatchEvent(new Event('input', { bubbles:true }));
     textureFiltering.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.texture_filtering === 'highest' && window.__launcherSettings.gameSettings.settings.graphics.texture_filtering === 'highest', "Texture Filtering Highest save");
     if (!state.calls.some(call => call.command === 'set_game_settings' && call.args.settings.graphics.texture_filtering === 'highest') || state.gameSettings.settings.graphics.texture_filtering !== 'highest' || textureFiltering.value !== '3') throw new Error('Texture Filtering bar did not persist Highest');
     state.calls.length = 0;
     const multisampling = settingsScreen.querySelector('[data-game-setting-choice="graphics.multisampling"][data-game-setting-value="4x"]');
     multisampling.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.multisampling === '4x' && multisampling.getAttribute('aria-pressed') === 'true', "multisampling 4x save");
     if (!state.calls.some(call => call.command === 'set_game_settings' && call.args.settings.graphics.multisampling === '4x')) throw new Error('graphics enum did not persist');
 
     state.gameSettingsWriteDelayMs = 60;
@@ -3181,31 +3188,31 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     window.__launcherBrowserState.registerMode = 'network';
     submit.click();
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration network duplicate-submit result");
     if (state.calls.filter(call => call.command === 'register').length !== 1 || !document.querySelector('#screen-register [data-feedback]').textContent) throw new Error('Registration allowed duplicate submissions while the first request was pending');
     window.__launcherBrowserState.registerMode = 'username-taken';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration username-taken result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== 'That username is already taken.') throw new Error('Taken-username copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'network';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration network result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't reach the server to create your account. Copy logs from the Help page for support.") throw new Error('Registration network-error copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'rate-limited';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration rate-limited result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== 'Too many attempts. Wait a few minutes.') throw new Error('Registration rate-limit copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'create-failed';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration create-failed result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration create-failure copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'server';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration server result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration fallback copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'username-invalid';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && usernameError.textContent === 'Username is rejected by this server.' && username.getAttribute('aria-invalid') === 'true', "registration username-invalid result");
     if (usernameError.textContent !== 'Username is rejected by this server.' || username.getAttribute('aria-invalid') !== 'true') throw new Error('Server username validation did not use the reserved field-error slot');
     submit.focus();
     if (document.activeElement.type !== 'submit') throw new Error('Create Account navigation did not reach submit');
