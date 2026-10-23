@@ -182,16 +182,12 @@ class AppBundleTests(unittest.TestCase):
         self.assertTrue((resources / "scripts").is_dir())
         self.assertIn(f"PASS ({len(expected)} files, ad hoc signature)", result.stdout)
 
-    def test_launcher_is_universal_executable(self):
-        self.package()
         launcher = self.app / "Contents" / "MacOS" / "bahamut-launcher"
         self.assertEqual(stat.S_IMODE(launcher.stat().st_mode), 0o755)
         result = run("lipo", "-archs", launcher)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(sorted(result.stdout.split()), ["arm64", "x86_64"])
 
-    def test_info_plist_matches_tauri_config(self):
-        self.package()
         self.assertEqual(self.plist_value("CFBundleExecutable"), "bahamut-launcher")
         self.assertEqual(self.plist_value("CFBundleIdentifier"), self.tauri["identifier"])
         self.assertEqual(self.plist_value("CFBundleName"), self.tauri["productName"])
@@ -291,6 +287,10 @@ class AppBundleTests(unittest.TestCase):
         self.assertEqual(bundle_files(extracted / APP), bundle_files(self.app))
         result = self.verify(extracted / APP)
         self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_checker("--zip", archive)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        last_line = result.stdout.rstrip("\n").splitlines()[-1]
+        self.assertTrue(last_line.startswith(f"{CHECKER_SOURCE.name}: PASS ("), result.stdout)
 
     def test_writing_into_resources_breaks_seal(self):
         self.package()
@@ -308,14 +308,6 @@ class AppBundleTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("macOS only", result.stderr)
         self.assertFalse(self.destination.exists())
-
-    def test_checker_accepts_clean_ditto_zip(self):
-        self.package()
-        archive = self.zip_bundle(self.app, self.root / "app.zip", "--norsrc")
-        result = self.run_checker("--zip", archive)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        last_line = result.stdout.rstrip("\n").splitlines()[-1]
-        self.assertTrue(last_line.startswith(f"{CHECKER_SOURCE.name}: PASS ("), result.stdout)
 
     def test_checker_rejects_apple_double_metadata(self):
         self.package()
