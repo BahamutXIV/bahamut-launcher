@@ -10,11 +10,13 @@ selection, and priority, or return to the [documentation index](README.md).
 
 ## Official overlay package
 
-Every release includes `bahamut-dats-overlay`. This official package is always
-enabled and takes priority over custom packages for any paths it contains.
-Its current manifest contains no retail DAT changes. See
-[Platform support](extensions.md#platform-support) for which launches apply
-packages.
+Every release includes `bahamut-dats-overlay`. In normal runtime mode this
+official package is always enabled and takes priority over custom packages
+for any paths it contains. Its current manifest contains no retail DAT
+changes. The opt-in [stock seasonal switch](stock-seasonal-weather.md)
+bypasses all runtime DAT packages for testing with installed stock resources.
+See [Platform support](extensions.md#platform-support) for which launches
+apply packages.
 
 Official files are updated with the launcher:
 

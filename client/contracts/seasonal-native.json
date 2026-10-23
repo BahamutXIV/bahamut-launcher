@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "binary": {
+    "name": "ffxivgame.exe",
+    "build": "2012.09.19.0001",
+    "image_base": "0x00400000",
+    "bytes": 15996808,
+    "sha256": "9341f2b4567440b310a4d494f5cc5599ca334ba51c8042247317ff466492f2e9"
+  },
+  "evidence": [
+    "https://github.com/XIVLegacy/xivl-decomp/blob/c913db63dcc854656e4757f31006b7f7d431e0e9/docs/resource/native-stock-seasonal-switch.md",
+    "https://github.com/XIVLegacy/xivl-decomp/blob/c913db63dcc854656e4757f31006b7f7d431e0e9/docs/resource/timeline-weather-record-view.md",
+    "https://github.com/XIVLegacy/xivl-decomp/blob/c913db63dcc854656e4757f31006b7f7d431e0e9/docs/resource/map-layout-selector.md"
+  ],
+  "entries": [
+    {
+      "name": "SceneOperation",
+      "va": "0x00629410",
+      "signature": "8b44240483c0f483f806568bf10f8782"
+    },
+    {
+      "name": "MapUpdate",
+      "va": "0x0062AA70",
+      "signature": "83ec0853568bf18b86540100008b480c"
+    },
+    {
+      "name": "WeatherKey",
+      "va": "0x0079B050",
+      "signature": "535556578bf98b87c000000033ed85c0"
+    },
+    {
+      "name": "DrawEnvLookup",
+      "va": "0x007E4630",
+      "signature": "8b44240483ec08535556578d7138508d"
+    },
+    {
+      "name": "ConditionCompare",
+      "va": "0x007FCCEA",
+      "signature": "385e46740b"
+    },
+    {
+      "name": "MapDestroy",
+      "va": "0x0062DA70",
+      "signature": "6aff683038e80064a100000000505153"
+    },
+    {
+      "name": "WeatherClear",
+      "va": "0x006242F0",
+      "signature": "56578bf133ff39be9c010000751039be"
+    },
+    {
+      "name": "RegionLookup",
+      "va": "0x0079B380",
+      "signature": "558b6c240885ed578bf975075f33c05d"
+    },
+    {
+      "name": "OwnerReady",
+      "va": "0x00644E90",
+      "signature": "538b5934568d71308bc3578b388d4900"
+    },
+    {
+      "name": "StringConstruct",
+      "va": "0x00447260",
+      "signature": "538b5c2408568bf1ba01000000578b7c"
+    },
+    {
+      "name": "StringDestroy",
+      "va": "0x00446F50",
+      "signature": "8079110075118b41048b096a0b5051e8"
+    }
+  ],
+  "call_sites": [
+    {
+      "va": "0x006241F2",
+      "target": "0x0079B050"
+    },
+    {
+      "va": "0x007E8DD4",
+      "target": "0x0079B050"
+    },
+    {
+      "va": "0x007E8E58",
+      "target": "0x0079B050"
+    },
+    {
+      "va": "0x007DCEF5",
+      "target": "0x007E4630"
+    }
+  ],
+  "cells": [
+    {
+      "va": "0x00FF2D3C",
+      "value": "0x008006E0"
+    },
+    {
+      "va": "0x00FF27E8",
+      "value": "0x00A29AA0"
+    },
+    {
+      "va": "0x0106209C",
+      "value": "0x008D5570"
+    },
+    {
+      "va": "0x01062214",
+      "value": "0x008D5570"
+    },
+    {
+      "va": "0x00FF2A3C",
+      "value": "0x008005D0"
+    },
+    {
+      "va": "0x00FF2890",
+      "value": "0x0060DE70"
+    }
+  ]
+}

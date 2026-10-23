@@ -165,6 +165,13 @@ add_library(bahamut SHARED
     src/actor_name.h
     src/camera_zoom.cpp
     src/camera_zoom.h
+    src/seasonal_weather.cpp
+    src/seasonal_weather.h
+    src/seasonal_policy.cpp
+    src/seasonal_policy.h
+    src/seasonal_catalog.cpp
+    src/seasonal_catalog.h
+    src/seasonal_bindings.h
     src/addon_host.cpp
     src/addon_host.h
     src/chat_boundary.cpp
@@ -496,6 +503,28 @@ add_executable(bahamut-camera-zoom-tests
 target_include_directories(bahamut-camera-zoom-tests PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-camera-zoom-tests PRIVATE minhook)
 
+add_executable(bahamut-seasonal-policy-tests
+    src/seasonal_policy.cpp
+    tests/seasonal_policy_tests.cpp
+)
+target_include_directories(bahamut-seasonal-policy-tests PRIVATE src)
+
+add_executable(bahamut-seasonal-catalog-tests
+    src/seasonal_catalog.cpp
+    tests/seasonal_catalog_tests.cpp
+)
+target_include_directories(bahamut-seasonal-catalog-tests PRIVATE src)
+
+add_executable(bahamut-seasonal-weather-tests
+    src/seasonal_weather.cpp
+    src/seasonal_policy.cpp
+    src/seasonal_catalog.cpp
+    tests/seasonal_weather_tests.cpp
+)
+target_include_directories(bahamut-seasonal-weather-tests PRIVATE api src vendor/minhook/include)
+target_compile_definitions(bahamut-seasonal-weather-tests PRIVATE BAHAMUT_SEASONAL_WEATHER_TEST)
+target_link_libraries(bahamut-seasonal-weather-tests PRIVATE minhook bcrypt)
+
 add_executable(bahamut-object-distance-tests
     src/object_distance.cpp
     src/object_distance.h
@@ -536,6 +565,9 @@ endif()
 add_test(NAME bahamut-startup-script COMMAND bahamut-startup-script-tests)
 add_test(NAME bahamut-dat-overlay COMMAND bahamut-dat-overlay-tests)
 add_test(NAME bahamut-camera-zoom COMMAND bahamut-camera-zoom-tests)
+add_test(NAME bahamut-seasonal-policy COMMAND bahamut-seasonal-policy-tests)
+add_test(NAME bahamut-seasonal-catalog COMMAND bahamut-seasonal-catalog-tests)
+add_test(NAME bahamut-seasonal-weather COMMAND bahamut-seasonal-weather-tests)
 add_test(NAME bahamut-object-distance COMMAND bahamut-object-distance-tests)
 add_test(NAME bahamut-packet-observer COMMAND bahamut-packet-observer-tests)
 add_test(

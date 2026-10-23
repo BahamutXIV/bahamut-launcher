@@ -83,6 +83,7 @@ The native suite covers:
 - Screenshot loading, capture, and fault isolation.
 - DiscordRPC presence and copied player state publication.
 - DAT opening and resolution for the exact supported client build.
+- Stock seasonal policy, relocated TimeLine classification and inline hook ABI.
 - D3D9 device, swap-chain `Present`, `Reset`, and input forwarding.
 - Telemetry and the isolated Lua addon lifecycle against the bundled test client.
 
@@ -93,6 +94,11 @@ loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
 
 These tests use the bundled stub client. Results do not establish retail client
 behavior or Wine support beyond the tested build and prefix.
+
+The [stock seasonal switch](../docs/stock-seasonal-weather.md) is opt-in. Its
+headless tests use synthetic records and code buffers; the default native
+suite also contains GUI tests. Use the seasonal guide's CTest filter when
+running without a desktop session.
 
 See [Development](../docs/development.md) for workspace checks, package staging,
 and coverage. [Handshake](../docs/handshake.md) and

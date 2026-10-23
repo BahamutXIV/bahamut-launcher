@@ -37,6 +37,7 @@ pages do not define server behavior.
 - [Game content delivery](content-delivery.md): download verification, staged installation, recovery, and publisher inputs
 - [Signed release metadata](release-metadata.md): signing, release ordering, managed files, and trust limits
 - [Extension author reference](extensions.md): package formats, Lua APIs, and native plugins
+- [Stock seasonal weather](stock-seasonal-weather.md): opt-in native resource selection and manual acceptance
 
 ## Contribution guidance
 

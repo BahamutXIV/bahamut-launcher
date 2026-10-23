@@ -14,6 +14,7 @@
 #include "render_boundary.h"
 #include "retail_identity.h"
 #include "runtime_api.h"
+#include "seasonal_weather.h"
 #include "startup_script.h"
 #include "target_distance.h"
 #include "targetlines.h"
@@ -56,6 +57,8 @@ constexpr wchar_t kDiscordEnabledEnvironment[]        = L"BAHAMUT_RUNTIME_DISCOR
 constexpr wchar_t kObjectDistanceEnabledEnvironment[] = L"BAHAMUT_RUNTIME_OBJECT_DISTANCE_ENABLED";
 constexpr wchar_t kCameraZoomEnabledEnvironment[]     = L"BAHAMUT_RUNTIME_CAMERA_ZOOM_ENABLED";
 constexpr wchar_t kStartupScriptEnvironment[]         = L"BAHAMUT_RUNTIME_STARTUP_SCRIPT";
+constexpr wchar_t kStockSeasonsEnvironment[]          = L"BAHAMUT_RUNTIME_STOCK_SEASONS";
+constexpr wchar_t kStockSeasonsLogEnvironment[]       = L"BAHAMUT_RUNTIME_STOCK_SEASONS_LOG";
 constexpr wchar_t kDatPackageRootsEnvironment[] =
     L"BAHAMUT_RUNTIME_DAT_PACKAGE_ROOTS";
 constexpr wchar_t     kBorderlessEnvironment[]    = L"BAHAMUT_RUNTIME_BORDERLESS";
@@ -309,7 +312,15 @@ public:
             return 12;
         }
         bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled());
-        if (!datOverlay_.Install(PathList(kDatPackageRootsEnvironment),
+        const bool stockSeasons = EnvironmentValue(kStockSeasonsEnvironment) == L"1";
+        if (stockSeasons && !seasonalWeather_.Install(!HasValue(kTestStubEnvironment), std::filesystem::path(EnvironmentValue(kStockSeasonsLogEnvironment))))
+        {
+            RecordStartupError(0, "stock seasons: " + seasonalWeather_.LastError());
+            ReleaseHandles();
+            return 16;
+        }
+        const auto datRoots = stockSeasons ? std::vector<std::filesystem::path>{} : PathList(kDatPackageRootsEnvironment);
+        if (!datOverlay_.Install(datRoots,
                                  !HasValue(kTestStubEnvironment)))
         {
             ReleaseHandles();
@@ -498,6 +509,7 @@ private:
     {
         nativePluginHost_.Shutdown();
         discordPluginHost_.Shutdown();
+        seasonalWeather_.Shutdown();
         datOverlay_.Shutdown();
         if (frameEvent_ != nullptr)
         {
@@ -517,30 +529,31 @@ private:
         }
     }
 
-    HANDLE                                telemetryMapping_ = nullptr;
-    BahamutRuntimeSharedState*            sharedState_      = nullptr;
-    BahamutRuntimeTelemetry*              telemetry_        = nullptr;
-    HANDLE                                frameEvent_       = nullptr;
-    bahamut_client::PlayerStateService    playerState_;
-    bahamut_client::ActorNameService      actorNames_{ &playerState_ };
-    bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
-    bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
-    bahamut_client::CustomTimerService    customTimer_;
-    bahamut_client::EnemyCastService      enemyCast_{ &playerState_, &actorNames_ };
-    packet_observer::PacketObserver       packetObserver_;
-    bahamut_client::ObjectDistanceService objectDistance_;
-    bahamut_client::CameraZoomService     cameraZoom_;
-    AddonHost                             addonHost_;
-    std::filesystem::path                 screenshotPluginPath_;
-    NativePluginConfiguration             screenshotConfiguration_;
-    NativePluginHost                      nativePluginHost_;
-    std::filesystem::path                 discordPluginPath_;
-    NativePluginConfiguration             discordConfiguration_;
-    NativePluginHost                      discordPluginHost_;
-    bool                                  fillModeHotkeyEnabled_ = false;
-    bool                                  fpsHotkeyEnabled_      = false;
-    bool                                  nativePluginFailed_    = false;
-    bahamut_dat_overlay::DatOverlay       datOverlay_;
+    HANDLE                                 telemetryMapping_ = nullptr;
+    BahamutRuntimeSharedState*             sharedState_      = nullptr;
+    BahamutRuntimeTelemetry*               telemetry_        = nullptr;
+    HANDLE                                 frameEvent_       = nullptr;
+    bahamut_client::PlayerStateService     playerState_;
+    bahamut_client::ActorNameService       actorNames_{ &playerState_ };
+    bahamut_client::TargetDistanceService  targetDistance_{ &playerState_, &actorNames_ };
+    bahamut_client::TargetlinesService     targetlines_{ &playerState_, &targetDistance_ };
+    bahamut_client::CustomTimerService     customTimer_;
+    bahamut_client::EnemyCastService       enemyCast_{ &playerState_, &actorNames_ };
+    packet_observer::PacketObserver        packetObserver_;
+    bahamut_client::ObjectDistanceService  objectDistance_;
+    bahamut_client::CameraZoomService      cameraZoom_;
+    AddonHost                              addonHost_;
+    std::filesystem::path                  screenshotPluginPath_;
+    NativePluginConfiguration              screenshotConfiguration_;
+    NativePluginHost                       nativePluginHost_;
+    std::filesystem::path                  discordPluginPath_;
+    NativePluginConfiguration              discordConfiguration_;
+    NativePluginHost                       discordPluginHost_;
+    bool                                   fillModeHotkeyEnabled_ = false;
+    bool                                   fpsHotkeyEnabled_      = false;
+    bool                                   nativePluginFailed_    = false;
+    bahamut_dat_overlay::DatOverlay        datOverlay_;
+    bahamut_client::SeasonalWeatherService seasonalWeather_;
 };
 
 RuntimeHost gRuntimeHost;

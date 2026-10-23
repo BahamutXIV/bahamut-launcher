@@ -83,6 +83,11 @@ jobs:
       - name: Check documentation links
         run: node scripts/check-markdown-links.mjs
 
+      - name: Check seasonal bindings and catalog tools
+        run: |
+          python client/tools/verify-seasonal-bindings.py
+          python client/tests/test_seasonal_catalog.py
+
       - name: Test content intake output safety
         run: python scripts/test-intake-full-client.py
 
