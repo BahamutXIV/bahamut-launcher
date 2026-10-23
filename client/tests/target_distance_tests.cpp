@@ -342,7 +342,7 @@ int main()
     targetDistance.Observe(MakeTarget(kNpcActorId));
     auto despawn      = packet_observer::GameMessage{};
     despawn.direction = packet_observer::Direction::Incoming;
-    despawn.opcode    = 0x0114u;
+    despawn.opcode    = 0x00CBu;
     despawn.sourceId  = kNpcActorId;
     targetDistance.Observe(despawn);
     if (targetDistance.Snapshot())

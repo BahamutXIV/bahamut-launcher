@@ -19,7 +19,6 @@ constexpr std::uint16_t kMoveActor              = 0x00CFu;
 constexpr std::uint16_t kSetActorPosition       = 0x00CEu;
 constexpr std::uint16_t kSetMap                 = 0x0005u;
 constexpr std::uint16_t kAddActor               = 0x00CAu;
-constexpr std::uint16_t kActorDespawn           = 0x0114u;
 constexpr std::uint16_t kRemoveActor            = 0x00CBu;
 constexpr std::uint16_t kDeleteAllActors        = 0x0007u;
 constexpr std::uint16_t kActorProperty          = 0x0137u;
@@ -249,7 +248,7 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
     {
         return;
     }
-    if (message.opcode == kActorDespawn || message.opcode == kRemoveActor || message.opcode == kAddActor)
+    if (message.opcode == kRemoveActor || message.opcode == kAddActor)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (IsActorId(localActorId_) && message.sourceId == localActorId_)

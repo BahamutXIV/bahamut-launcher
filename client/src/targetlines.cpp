@@ -258,7 +258,7 @@ void TargetlinesService::Observe(const packet_observer::GameMessage& message, Cl
     {
         return;
     }
-    if (message.opcode == 0x0114u || message.opcode == 0x00CBu || message.opcode == 0x00CCu || message.opcode == 0x00CAu)
+    if (message.opcode == 0x00CBu || message.opcode == 0x00CCu || message.opcode == 0x00CAu)
     {
         mobs_.erase(message.sourceId);
         if (cast_ && (message.sourceId == cast_->sourceId || message.sourceId == cast_->targetId))
