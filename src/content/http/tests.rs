@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::*;
-use crate::atomic_fs::is_link_or_reparse;
 use crate::content::test_support::tempdir;
 use std::cell::Cell;
 use std::net::{TcpListener, TcpStream};
@@ -722,6 +721,7 @@ fn redirects_and_requests_do_not_forward_credentials_or_accept_remote_http() {
 #[cfg(windows)]
 #[test]
 fn cache_junction_is_rejected_without_touching_its_target() {
+    use crate::atomic_fs::is_link_or_reparse;
     use std::os::windows::process::CommandExt;
 
     let temp = tempdir().unwrap();
