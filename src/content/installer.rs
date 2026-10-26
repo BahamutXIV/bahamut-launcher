@@ -510,7 +510,7 @@ fn validate_managed_version_files(package: &BasePackage) -> Result<(), String> {
         ("boot.ver", FFXIV_BOOT_VERSION),
         ("game.ver", FFXIV_GAME_VERSION),
     ] {
-        let expected_hash = format!("{:x}", Sha256::digest(contents.as_bytes()));
+        let expected_hash = crate::digest::sha256_hex(contents.as_bytes());
         let expected_length = contents.len() as u64;
         let file = package
             .final_files
@@ -749,24 +749,13 @@ fn validate_no_reparse_ancestors(path: &Path) -> Result<(), String> {
 }
 
 fn check_reparse(path: &Path, metadata: &fs::Metadata) -> Result<(), String> {
-    if metadata.file_type().is_symlink() || is_windows_reparse(metadata) {
+    if crate::atomic_fs::is_link_or_reparse(metadata) {
         return Err(format!(
             "Refusing a link or reparse point: {}",
             path.display()
         ));
     }
     Ok(())
-}
-
-#[cfg(windows)]
-fn is_windows_reparse(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-fn is_windows_reparse(_metadata: &fs::Metadata) -> bool {
-    false
 }
 
 fn ensure_cache_directory(path: &Path) -> Result<PathBuf, String> {
@@ -1368,7 +1357,7 @@ fn extraction_identities(package: &BasePackage) -> HashMap<String, (u64, String)
             name.to_owned(),
             (
                 contents.len() as u64,
-                format!("{:x}", Sha256::digest(contents.as_bytes())),
+                crate::digest::sha256_hex(contents.as_bytes()),
             ),
         );
     }
@@ -1601,7 +1590,7 @@ mod tests {
         InstallFile {
             path: path.to_owned(),
             length: contents.len() as u64,
-            sha256: format!("{:x}", Sha256::digest(contents)),
+            sha256: crate::digest::sha256_hex(contents),
         }
     }
 
@@ -1615,7 +1604,7 @@ mod tests {
         fs::create_dir(&cache).unwrap();
         let destination = root.join("game");
         let archive_bytes = zip_bytes(entries);
-        let digest = format!("{:x}", Sha256::digest(&archive_bytes));
+        let digest = crate::digest::sha256_hex(&archive_bytes);
         let archive_path = cache.join(format!("{digest}-{}.object", archive_bytes.len()));
         fs::write(&archive_path, &archive_bytes).unwrap();
 
@@ -2025,7 +2014,7 @@ mod tests {
         ];
         let (mut package, cache, destination) = valid_fixture(temporary.path());
         let bytes = with_unix_mode(zip_bytes(&entries), "link", 0o120777);
-        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let digest = crate::digest::sha256_hex(&bytes);
         package.archives[0].object.sha256 = digest.clone();
         package.archives[0].object.length = bytes.len() as u64;
         let path = cache.join(format!("{digest}-{}.object", bytes.len()));
@@ -2371,7 +2360,7 @@ mod tests {
         assert_eq!(footprint.logical_bytes, object.length);
         assert!(footprint.allocated_bytes < full_allocation);
         assert_ne!(
-            format!("{:x}", Sha256::digest(fs::read(&path).unwrap())),
+            crate::digest::sha256_hex(&fs::read(&path).unwrap()),
             object.sha256
         );
 

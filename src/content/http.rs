@@ -18,6 +18,8 @@ use reqwest::header::{
 use reqwest::{Client, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use crate::atomic_fs::is_link_or_reparse;
 use thiserror::Error;
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::time::sleep;
@@ -656,20 +658,6 @@ fn validate_cache_directory(metadata: &fs::Metadata) -> Result<(), DownloadError
     Ok(())
 }
 
-fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    }
-    #[cfg(not(windows))]
-    false
-}
-
 fn open_existing(path: &Path, write: bool) -> Result<Option<File>, DownloadError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -1076,7 +1064,7 @@ mod tests {
     }
 
     fn sha256(bytes: &[u8]) -> String {
-        format!("{:x}", Sha256::digest(bytes))
+        crate::digest::sha256_hex(bytes)
     }
 
     fn cache_paths(cache: &Path, spec: &ObjectSpec) -> (PathBuf, PathBuf) {
