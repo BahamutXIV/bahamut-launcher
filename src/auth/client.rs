@@ -131,9 +131,8 @@ impl AuthClient {
     /// GET `/sessions/current`; inconclusive results return [`SessionValidation::Unknown`] so transient failures do not force logout.
     pub async fn validate_session(&self, token: &str) -> SessionValidation {
         let path = format!("{SESSIONS_PATH}/current");
-        let url = match self.api_base.join(&path) {
-            Ok(url) => url,
-            Err(_) => return SessionValidation::Unknown,
+        let Ok(url) = self.api_base.join(&path) else {
+            return SessionValidation::Unknown;
         };
         match self.http.get(url).bearer_auth(token).send().await {
             Ok(response) => match response.status() {

@@ -158,13 +158,13 @@ fn accept_command(mut options: Options) -> Result<(), ReleaseError> {
     verify_artifact_file(&release.metadata, &artifact_path)?;
     match accept_offer(&state_path, &release)? {
         bahamut_launcher::release::OfferDecision::Accepted => {
-            println!("accepted remote version {}", release.metadata.version)
+            println!("accepted remote version {}", release.metadata.version);
         }
         bahamut_launcher::release::OfferDecision::ReuseIdentical => {
             println!(
                 "reused identical remote version {}",
                 release.metadata.version
-            )
+            );
         }
     }
     Ok(())
@@ -177,13 +177,13 @@ fn record_installed_command(mut options: Options) -> Result<(), ReleaseError> {
     verify_artifact_file(&release.metadata, &artifact_path)?;
     match record_installed_release(&state_path, &release)? {
         bahamut_launcher::release::InstalledDecision::Recorded => {
-            println!("recorded installed version {}", release.metadata.version)
+            println!("recorded installed version {}", release.metadata.version);
         }
         bahamut_launcher::release::InstalledDecision::AlreadyCurrent => {
             println!(
                 "installed version {} is already recorded",
                 release.metadata.version
-            )
+            );
         }
     }
     let (highest, installed) = accepted_state_summary(&state_path, release.metadata.scope())?;
