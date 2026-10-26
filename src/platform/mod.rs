@@ -158,6 +158,8 @@ pub use monitors::{
     selected_monitor_resolution,
 };
 
+pub mod wine_input_cache;
+
 #[cfg(target_os = "windows")]
 pub mod windows;
 

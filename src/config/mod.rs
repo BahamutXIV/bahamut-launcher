@@ -6,3 +6,4 @@ pub mod extension_config;
 pub mod launcher_ini;
 pub mod preferences;
 pub mod retail_game;
+pub mod retail_pad;
