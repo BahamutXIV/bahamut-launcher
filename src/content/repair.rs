@@ -17,7 +17,9 @@ use super::manifest::{
     ArchiveLayout, BasePackage, InstallFile, validate_hash, validate_relative_path,
 };
 use super::require_space;
+use crate::atomic_fs::{is_link_or_reparse, sync_directory};
 use crate::diagnostics::free_disk_bytes;
+use crate::digest::sha256_hex;
 use crate::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
 
 const IO_BUFFER_BYTES: usize = 1024 * 1024;
@@ -1112,7 +1114,7 @@ fn inspect_file_inner(
                 ));
             }
             Ok(metadata) => {
-                if is_reparse(&metadata) {
+                if is_link_or_reparse(&metadata) {
                     return Ok(file_status(
                         spec,
                         FileState::Unresolved,
@@ -1319,7 +1321,7 @@ fn archive_member_path(layout: ArchiveLayout, path: &str) -> String {
 }
 
 fn validate_generated_version(file: &InstallFile, contents: &str) -> Result<(), String> {
-    let digest = format!("{:x}", Sha256::digest(contents.as_bytes()));
+    let digest = sha256_hex(contents.as_bytes());
     if file.length != contents.len() as u64 || !file.sha256.eq_ignore_ascii_case(&digest) {
         return Err(format!(
             "The final catalog has an invalid {} identity.",
@@ -1501,7 +1503,7 @@ fn create_owned_parents(root: &Path, parent: &Path) -> Result<(), String> {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let metadata = fs::symlink_metadata(&current)
                     .map_err(|error| format!("Could not inspect staged directory: {error}"))?;
-                if is_reparse(&metadata) || !metadata.is_dir() {
+                if is_link_or_reparse(&metadata) || !metadata.is_dir() {
                     return Err(format!(
                         "Unsafe staged repair parent: {}",
                         current.display()
@@ -1719,7 +1721,7 @@ fn detach_published_stage_links(
                     staged.display()
                 ));
             }
-            Ok(metadata) if is_reparse(&metadata) || !metadata.is_file() => {
+            Ok(metadata) if is_link_or_reparse(&metadata) || !metadata.is_file() => {
                 return Err(format!(
                     "Refusing an unsafe staged repair file: {}",
                     staged.display()
@@ -1803,7 +1805,7 @@ fn missing_parent_directories(root: &Path, files: &[&InstallFile]) -> Result<Vec
         for part in components.iter().take(components.len().saturating_sub(1)) {
             current.push(part);
             match fs::symlink_metadata(&current) {
-                Ok(metadata) if !is_reparse(&metadata) && metadata.is_dir() => {}
+                Ok(metadata) if !is_link_or_reparse(&metadata) && metadata.is_dir() => {}
                 Ok(_) => return Err(format!("Unsafe parent directory for {}.", file.path)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     let relative = current
@@ -1844,7 +1846,7 @@ fn recover_transaction(
             ));
         }
     };
-    if is_reparse(&metadata) || !metadata.is_dir() {
+    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
         return Err("The repair recovery path is not a safe directory.".into());
     }
     validate_transaction_tree(transaction, package, None)?;
@@ -1894,7 +1896,7 @@ fn cleanup_committed_transaction(
 ) -> Result<(), String> {
     let metadata = fs::symlink_metadata(transaction)
         .map_err(|error| format!("Could not inspect repair recovery directory: {error}"))?;
-    if is_reparse(&metadata) || !metadata.is_dir() {
+    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
         return Err("The repair recovery path is not a safe directory.".into());
     }
     validate_transaction_tree(transaction, package, None)?;
@@ -1924,7 +1926,7 @@ fn inspect_recovery_state(
             "Could not inspect repair recovery directory: {error}"
         )),
         Ok(metadata) => {
-            if is_reparse(&metadata) || !metadata.is_dir() {
+            if is_link_or_reparse(&metadata) || !metadata.is_dir() {
                 return Err("The repair recovery path is not a safe directory.".into());
             }
             validate_transaction_tree(transaction, package, None)?;
@@ -2033,7 +2035,7 @@ fn rollback_journal(
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(format!("Could not inspect created directory: {error}")),
-            Ok(metadata) if is_reparse(&metadata) || !metadata.is_dir() => {
+            Ok(metadata) if is_link_or_reparse(&metadata) || !metadata.is_dir() => {
                 return Err(format!(
                     "Created repair directory changed: {}",
                     path.display()
@@ -2170,7 +2172,7 @@ fn open_regular_for_identity(path: &Path) -> Result<File, String> {
     let metadata = file
         .metadata()
         .map_err(|error| format!("Could not inspect repair file {}: {error}", path.display()))?;
-    if is_reparse(&metadata) || !metadata.is_file() {
+    if is_link_or_reparse(&metadata) || !metadata.is_file() {
         return Err(format!(
             "Refusing a non-regular repair file: {}",
             path.display()
@@ -2321,7 +2323,7 @@ fn validate_transaction_tree(
             let path = entry.path();
             let metadata = fs::symlink_metadata(&path)
                 .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
-            if is_reparse(&metadata) {
+            if is_link_or_reparse(&metadata) {
                 return Err(format!(
                     "Repair recovery contains a reparse point: {}",
                     path.display()
@@ -2455,7 +2457,7 @@ fn create_transaction(
 fn write_journal(transaction: &Path, journal: &RepairJournal) -> Result<(), String> {
     let next = transaction.join(JOURNAL_NEXT_FILE);
     match fs::symlink_metadata(&next) {
-        Ok(metadata) if !is_reparse(&metadata) && metadata.is_file() => {
+        Ok(metadata) if !is_link_or_reparse(&metadata) && metadata.is_file() => {
             fs::remove_file(&next)
                 .map_err(|error| format!("Could not reset repair journal temp file: {error}"))?;
         }
@@ -2490,7 +2492,7 @@ fn write_json_new(path: &Path, value: &impl Serialize) -> Result<(), String> {
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, max_bytes: u64) -> Result<T, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect repair state {}: {error}", path.display()))?;
-    if is_reparse(&metadata) || !metadata.is_file() || metadata.len() > max_bytes {
+    if is_link_or_reparse(&metadata) || !metadata.is_file() || metadata.len() > max_bytes {
         return Err(format!("Invalid repair state file: {}", path.display()));
     }
     let (length, _) = hash_regular_file(path)?;
@@ -2523,7 +2525,7 @@ fn cache_object_status(cache: &Path, object: &ObjectSpec) -> Result<CacheStatus,
             valid: false,
             problem: Some(format!("Could not inspect cached archive: {error}")),
         }),
-        Ok(metadata) if is_reparse(&metadata) || !metadata.is_file() => Ok(CacheStatus {
+        Ok(metadata) if is_link_or_reparse(&metadata) || !metadata.is_file() => Ok(CacheStatus {
             valid: false,
             problem: Some("A cached archive path is linked or is not a regular file.".into()),
         }),
@@ -2557,7 +2559,7 @@ fn resolve_cache_path(path: &Path) -> Result<ResolvedCachePath, String> {
     let deepest = loop {
         match fs::symlink_metadata(&probe) {
             Ok(metadata) => {
-                if is_reparse(&metadata) {
+                if is_link_or_reparse(&metadata) {
                     return Err(format!(
                         "Refusing a cache reparse point: {}",
                         probe.display()
@@ -2615,7 +2617,7 @@ fn resolve_existing_directory(path: &Path) -> Result<PathBuf, String> {
             path.display()
         )
     })?;
-    if is_reparse(&metadata) || !metadata.is_dir() {
+    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
         return Err("The selected game path is not a safe directory.".into());
     }
     fs::canonicalize(path).map_err(|error| format!("Could not resolve game directory: {error}"))
@@ -2631,7 +2633,7 @@ fn inspect_directory_ancestors(path: &Path) -> Result<(), String> {
         let metadata = fs::symlink_metadata(&prefix).map_err(|error| {
             format!("Could not inspect directory {}: {error}", prefix.display())
         })?;
-        if is_reparse(&metadata) {
+        if is_link_or_reparse(&metadata) {
             return Err(format!(
                 "Refusing a directory reparse point: {}",
                 prefix.display()
@@ -2658,7 +2660,7 @@ fn check_no_reparse_between(root: &Path, path: &Path) -> Result<(), String> {
         };
         current.push(name);
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if is_reparse(&metadata) => {
+            Ok(metadata) if is_link_or_reparse(&metadata) => {
                 return Err(format!(
                     "Refusing a cache reparse point: {}",
                     current.display()
@@ -2688,7 +2690,7 @@ fn path_exists_safely(path: &Path) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(format!("Could not inspect repair recovery file: {error}")),
-        Ok(metadata) if is_reparse(&metadata) || !metadata.is_file() => Err(format!(
+        Ok(metadata) if is_link_or_reparse(&metadata) || !metadata.is_file() => Err(format!(
             "Repair recovery copy is unsafe: {}",
             path.display()
         )),
@@ -2715,7 +2717,7 @@ fn ensure_live_parent(game: &Path, path: &Path) -> Result<(), String> {
                 current.display()
             )
         })?;
-        if is_reparse(&metadata) || !metadata.is_dir() {
+        if is_link_or_reparse(&metadata) || !metadata.is_dir() {
             return Err(format!(
                 "Unsafe managed parent directory: {}",
                 current.display()
@@ -2735,7 +2737,7 @@ fn find_file<'a>(package: &'a BasePackage, path: &str) -> Result<&'a InstallFile
 
 fn package_identity(package: &BasePackage) -> String {
     let encoded = serde_json::to_vec(package).expect("BasePackage is infallibly serializable");
-    format!("{:x}", Sha256::digest(encoded))
+    sha256_hex(&encoded)
 }
 
 fn join_relative(root: &Path, relative: &str) -> PathBuf {
@@ -2799,19 +2801,6 @@ fn has_parent_alias(path: &Path) -> bool {
         .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
 }
 
-fn is_reparse(metadata: &fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    false
-}
-
 fn set_no_follow(options: &mut OpenOptions) {
     #[cfg(unix)]
     {
@@ -2830,7 +2819,7 @@ fn validate_regular_handle(file: &File, path: &Path) -> Result<(), String> {
     let metadata = file
         .metadata()
         .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
-    if is_reparse(&metadata) || !metadata.is_file() {
+    if is_link_or_reparse(&metadata) || !metadata.is_file() {
         return Err(format!("Refusing a non-regular file: {}", path.display()));
     }
     #[cfg(unix)]
@@ -2871,16 +2860,9 @@ fn validate_regular_handle(file: &File, path: &Path) -> Result<(), String> {
 }
 
 fn sync_parent(path: &Path) {
-    #[cfg(unix)]
-    {
-        if let Some(parent) = path.parent()
-            && let Ok(directory) = File::open(parent)
-        {
-            let _ = directory.sync_all();
-        }
+    if let Some(parent) = path.parent() {
+        let _ = sync_directory(parent);
     }
-    #[cfg(not(unix))]
-    let _ = path;
 }
 
 #[cfg(test)]
@@ -3016,7 +2998,7 @@ mod tests {
             .iter()
             .map(|(path, bytes)| install_file(path, bytes))
             .collect::<Vec<_>>();
-        let archive_sha256 = format!("{:x}", Sha256::digest(&archive_bytes));
+        let archive_sha256 = sha256_hex(&archive_bytes);
         let archive = BaseArchive {
             object: ObjectSpec {
                 object_key: "game/test/client.zip".into(),
@@ -3058,7 +3040,7 @@ mod tests {
         InstallFile {
             path: path.into(),
             length: bytes.len() as u64,
-            sha256: format!("{:x}", Sha256::digest(bytes)),
+            sha256: sha256_hex(bytes),
         }
     }
 
@@ -3123,8 +3105,7 @@ mod tests {
         fixture.archive_bytes = writer.finish().unwrap().into_inner();
         let old_object = fixture.package.archives[0].object.clone();
         fixture.package.archives[0].object.length = fixture.archive_bytes.len() as u64;
-        fixture.package.archives[0].object.sha256 =
-            format!("{:x}", Sha256::digest(&fixture.archive_bytes));
+        fixture.package.archives[0].object.sha256 = sha256_hex(&fixture.archive_bytes);
         fixture.package.staging_bytes = fixture
             .package
             .final_files
@@ -3512,7 +3493,7 @@ mod tests {
             .map(|index| InstallFile {
                 path: format!("data/{padding}-{index:04}.dat"),
                 length: 1,
-                sha256: format!("{:x}", Sha256::digest(b"x")),
+                sha256: sha256_hex(b"x"),
             })
             .collect::<Vec<_>>();
         fixture.package.final_files.extend(extras.iter().cloned());
