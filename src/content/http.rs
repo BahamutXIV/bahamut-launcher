@@ -318,12 +318,15 @@ where
         };
 
         partial.seek(SeekFrom::Start(response_start))?;
+        // Only an uninterrupted stream from byte 0 is verified in memory.
+        let mut digest = (response_start == 0).then(Sha256::new);
         let outcome = consume_response(
             response,
             response_bytes,
             length,
             response_start,
             &mut partial,
+            digest.as_mut(),
             checkpoint,
             progress,
         )
@@ -336,7 +339,13 @@ where
             }
             Ok(StreamOutcome::Complete) => {
                 partial.sync_all()?;
-                if !file_matches(&mut partial, length, &expected_sha256, checkpoint)? {
+                let matches = match digest {
+                    Some(digest) if partial.metadata()?.len() == length => {
+                        format!("{:x}", digest.finalize()) == expected_sha256
+                    }
+                    _ => file_matches(&mut partial, length, &expected_sha256, checkpoint)?,
+                };
+                if !matches {
                     partial.set_len(0)?;
                     partial.sync_data()?;
                     return Err(DownloadError::HashMismatch);
@@ -385,12 +394,14 @@ enum StreamOutcome {
     Paused,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn consume_response<C, P>(
     mut response: Response,
     expected_body_bytes: u64,
     total_bytes: u64,
     mut transferred: u64,
     partial: &mut File,
+    mut digest: Option<&mut Sha256>,
     checkpoint: &mut C,
     progress: &mut P,
 ) -> Result<StreamOutcome, DownloadError>
@@ -441,6 +452,9 @@ where
 
         for piece in chunk.chunks(IO_CHUNK) {
             partial.write_all(piece)?;
+            if let Some(digest) = digest.as_mut() {
+                digest.update(piece);
+            }
             let bytes = piece.len() as u64;
             body_bytes += bytes;
             transferred += bytes;
@@ -1331,6 +1345,72 @@ mod tests {
         .unwrap();
         assert!(paused);
         assert_eq!(server.finish().len(), 1);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_clean_stream_is_verified_without_a_reread() {
+        let bytes: Vec<u8> = (0..IO_CHUNK * 3 + 7).map(|i| (i % 251) as u8).collect();
+        let spec = object_spec(&bytes);
+        let temp = tempdir().unwrap();
+        let server = TestServer::start(vec![ok_response(&bytes)]);
+        let progress = Cell::new((0, 0));
+        let mut durable_after_last_byte = 0;
+        let path = download_object(
+            &server.root,
+            &spec,
+            temp.path(),
+            |state| {
+                let (transferred, total) = progress.get();
+                if state.durable && transferred == total && total > 0 {
+                    durable_after_last_byte += 1;
+                }
+                CheckpointAction::Continue
+            },
+            |transferred, total| progress.set((transferred, total)),
+        )
+        .unwrap();
+        assert_eq!(server.finish().len(), 1);
+        assert_eq!(durable_after_last_byte, 0);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_range_resume_keeps_the_full_reread() {
+        let bytes: Vec<u8> = (0..IO_CHUNK * 3 + 7).map(|i| (i % 251) as u8).collect();
+        let spec = object_spec(&bytes);
+        let temp = tempdir().unwrap();
+        let (partial, _) = cache_paths(temp.path(), &spec);
+        let prefix = IO_CHUNK + 11;
+        fs::write(&partial, &bytes[..prefix]).unwrap();
+        let server = TestServer::start(vec![partial_response(
+            prefix,
+            &bytes[prefix..],
+            bytes.len(),
+        )]);
+        let progress = Cell::new((0, 0));
+        let mut durable_after_last_byte = 0;
+        let path = download_object(
+            &server.root,
+            &spec,
+            temp.path(),
+            |state| {
+                let (transferred, total) = progress.get();
+                if state.durable && transferred == total && total > 0 {
+                    durable_after_last_byte += 1;
+                }
+                CheckpointAction::Continue
+            },
+            |transferred, total| progress.set((transferred, total)),
+        )
+        .unwrap();
+        let requests = server.finish();
+        assert!(has_request_header(
+            &requests[0],
+            "Range",
+            &format!("bytes={prefix}-")
+        ));
+        assert!(durable_after_last_byte >= 1);
         assert_eq!(fs::read(path).unwrap(), bytes);
     }
 
