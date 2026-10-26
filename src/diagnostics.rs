@@ -1,5 +1,7 @@
 //! Bounded, support-relevant host diagnostics.
 
+use crate::config::retail_pad::{self as pad, PadIdentity, PadSelection};
+use crate::platform::wine_input_cache::CachedPad;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -402,6 +404,198 @@ fn truncate_chars(value: &str, max: usize) -> String {
     }
 }
 
+const MAX_LISTED_CACHED_PADS: usize = 16;
+const MAX_USER_GAME_FILES: usize = 16;
+const MAX_USER_DIR_ENTRIES: usize = 256;
+const MAX_USER_GAME_FILE_BYTES: u64 = 1024 * 1024;
+const GAME_TEXT_MARKER: u8 = 0xFF;
+const GAME_TEXT_KEY: u8 = 0x73;
+const INPUT_MODE_ROW_PREFIX: &str = "input_mode,\t";
+const INPUT_MODE_FIELD_SEPARATOR: &str = ",\t";
+
+/// Support-log lines for the retail `config.pad` state and, when given, the Wine DirectInput
+/// cache. Product IDs appear as `vvvv:pppp`; GUID bytes are never printed.
+pub fn pad_file_lines(
+    read: Result<Option<&[u8]>, std::io::ErrorKind>,
+    cached: Option<&[CachedPad]>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    match read {
+        Err(kind) => lines.push(format!("config.pad = unreadable ({kind:?})")),
+        Ok(None) => lines.push("config.pad = absent".to_string()),
+        Ok(Some(bytes)) => match pad::decode_fields(bytes) {
+            None => lines.push(format!(
+                "config.pad = {} bytes, invalid (client uses its defaults)",
+                bytes.len()
+            )),
+            Some(fields) => {
+                lines.push(format!("config.pad = {} bytes, valid", bytes.len()));
+                match pad::decode_selection(Some(bytes)) {
+                    PadSelection::Zero => lines
+                        .push("config.pad selection = zero (no controller selected)".to_string()),
+                    PadSelection::Selected(identity) => {
+                        lines.push(pad_selection_line(&identity, cached));
+                    }
+                    PadSelection::Absent | PadSelection::Invalid { .. } => {}
+                }
+                let map = if fields.assigned == 0 {
+                    "none assigned".to_string()
+                } else {
+                    let kind = if fields.preset_xinput {
+                        "XInput preset"
+                    } else {
+                        "custom"
+                    };
+                    format!("{} of {} assigned ({kind})", fields.assigned, pad::MAP_LEN)
+                };
+                lines.push(format!("config.pad map = {map}"));
+                lines.push(format!(
+                    "config.pad flags = background {}, deadzone {}, vibration {}",
+                    fields.background_input, fields.deadzone, fields.vibration
+                ));
+            }
+        },
+    }
+    if let Some(entries) = cached {
+        lines.push(format!(
+            "Wine DirectInput cache = {} entries",
+            entries.len()
+        ));
+        lines.extend(entries.iter().take(MAX_LISTED_CACHED_PADS).map(|entry| {
+            format!(
+                "Wine DirectInput cached pad = {:04x}:{:04x} idx {}",
+                entry.vendor, entry.product, entry.index
+            )
+        }));
+    }
+    lines
+}
+
+fn pad_selection_line(identity: &PadIdentity, cached: Option<&[CachedPad]>) -> String {
+    let product = match pad::product_vid_pid(&identity.product) {
+        Some((vendor, product)) => format!("{vendor:04x}:{product:04x}"),
+        None => "(nonstandard product GUID)".to_string(),
+    };
+    let instance = match cached {
+        None => "not checked".to_string(),
+        Some(entries) => match entries.iter().find(|entry| {
+            entry.instance == identity.instance
+                && pad::product_guid(entry.vendor, entry.product) == identity.product
+        }) {
+            Some(entry) => format!(
+                "matches cached pad {:04x}:{:04x} idx {}",
+                entry.vendor, entry.product, entry.index
+            ),
+            None => "matches no cached pad".to_string(),
+        },
+    };
+    format!("config.pad selection = product {product}, instance {instance}")
+}
+
+/// The text of a retail per-user `game` file: a leading 0xFF marker, then bytes XOR 0x73.
+pub fn decode_game_text(bytes: &[u8]) -> Option<Vec<u8>> {
+    let (&marker, rest) = bytes.split_first()?;
+    (marker == GAME_TEXT_MARKER).then(|| rest.iter().map(|byte| byte ^ GAME_TEXT_KEY).collect())
+}
+
+/// The value field of the first well-formed `input_mode,<TAB><int>,<TAB><int>,<TAB><int>` row.
+pub fn input_mode_value(decoded: &[u8]) -> Option<i64> {
+    decoded.split(|&byte| byte == b'\n').find_map(|row| {
+        let row = std::str::from_utf8(row).ok()?;
+        let fields = row
+            .strip_prefix(INPUT_MODE_ROW_PREFIX)?
+            .trim_end_matches('\r');
+        let mut fields = fields.split(INPUT_MODE_FIELD_SEPARATOR);
+        let (meta0, meta1, value) = (fields.next()?, fields.next()?, fields.next()?);
+        if fields.next().is_some() {
+            return None;
+        }
+        meta0.parse::<i64>().ok()?;
+        meta1.parse::<i64>().ok()?;
+        value.parse().ok()
+    })
+}
+
+/// One line per retail per-user `game` file, at most 16. Account directory names are never
+/// printed because they can identify an account.
+pub fn input_mode_lines(user_dir: &Path) -> Vec<String> {
+    const NO_FILES: &str = "input_mode = no user game files";
+
+    let accounts = user_dir.join("user");
+    let entries = match std::fs::read_dir(&accounts) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return vec![NO_FILES.to_string()];
+        }
+        Err(error) => return vec![format!("input_mode = unreadable ({:?})", error.kind())],
+    };
+    let mut entries = entries.take(MAX_USER_DIR_ENTRIES + 1).collect::<Vec<_>>();
+    let mut truncated = entries.len() > MAX_USER_DIR_ENTRIES;
+    entries.truncate(MAX_USER_DIR_ENTRIES);
+    let mut names: Vec<String> = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name().into_string().ok()?;
+            let account = name.len() == 8 && name.bytes().all(|byte| byte.is_ascii_hexdigit());
+            (account && entry.file_type().ok()?.is_dir()).then_some(name)
+        })
+        .collect();
+    names.sort();
+
+    let mut values: Vec<String> = names
+        .iter()
+        .filter_map(|name| game_file_input_mode(&accounts.join(name).join("game")))
+        .collect();
+    truncated |= values.len() > MAX_USER_GAME_FILES;
+    values.truncate(MAX_USER_GAME_FILES);
+    if values.is_empty() && !truncated {
+        return vec![NO_FILES.to_string()];
+    }
+    let total = values.len();
+    let mut lines: Vec<String> = values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            format!(
+                "input_mode in user game file {} of {total} = {value}",
+                index + 1
+            )
+        })
+        .collect();
+    if truncated {
+        lines.push("input_mode = further user game files were not listed".to_string());
+    }
+    lines
+}
+
+/// The reported `input_mode` of one `game` file, or `None` when the file does not exist.
+fn game_file_input_mode(path: &Path) -> Option<String> {
+    let unreadable = |error: std::io::Error| format!("unreadable ({:?})", error.kind());
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => return Some(unreadable(error)),
+    };
+    if !metadata.is_file() {
+        return None;
+    }
+    if metadata.len() > MAX_USER_GAME_FILE_BYTES {
+        return Some("too large".to_string());
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => return Some(unreadable(error)),
+    };
+    let Some(decoded) = decode_game_text(&bytes) else {
+        return Some("not in the encoded format".to_string());
+    };
+    Some(match input_mode_value(&decoded) {
+        Some(value) => value.to_string(),
+        None => "no input_mode row".to_string(),
+    })
+}
+
 /// Controller-relevant sandbox and input state for the support log, at most 200 lines.
 #[cfg(target_os = "linux")]
 pub fn controller_diagnostics() -> Vec<String> {
@@ -445,6 +639,18 @@ pub fn controller_diagnostics() -> Vec<String> {
     }
 
     lines.extend(process_controller_environment_lines());
+
+    match crate::config::dirs::retail_user_dir() {
+        Err(_) => lines.push("config.pad = unavailable (no Documents folder)".to_string()),
+        Ok(dir) => {
+            let read = pad::read_pad_file(&dir.join(pad::PAD_FILE_NAME));
+            lines.extend(pad_file_lines(
+                read.as_ref().map(Option::as_deref).map_err(|kind| *kind),
+                None,
+            ));
+            lines.extend(input_mode_lines(&dir));
+        }
+    }
 
     if lines.len() > MAX_LINES {
         lines.truncate(MAX_LINES - 1);
@@ -812,6 +1018,297 @@ B: EV=120013
             lines
                 .iter()
                 .any(|line| line.starts_with("SDL_GAMECONTROLLER_IGNORE_DEVICES = "))
+        );
+    }
+
+    const PAD_TESTER_INSTANCE: [u8; 16] = [
+        0xde, 0x3e, 0x57, 0x9e, 0x34, 0x77, 0xd2, 0x11, 0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd,
+        0xf7,
+    ];
+    const PAD_TESTER_PRODUCT: [u8; 16] = [
+        0xde, 0x28, 0x05, 0x13, 0, 0, 0, 0, 0, 0, 0x50, 0x49, 0x44, 0x56, 0x49, 0x44,
+    ];
+    const PAD_TESTER_MAP: [u8; 24] = [
+        34, 35, 32, 33, 38, 39, 36, 37, 42, 43, 40, 41, 9, 7, 6, 255, 4, 255, 255, 2, 255, 3, 1,
+        255,
+    ];
+
+    fn pad_image(instance: [u8; 16], product: [u8; 16], map: [u8; 24]) -> Vec<u8> {
+        let mut bytes = vec![0u8; 0x148];
+        bytes[0..4].copy_from_slice(&[0x11, 0x02, 0x10, 0x20]);
+        bytes[0x04..0x14].copy_from_slice(&instance);
+        bytes[0x14..0x24].copy_from_slice(&product);
+        bytes[0x28] = 2;
+        bytes[0x2C..0x44].copy_from_slice(&map);
+        bytes[0x44] = 1;
+        bytes
+    }
+
+    fn tester_pad() -> Vec<u8> {
+        pad_image(PAD_TESTER_INSTANCE, PAD_TESTER_PRODUCT, PAD_TESTER_MAP)
+    }
+
+    fn cached_pad(instance: [u8; 16]) -> CachedPad {
+        CachedPad {
+            vendor: 0x28DE,
+            product: 0x1305,
+            index: 0,
+            instance,
+        }
+    }
+
+    fn assert_support_safe(lines: &[String]) {
+        for line in lines {
+            let mut run = 0;
+            let mut longest = 0;
+            for byte in line.bytes() {
+                run = if byte.is_ascii_hexdigit() { run + 1 } else { 0 };
+                longest = longest.max(run);
+            }
+            assert!(longest < 32, "GUID-like hex run in {line:?}");
+            assert!(!line.contains(['\\', '/']), "path text in {line:?}");
+        }
+    }
+
+    #[test]
+    fn pad_file_states_have_stable_first_lines() {
+        let unreadable = pad_file_lines(Err(std::io::ErrorKind::PermissionDenied), None);
+        assert_eq!(unreadable, ["config.pad = unreadable (PermissionDenied)"]);
+        assert_eq!(pad_file_lines(Ok(None), None), ["config.pad = absent"]);
+        assert_eq!(
+            pad_file_lines(Ok(Some(&[0u8; 12])), None),
+            ["config.pad = 12 bytes, invalid (client uses its defaults)"]
+        );
+        let mut wrong_magic = tester_pad();
+        wrong_magic[0] = 0x12;
+        assert_eq!(
+            pad_file_lines(Ok(Some(&wrong_magic)), None),
+            ["config.pad = 328 bytes, invalid (client uses its defaults)"]
+        );
+        let valid = tester_pad();
+        assert_eq!(
+            pad_file_lines(Ok(Some(&valid)), None)[0],
+            "config.pad = 328 bytes, valid"
+        );
+    }
+
+    #[test]
+    fn tester_layout_reports_selection_map_and_flags() {
+        let valid = tester_pad();
+        assert_eq!(
+            pad_file_lines(Ok(Some(&valid)), None),
+            [
+                "config.pad = 328 bytes, valid",
+                "config.pad selection = product 28de:1305, instance not checked",
+                "config.pad map = 19 of 24 assigned (custom)",
+                "config.pad flags = background 0, deadzone 2, vibration 1",
+            ]
+        );
+    }
+
+    #[test]
+    fn preset_empty_and_zero_selection_states_are_reported() {
+        let preset = pad_image(
+            PAD_TESTER_INSTANCE,
+            PAD_TESTER_PRODUCT,
+            [
+                34, 35, 32, 33, 38, 39, 36, 37, 42, 43, 40, 41, 9, 7, 6, 8, 4, 45, 2, 5, 47, 3, 0,
+                1,
+            ],
+        );
+        assert_eq!(
+            pad_file_lines(Ok(Some(&preset)), None)[2],
+            "config.pad map = 24 of 24 assigned (XInput preset)"
+        );
+
+        let empty = pad_image([0; 16], PAD_TESTER_PRODUCT, [0xFF; 24]);
+        let lines = pad_file_lines(Ok(Some(&empty)), None);
+        assert_eq!(
+            lines[1],
+            "config.pad selection = zero (no controller selected)"
+        );
+        assert_eq!(lines[2], "config.pad map = none assigned");
+
+        let foreign = pad_image(PAD_TESTER_INSTANCE, [0x42; 16], PAD_TESTER_MAP);
+        assert_eq!(
+            pad_file_lines(Ok(Some(&foreign)), None)[1],
+            "config.pad selection = product (nonstandard product GUID), instance not checked"
+        );
+    }
+
+    #[test]
+    fn selection_is_matched_against_the_wine_cache() {
+        let valid = tester_pad();
+        let line = |cached: &[CachedPad]| pad_file_lines(Ok(Some(&valid)), Some(cached))[1].clone();
+
+        assert_eq!(
+            line(&[cached_pad(PAD_TESTER_INSTANCE)]),
+            "config.pad selection = product 28de:1305, instance matches cached pad 28de:1305 idx 0"
+        );
+        assert_eq!(
+            line(&[cached_pad([0x11; 16])]),
+            "config.pad selection = product 28de:1305, instance matches no cached pad"
+        );
+        let other_product = CachedPad {
+            product: 0x1306,
+            ..cached_pad(PAD_TESTER_INSTANCE)
+        };
+        assert_eq!(
+            line(&[other_product]),
+            "config.pad selection = product 28de:1305, instance matches no cached pad"
+        );
+        assert_eq!(
+            line(&[]),
+            "config.pad selection = product 28de:1305, instance matches no cached pad"
+        );
+    }
+
+    #[test]
+    fn wine_cache_entries_are_counted_and_listed_up_to_sixteen() {
+        assert_eq!(
+            pad_file_lines(Ok(None), Some(&[])),
+            ["config.pad = absent", "Wine DirectInput cache = 0 entries"]
+        );
+        let entries: Vec<CachedPad> = (0..20)
+            .map(|index| CachedPad {
+                index,
+                ..cached_pad([index as u8; 16])
+            })
+            .collect();
+        let lines = pad_file_lines(Err(std::io::ErrorKind::NotFound), Some(&entries));
+        assert_eq!(lines.len(), 2 + 16);
+        assert_eq!(lines[1], "Wine DirectInput cache = 20 entries");
+        assert_eq!(lines[2], "Wine DirectInput cached pad = 28de:1305 idx 0");
+        assert_eq!(lines[17], "Wine DirectInput cached pad = 28de:1305 idx 15");
+    }
+
+    #[test]
+    fn pad_lines_never_carry_guid_bytes_or_paths() {
+        let valid = tester_pad();
+        let zero = pad_image([0; 16], PAD_TESTER_PRODUCT, [0xFF; 24]);
+        let foreign = pad_image(PAD_TESTER_INSTANCE, [0x42; 16], PAD_TESTER_MAP);
+        let cached = [cached_pad(PAD_TESTER_INSTANCE), cached_pad([0xAB; 16])];
+        let short = [0u8; 3];
+        let mut lines = Vec::new();
+        for read in [
+            Ok(None),
+            Ok(Some(valid.as_slice())),
+            Ok(Some(zero.as_slice())),
+            Ok(Some(foreign.as_slice())),
+            Ok(Some(short.as_slice())),
+            Err(std::io::ErrorKind::PermissionDenied),
+        ] {
+            lines.extend(pad_file_lines(read, None));
+            lines.extend(pad_file_lines(read, Some(&cached)));
+        }
+        assert!(lines.len() > 20);
+        assert_support_safe(&lines);
+    }
+
+    fn encode_game_text(text: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0xFF];
+        bytes.extend(text.iter().map(|byte| byte ^ 0x73));
+        bytes
+    }
+
+    #[test]
+    fn game_text_round_trips_and_requires_the_marker() {
+        let text = b"input_mode,\t0,\t1,\t1\n";
+        let encoded = encode_game_text(text);
+        assert_eq!(encoded[0], 0xFF);
+        assert_eq!(encoded[1], b'i' ^ 0x73);
+        assert_eq!(decode_game_text(&encoded).as_deref(), Some(text.as_slice()));
+        assert_eq!(decode_game_text(&encoded[1..]), None);
+        assert_eq!(decode_game_text(&[]), None);
+        assert_eq!(decode_game_text(&[0xFF]), Some(Vec::new()));
+    }
+
+    #[test]
+    fn input_mode_value_reads_the_last_field_of_its_row() {
+        let text = b"other,\t9,\t9\ninput_mode,\t0,\t1,\t1\nlater,\t5\n";
+        assert_eq!(input_mode_value(text), Some(1));
+        assert_eq!(
+            input_mode_value(b"a,\t1\ninput_mode,\t0,\t2,\t-3"),
+            Some(-3)
+        );
+        assert_eq!(input_mode_value(b"input_mode,\t0,\t2,\t7\r\n"), Some(7));
+        assert_eq!(input_mode_value(b"other,\t1\nnot_input_mode,\t1\n"), None);
+        assert_eq!(input_mode_value(b"input_mode,\t0,\t1,\tabc\n"), None);
+        assert_eq!(input_mode_value(b"input_mode,0,1,1\n"), None);
+        assert_eq!(input_mode_value(b"input_mode,\t1\n"), None);
+        assert_eq!(input_mode_value(b"input_mode,\t0,\t1,\t1,\t2\n"), None);
+        assert_eq!(input_mode_value(b""), None);
+    }
+
+    #[test]
+    fn input_mode_lines_report_each_account_file_without_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let accounts = temp.path().join("user");
+        let write_game = |name: &str, bytes: &[u8]| {
+            let dir = accounts.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("game"), bytes).unwrap();
+        };
+        write_game("0000000A", b"plain text, not encoded");
+        write_game(
+            "00000001",
+            &encode_game_text(b"x,\t1\ninput_mode,\t0,\t2,\t3\n"),
+        );
+        write_game("notahex1", &encode_game_text(b"input_mode,\t0,\t2,\t9\n"));
+        write_game("0000000B", &encode_game_text(b"other,\t1\n"));
+        std::fs::create_dir_all(accounts.join("0000000C")).unwrap();
+
+        let lines = input_mode_lines(temp.path());
+        assert_eq!(
+            lines,
+            [
+                "input_mode in user game file 1 of 3 = 3",
+                "input_mode in user game file 2 of 3 = not in the encoded format",
+                "input_mode in user game file 3 of 3 = no input_mode row",
+            ]
+        );
+        let rendered = lines.join("\n");
+        for name in ["0000000A", "00000001", "notahex1", "0000000B"] {
+            assert!(!rendered.contains(name), "{name} leaked");
+        }
+        assert_support_safe(&lines);
+    }
+
+    #[test]
+    fn input_mode_lines_handle_missing_empty_and_oversized_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let none = ["input_mode = no user game files"];
+        assert_eq!(input_mode_lines(temp.path()), none);
+
+        std::fs::create_dir_all(temp.path().join("user").join("00000001")).unwrap();
+        assert_eq!(input_mode_lines(temp.path()), none);
+
+        let huge = vec![0xFF; MAX_USER_GAME_FILE_BYTES as usize + 1];
+        std::fs::write(temp.path().join("user").join("00000001").join("game"), huge).unwrap();
+        assert_eq!(
+            input_mode_lines(temp.path()),
+            ["input_mode in user game file 1 of 1 = too large"]
+        );
+    }
+
+    #[test]
+    fn input_mode_lines_cap_the_listed_files() {
+        let temp = tempfile::tempdir().unwrap();
+        for index in 0..20 {
+            let dir = temp.path().join("user").join(format!("{index:08x}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("game"),
+                encode_game_text(b"input_mode,\t0,\t1,\t1\n"),
+            )
+            .unwrap();
+        }
+        let lines = input_mode_lines(temp.path());
+        assert_eq!(lines.len(), MAX_USER_GAME_FILES + 1);
+        assert_eq!(lines[15], "input_mode in user game file 16 of 16 = 1");
+        assert_eq!(
+            lines[16],
+            "input_mode = further user game files were not listed"
         );
     }
 }
