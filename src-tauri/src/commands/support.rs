@@ -151,20 +151,9 @@ fn open_path(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn open_path(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("open")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_path(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
+    spawn_os_opener(path)
 }
 
 #[cfg(not(any(windows, unix)))]
@@ -185,20 +174,9 @@ fn open_in_browser(url: &str) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn open_in_browser(url: &str) -> std::io::Result<()> {
-    std::process::Command::new("open")
-        .arg(url)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_in_browser(url: &str) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(url)
-        .spawn()
-        .map(|_| ())
+    spawn_os_opener(url)
 }
 
 #[cfg(not(any(windows, unix)))]
@@ -206,4 +184,18 @@ fn open_in_browser(_url: &str) -> std::io::Result<()> {
     Err(std::io::Error::other(
         "opening a browser is unsupported on this platform",
     ))
+}
+
+/// Start the Unix default opener (`open` on macOS, `xdg-open` elsewhere) for a path or URL.
+#[cfg(unix)]
+pub(crate) fn spawn_os_opener(target: impl AsRef<std::ffi::OsStr>) -> std::io::Result<()> {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(program)
+        .arg(target)
+        .spawn()
+        .map(|_| ())
 }

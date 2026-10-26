@@ -5,6 +5,8 @@ use bahamut_launcher::config::extension_config::{
     SCREENSHOT_PLUGIN_ID,
 };
 
+#[cfg(unix)]
+use super::support::spawn_os_opener;
 use crate::extensions;
 use crate::presentation::{
     ExtensionCommandView, ExtensionInventoryView, ExtensionItemView, OverlayPackageView,
@@ -27,11 +29,29 @@ pub(crate) fn get_extension_inventory() -> Result<ExtensionInventoryView, String
 }
 
 pub(crate) fn extension_inventory_view_with_overlays(
-    mut packages: Vec<bahamut_launcher::extensions::AddonPackage>,
+    packages: Vec<bahamut_launcher::extensions::AddonPackage>,
     config: &ExtensionsConfig,
-    mut dat_packages: Vec<bahamut_launcher::extensions::OverlayPackage>,
+    dat_packages: Vec<bahamut_launcher::extensions::OverlayPackage>,
     dat_config: &DatsConfig,
 ) -> ExtensionInventoryView {
+    ExtensionInventoryView {
+        addons: addon_views(packages, config),
+        plugins: vec![
+            screenshot_plugin_view(config.plugin_enabled(SCREENSHOT_PLUGIN_ID)),
+            discord_rpc_plugin_view(config.plugin_enabled(DISCORD_RPC_PLUGIN_ID)),
+        ],
+        overlays: overlay_views(dat_packages, dat_config),
+    }
+}
+
+fn status_label(enabled: bool) -> String {
+    String::from(if enabled { "Enabled" } else { "Disabled" })
+}
+
+fn addon_views(
+    mut packages: Vec<bahamut_launcher::extensions::AddonPackage>,
+    config: &ExtensionsConfig,
+) -> Vec<ExtensionItemView> {
     packages.sort_by_key(|package| {
         config
             .addons
@@ -39,7 +59,7 @@ pub(crate) fn extension_inventory_view_with_overlays(
             .position(|addon| addon.id == package.id)
             .unwrap_or(usize::MAX)
     });
-    let addons = packages
+    packages
         .into_iter()
         .map(|package| {
             let supported = package
@@ -73,16 +93,18 @@ pub(crate) fn extension_inventory_view_with_overlays(
                 } else {
                     "Client build is not listed by this package".to_owned()
                 },
-                status: if enabled {
-                    "Enabled".to_owned()
-                } else {
-                    "Disabled".to_owned()
-                },
+                status: status_label(enabled),
                 trust: "Isolated Lua",
                 enabled,
             }
         })
-        .collect();
+        .collect()
+}
+
+fn overlay_views(
+    mut dat_packages: Vec<bahamut_launcher::extensions::OverlayPackage>,
+    dat_config: &DatsConfig,
+) -> Vec<OverlayPackageView> {
     dat_packages.sort_by_key(|package| {
         if package.id == OFFICIAL_DAT_OVERLAY_PACKAGE_ID {
             0
@@ -91,11 +113,10 @@ pub(crate) fn extension_inventory_view_with_overlays(
                 .packages
                 .iter()
                 .position(|preference| preference.id == package.id)
-                .map(|position| position.saturating_add(1))
-                .unwrap_or(usize::MAX)
+                .map_or(usize::MAX, |position| position.saturating_add(1))
         }
     });
-    let overlays = dat_packages
+    dat_packages
         .into_iter()
         .map(|package| {
             let enabled = package.id == OFFICIAL_DAT_OVERLAY_PACKAGE_ID
@@ -112,23 +133,11 @@ pub(crate) fn extension_inventory_view_with_overlays(
                 description: package.description,
                 homepage: package.homepage,
                 enabled,
-                status: if enabled {
-                    "Enabled".to_owned()
-                } else {
-                    "Disabled".to_owned()
-                },
+                status: status_label(enabled),
                 trust: "Data-only overlay",
             }
         })
-        .collect();
-    ExtensionInventoryView {
-        addons,
-        plugins: vec![
-            screenshot_plugin_view(config.plugin_enabled(SCREENSHOT_PLUGIN_ID)),
-            discord_rpc_plugin_view(config.plugin_enabled(DISCORD_RPC_PLUGIN_ID)),
-        ],
-        overlays,
-    }
+        .collect()
 }
 
 fn discord_rpc_plugin_view(enabled: bool) -> ExtensionItemView {
@@ -143,11 +152,7 @@ fn discord_rpc_plugin_view(enabled: bool) -> ExtensionItemView {
         commands: Vec::new(),
         capabilities: Vec::new(),
         compatibility: "Supported client build".into(),
-        status: if enabled {
-            "Enabled".into()
-        } else {
-            "Disabled".into()
-        },
+        status: status_label(enabled),
         trust: "First-party native",
         enabled,
     }
@@ -168,11 +173,7 @@ fn screenshot_plugin_view(enabled: bool) -> ExtensionItemView {
         }],
         capabilities: Vec::new(),
         compatibility: "Supported client build".into(),
-        status: if enabled {
-            "Enabled".into()
-        } else {
-            "Disabled".into()
-        },
+        status: status_label(enabled),
         trust: "First-party native",
         enabled,
     }
@@ -353,20 +354,9 @@ fn open_directory(path: &Path) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn open_directory(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("open")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_directory(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
+    spawn_os_opener(path)
 }
 
 #[cfg(not(any(windows, unix)))]
