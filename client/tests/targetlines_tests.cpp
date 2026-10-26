@@ -281,7 +281,7 @@ int main()
     }
     lines.Observe(Result(27346u, kAlly, true), now);
     packet_observer::GameMessage removed;
-    removed.opcode   = 0x0114u;
+    removed.opcode   = 0x00CBu;
     removed.sourceId = kAlly;
     targets.Observe(removed);
     lines.Observe(removed, now);
