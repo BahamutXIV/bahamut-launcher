@@ -314,7 +314,7 @@ fn publish_stage(
     Ok(())
 }
 
-fn package_identity(package: &BasePackage) -> String {
+pub(crate) fn package_identity(package: &BasePackage) -> String {
     let encoded = serde_json::to_vec(package).expect("BasePackage is infallibly serializable");
     format!("{:x}", Sha256::digest(encoded))
 }
@@ -360,7 +360,7 @@ fn validate_managed_version_files(package: &BasePackage) -> Result<(), String> {
     Ok(())
 }
 
-fn same_volume(left: &Path, right: &Path) -> bool {
+pub(crate) fn same_volume(left: &Path, right: &Path) -> bool {
     #[cfg(windows)]
     {
         use std::ffi::OsString;

@@ -10,6 +10,7 @@ use super::scan::{hash_regular_file, is_repairable};
 use super::types::{FileState, ManagedFileStatus, RepairQuote, VerificationSummary};
 use crate::atomic_fs::is_link_or_reparse;
 use crate::content::http::ObjectSpec;
+use crate::content::installer::same_volume;
 use crate::content::manifest::BasePackage;
 use crate::content::require_space;
 use crate::diagnostics::free_disk_bytes;
@@ -161,47 +162,6 @@ pub(super) fn preflight_space(
         )?;
     }
     Ok(())
-}
-
-pub(super) fn same_volume(left: &Path, right: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::{OsStrExt, OsStringExt};
-        use windows::Win32::Storage::FileSystem::GetVolumePathNameW;
-        use windows::core::PCWSTR;
-
-        let volume_path = |path: &Path| {
-            let input = path
-                .as_os_str()
-                .encode_wide()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let mut output = vec![0_u16; 32768];
-            unsafe { GetVolumePathNameW(PCWSTR(input.as_ptr()), &mut output) }.ok()?;
-            let length = output.iter().position(|unit| *unit == 0)?;
-            Some(
-                OsString::from_wide(&output[..length])
-                    .to_string_lossy()
-                    .to_lowercase(),
-            )
-        };
-        volume_path(left)
-            .zip(volume_path(right))
-            .is_some_and(|(left, right)| left == right)
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        fs::metadata(left)
-            .ok()
-            .zip(fs::metadata(right).ok())
-            .is_some_and(|(left, right)| left.dev() == right.dev())
-    }
-    #[cfg(not(any(windows, unix)))]
-    {
-        left.components().next() == right.components().next()
-    }
 }
 
 pub(super) fn cache_object_status(

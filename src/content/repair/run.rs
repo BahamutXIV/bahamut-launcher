@@ -10,7 +10,7 @@ use super::archive::{
 use super::control::{RepairPhase, RepairShared};
 use super::journal::{
     JournalPhase, RepairJournal, cleanup_unjournaled_transaction, create_transaction, make_journal,
-    package_identity, write_journal,
+    write_journal,
 };
 use super::paths::{
     ResolvedCachePath, find_file, resolve_cache_path, resolve_existing_directory, transaction_path,
@@ -28,6 +28,7 @@ use super::scan::{scan_files_controlled, scan_selected_controlled, select_repair
 use super::types::{FileState, ManagedFileStatus, RepairQuote, RepairResult, VerificationSummary};
 use super::{STAGED_DIR, acquire_repair_lock};
 use crate::content::http::download_object;
+use crate::content::installer::package_identity;
 use crate::content::manifest::{BasePackage, InstallFile};
 use crate::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
 

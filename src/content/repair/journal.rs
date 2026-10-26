@@ -14,7 +14,6 @@ use super::types::{FileState, ManagedFileStatus};
 use super::{JOURNAL_FILE, JOURNAL_NEXT_FILE, OWNER_FILE, ROLLBACK_DIR, STAGED_DIR};
 use crate::atomic_fs::is_link_or_reparse;
 use crate::content::manifest::{BasePackage, validate_hash, validate_relative_path};
-use crate::digest::sha256_hex;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -393,11 +392,6 @@ pub(super) fn read_json<T: for<'de> Deserialize<'de>>(
     }
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("Invalid repair state {}: {error}", path.display()))
-}
-
-pub(super) fn package_identity(package: &BasePackage) -> String {
-    let encoded = serde_json::to_vec(package).expect("BasePackage is infallibly serializable");
-    sha256_hex(&encoded)
 }
 
 pub(super) fn maximum_repair_journal(

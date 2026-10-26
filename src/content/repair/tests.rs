@@ -12,7 +12,7 @@ use super::archive::{create_owned_parents, repair_sources, write_staged_bytes};
 use super::control::{RepairPhase, RepairShared};
 use super::journal::{
     JournalPhase, RepairJournal, create_transaction, journal_read_limit, make_journal,
-    maximum_repair_journal, package_identity, read_json, write_journal,
+    maximum_repair_journal, read_json, write_journal,
 };
 use super::paths::{
     find_file, join_relative, resolve_cache_path, resolve_existing_directory, transaction_path,
@@ -26,6 +26,7 @@ use super::{
     recovery_pending, repair_all,
 };
 use crate::content::http::ObjectSpec;
+use crate::content::installer::package_identity;
 use crate::content::manifest::{ArchiveLayout, BaseArchive, BasePackage, InstallFile};
 use crate::digest::sha256_hex;
 use crate::version::{FFXIV_BOOT_VERSION, FFXIV_GAME_VERSION};
