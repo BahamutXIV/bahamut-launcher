@@ -6,6 +6,7 @@ pub mod backups;
 pub mod config;
 pub mod content;
 pub mod diagnostics;
+pub mod digest;
 pub mod extensions;
 pub mod install_check;
 pub mod launcher;

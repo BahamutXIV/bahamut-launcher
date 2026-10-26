@@ -28,10 +28,11 @@ const NEW_SIGNATURE_FILE: &str = "new-signature.bin";
 const OLD_METADATA_FILE: &str = "old-metadata.json";
 const OLD_SIGNATURE_FILE: &str = "old-signature.bin";
 const SNAPSHOT_FILE: &str = "snapshot.json";
-const POINTER_FILE: &str = "config/launcher-update-state.json";
-const PENDING_FILE: &str = "config/launcher-update-pending.json";
-const HELPER_LOCK_FILE: &str = "config/launcher-update-helper.lock";
-const OFFICIAL_OVERLAY_MANIFEST: &str = "plugins/dats/bahamut-dats-overlay/overlay.toml";
+// The shell reads and locks these install-relative paths too.
+pub const POINTER_FILE: &str = "config/launcher-update-state.json";
+pub const PENDING_FILE: &str = "config/launcher-update-pending.json";
+pub const HELPER_LOCK_FILE: &str = "config/launcher-update-helper.lock";
+pub const OFFICIAL_OVERLAY_MANIFEST: &str = "plugins/dats/bahamut-dats-overlay/overlay.toml";
 const PAYLOAD_DIR: &str = "payload";
 const BACKUP_DIR: &str = "backup";
 const JOURNAL_SCHEMA: u32 = 1;

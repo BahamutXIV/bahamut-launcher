@@ -1,6 +1,6 @@
-//! Filesystem operations with explicit no-replace semantics.
+//! Filesystem publication and lock primitives with explicit replace semantics.
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
 
@@ -204,6 +204,74 @@ pub fn rename_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
+/// Move a sibling staging file over `destination`, replacing an existing file.
+/// On Windows the move is written through before it returns.
+pub fn rename_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        use windows::core::PCWSTR;
+
+        let source = source
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let destination = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        unsafe {
+            MoveFileExW(
+                PCWSTR(source.as_ptr()),
+                PCWSTR(destination.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        }
+        .map_err(io::Error::other)
+    }
+
+    #[cfg(not(windows))]
+    {
+        fs::rename(source, destination)
+    }
+}
+
+/// Flush a directory entry change to disk. Only Unix exposes directory fsync;
+/// elsewhere this is a no-op.
+pub fn sync_directory(directory: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(directory)?.sync_all()
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+        Ok(())
+    }
+}
+
+/// Whether metadata from `symlink_metadata` names a symbolic link or, on
+/// Windows, any reparse point such as a junction.
+pub fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +303,43 @@ mod tests {
 
         assert!(!source.exists());
         assert_eq!(fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
+    fn rename_replace_overwrites_an_existing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        fs::write(&source, b"source").unwrap();
+        fs::write(&destination, b"destination").unwrap();
+
+        rename_replace(&source, &destination).unwrap();
+        sync_directory(directory.path()).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"source");
+    }
+
+    #[test]
+    fn link_or_reparse_rejects_links_but_not_plain_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("file");
+        fs::write(&file, b"file").unwrap();
+        assert!(!is_link_or_reparse(&fs::symlink_metadata(&file).unwrap()));
+        assert!(!is_link_or_reparse(
+            &fs::symlink_metadata(directory.path()).unwrap()
+        ));
+
+        let link = directory.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        #[cfg(windows)]
+        if let Err(error) = std::os::windows::fs::symlink_file(&file, &link) {
+            // ERROR_PRIVILEGE_NOT_HELD: symbolic links need Developer Mode or elevation.
+            assert_eq!(error.raw_os_error(), Some(1314), "{error}");
+            return;
+        }
+        assert!(is_link_or_reparse(&fs::symlink_metadata(&link).unwrap()));
     }
 
     #[test]
