@@ -95,7 +95,14 @@ pub fn install(
             std::sync::atomic::Ordering::Release,
         );
         shared.set_phase(Phase::ValidatingFiles);
-        validate_final_tree(&destination_path.path, package, &identity, shared, true)?;
+        validate_final_tree(
+            &destination_path.path,
+            package,
+            &identity,
+            shared,
+            true,
+            FinalContentCheck::Hash,
+        )?;
         remove_receipt(&destination_path.path, &identity)?;
         return Ok(());
     }
@@ -105,7 +112,16 @@ pub fn install(
             std::sync::atomic::Ordering::Release,
         );
         shared.set_phase(Phase::ValidatingFiles);
-        if validate_final_tree(&destination_path.path, package, &identity, shared, false).is_ok() {
+        if validate_final_tree(
+            &destination_path.path,
+            package,
+            &identity,
+            shared,
+            false,
+            FinalContentCheck::Hash,
+        )
+        .is_ok()
+        {
             return Ok(());
         }
     }
@@ -209,7 +225,15 @@ pub fn install(
         .file_idx
         .store(0, std::sync::atomic::Ordering::Release);
     shared.set_phase(Phase::ValidatingFiles);
-    validate_final_tree(&stage_path, package, &identity, shared, true)?;
+    // Extraction already verified every staged byte against its archive identity.
+    validate_final_tree(
+        &stage_path,
+        package,
+        &identity,
+        shared,
+        true,
+        FinalContentCheck::ExtractionVerified,
+    )?;
 
     shared.set_phase(Phase::Installing);
     validate_no_reparse_ancestors(&stage_path)?;
@@ -1318,12 +1342,46 @@ fn copy_and_hash(
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FinalContentCheck {
+    Hash,
+    ExtractionVerified,
+}
+
+fn extraction_identities(package: &BasePackage) -> HashMap<String, (u64, String)> {
+    let mut identities: HashMap<String, (u64, String)> = package
+        .archives
+        .iter()
+        .flat_map(|archive| archive.files.iter())
+        .map(|file| {
+            (
+                file.path.to_ascii_lowercase(),
+                (file.length, file.sha256.to_ascii_lowercase()),
+            )
+        })
+        .collect();
+    for (name, contents) in [
+        ("boot.ver", FFXIV_BOOT_VERSION),
+        ("game.ver", FFXIV_GAME_VERSION),
+    ] {
+        identities.insert(
+            name.to_owned(),
+            (
+                contents.len() as u64,
+                format!("{:x}", Sha256::digest(contents.as_bytes())),
+            ),
+        );
+    }
+    identities
+}
+
 fn validate_final_tree(
     root: &Path,
     package: &BasePackage,
     identity: &str,
     shared: &InstallShared,
     receipt_required: bool,
+    content_check: FinalContentCheck,
 ) -> Result<(), String> {
     validate_tree_has_no_reparse_points(root)?;
     if receipt_required && read_receipt(root)? != identity {
@@ -1337,6 +1395,8 @@ fn validate_final_tree(
         .iter()
         .map(|file| (file.path.to_ascii_lowercase(), file))
         .collect();
+    let verified = (content_check == FinalContentCheck::ExtractionVerified)
+        .then(|| extraction_identities(package));
     let mut expected_dirs = expected_directories(expected.values().map(|file| file.path.as_str()));
     let empty_dirs: HashSet<String> = package
         .archives
@@ -1385,11 +1445,20 @@ fn validate_final_tree(
                 let spec = expected
                     .get(&folded)
                     .ok_or_else(|| format!("Unexpected staged file: {child}"))?;
-                if !found.insert(folded) {
+                if !found.insert(folded.clone()) {
                     return Err(format!("Duplicate staged destination: {child}"));
                 }
-                let digest = hash_file(shared, &path, &spec.path, spec.length)?;
-                if !digest.eq_ignore_ascii_case(&spec.sha256) {
+                let valid = match &verified {
+                    Some(sources) => {
+                        metadata.len() == spec.length
+                            && sources.get(&folded).is_some_and(|(length, sha256)| {
+                                *length == spec.length && spec.sha256.eq_ignore_ascii_case(sha256)
+                            })
+                    }
+                    None => hash_file(shared, &path, &spec.path, spec.length)?
+                        .eq_ignore_ascii_case(&spec.sha256),
+                };
+                if !valid {
                     return Err(format!(
                         "Final install file failed validation: {}",
                         spec.path
@@ -2110,6 +2179,82 @@ mod tests {
         );
         assert!(!destination.exists());
         assert!(!destination.join("game.ver").exists());
+    }
+
+    fn install_valid_fixture(root: &Path) -> (BasePackage, PathBuf, PathBuf) {
+        let (package, cache, destination) = valid_fixture(root);
+        install(
+            &InstallShared::with_totals(1, 1),
+            &destination,
+            "http://127.0.0.1:9",
+            &cache,
+            &package,
+        )
+        .unwrap();
+        (package, cache, destination)
+    }
+
+    #[test]
+    fn same_length_tamper_is_rejected_by_hashing_install_paths() {
+        let temporary = tempdir().unwrap();
+        let (package, cache, destination) = install_valid_fixture(temporary.path());
+        fs::write(destination.join("ffxivgame.exe"), b"evil").unwrap();
+
+        write_receipt(&destination, &package_identity(&package)).unwrap();
+        let error = install(
+            &InstallShared::with_totals(1, 1),
+            &destination,
+            "http://127.0.0.1:9",
+            &cache,
+            &package,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("Final install file failed validation"),
+            "{error}"
+        );
+        fs::remove_file(destination.join(RECEIPT_NAME)).unwrap();
+
+        let error = install(
+            &InstallShared::with_totals(1, 1),
+            &destination,
+            "http://127.0.0.1:9",
+            &cache,
+            &package,
+        )
+        .unwrap_err();
+        assert!(error.contains("not empty"), "{error}");
+        assert_eq!(
+            fs::read(destination.join("ffxivgame.exe")).unwrap(),
+            b"evil"
+        );
+    }
+
+    #[test]
+    fn extraction_verified_check_skips_content_but_keeps_length() {
+        let temporary = tempdir().unwrap();
+        let (package, _cache, destination) = install_valid_fixture(temporary.path());
+        let identity = package_identity(&package);
+        write_receipt(&destination, &identity).unwrap();
+        let shared = InstallShared::with_totals(1, 1);
+        let check =
+            |mode| validate_final_tree(&destination, &package, &identity, &shared, true, mode);
+        check(FinalContentCheck::ExtractionVerified).unwrap();
+
+        fs::write(destination.join("ffxivgame.exe"), b"evil").unwrap();
+        check(FinalContentCheck::ExtractionVerified).unwrap();
+        let error = check(FinalContentCheck::Hash).unwrap_err();
+        assert!(
+            error.contains("Final install file failed validation"),
+            "{error}"
+        );
+
+        fs::write(destination.join("ffxivgame.exe"), b"evil!").unwrap();
+        let error = check(FinalContentCheck::ExtractionVerified).unwrap_err();
+        assert!(
+            error.contains("Final install file failed validation: ffxivgame.exe"),
+            "{error}"
+        );
     }
 
     #[test]
