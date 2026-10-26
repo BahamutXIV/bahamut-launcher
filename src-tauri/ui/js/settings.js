@@ -4,6 +4,9 @@ import { feedbackToken, feedbackCurrent, clearFeedback, showFeedback, reportFail
 let gameSettingsSaveQueue = Promise.resolve();
 let launcherBehaviorSaveQueue = Promise.resolve();
 let borderlessMonitorSaveQueue = Promise.resolve();
+let padSetupSaveQueue = Promise.resolve();
+let padSetupView = null;
+let padSetupRevision = 0;
 let graphicsSaveQueue = Promise.resolve();
 let settingsHydrationRevision = 0;
 let gameSettingsRevision = 0;
@@ -16,6 +19,7 @@ const GAME_SETTINGS_WARNING = 'Game settings require a valid retail config.sys.'
 const BORDERLESS_MONITOR_WARNING = 'Borderless monitor selection is unavailable. Copy logs from the Help page for support.';
 const OBJECT_DISTANCE_WARNING = 'Extended draw distance is unavailable. Copy logs from the Help page for support.';
 const CAMERA_ZOOM_WARNING = 'Extended camera zoom is unavailable. Copy logs from the Help page for support.';
+const PAD_SETUP_WARNING = 'Force Auto-Detect Gamepad is unavailable. Copy logs from the Help page for support.';
 
 function activeSettingsCard() {
   return document.querySelector('[data-settings-pane][data-active] .settings-card')
@@ -198,6 +202,48 @@ function renderLauncherBehavior(view) {
   });
 }
 
+function renderPadSetup(view) {
+  padSetupRevision += 1;
+  padSetupView = view;
+  const supported = Boolean(view?.supported);
+  const enabled = supported && Boolean(view.enabled);
+  document.querySelectorAll('[data-pad-setup-row]').forEach(row => row.toggleAttribute('data-pad-setup-supported', supported));
+  document.querySelectorAll('[data-pad-setup-choice]').forEach(button => {
+    button.disabled = !supported;
+    button.setAttribute('aria-pressed', String(button.dataset.padSetupChoice === String(enabled)));
+  });
+}
+
+function queuePadSetupUpdate(enabled, target) {
+  const token = feedbackToken(target);
+  clearFeedback(token);
+  padSetupSaveQueue = padSetupSaveQueue.then(async () => {
+    const previous = padSetupView;
+    if (!previous?.supported) return;
+    try {
+      renderPadSetup(await invoke('set_pad_setup', { enabled }));
+    } catch (error) {
+      renderPadSetup(previous);
+      reportFailure(token, 'save Force Auto-Detect Gamepad', error, { context:'set_pad_setup' });
+    }
+  });
+  return padSetupSaveQueue;
+}
+
+async function hydratePadSetup() {
+  if (!tauriInvoke) return;
+  const token = feedbackToken('[data-pad-setup-row]');
+  const revision = padSetupRevision;
+  try {
+    const view = await invoke('get_pad_setup');
+    if (revision === padSetupRevision) renderPadSetup(view);
+  } catch (error) {
+    if (revision === padSetupRevision) renderPadSetup({ supported:false, enabled:false });
+    void recordFailure(token.scope, 'load Force Auto-Detect Gamepad', error, PAD_SETUP_WARNING, 'get_pad_setup');
+    if (feedbackCurrent(token)) showFeedback(token, PAD_SETUP_WARNING, 'warning');
+  }
+}
+
 function queueGameSettingsUpdate(update, target) {
   const token = feedbackToken(target || activeSettingsCard());
   const action = settingAction(target);
@@ -344,4 +390,4 @@ function renderServerSettings(serverSettings) {
   if (home.token) showFeedback(feedbackToken('#profile-server-select'), 'Log out before changing server profiles.');
 }
 
-export { renderChoice, setNestedValue, renderGameSettings, renderBorderlessMonitorSettings, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, renderLauncherBehavior, renderGameSettingProgress, queueGameSettingsUpdate, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, hydrateSettings, renderServerSettings };
+export { renderChoice, setNestedValue, renderGameSettings, renderBorderlessMonitorSettings, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, renderLauncherBehavior, renderGameSettingProgress, queueGameSettingsUpdate, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, queuePadSetupUpdate, hydratePadSetup, hydrateSettings, renderServerSettings };

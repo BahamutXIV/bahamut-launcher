@@ -11,6 +11,8 @@ pub const EXTENSIONS_CONFIG_FILE: &str = "extensions.ini";
 
 pub const DATS_CONFIG_FILE: &str = "dats.ini";
 
+pub const CONTROLLER_CONFIG_FILE: &str = "controller.ini";
+
 pub const PORTABLE_CONFIG_DIR_NAME: &str = "config";
 
 pub const PORTABLE_DATA_DIR_NAME: &str = "data";
@@ -231,6 +233,10 @@ pub fn extensions_config_path() -> Result<PathBuf, ConfigDirError> {
 
 pub fn dats_config_path() -> Result<PathBuf, ConfigDirError> {
     portable_config_dir().map(|dir| dir.join(DATS_CONFIG_FILE))
+}
+
+pub fn controller_config_path() -> Result<PathBuf, ConfigDirError> {
+    portable_config_dir().map(|dir| dir.join(CONTROLLER_CONFIG_FILE))
 }
 
 pub fn screenshot_settings_path() -> Result<PathBuf, ConfigDirError> {
@@ -700,6 +706,10 @@ mod tests {
             config.join("extensions.ini")
         );
         assert_eq!(dats_config_path().unwrap(), config.join("dats.ini"));
+        assert_eq!(
+            controller_config_path().unwrap(),
+            config.join("controller.ini")
+        );
         assert_eq!(
             screenshot_settings_path().unwrap(),
             config.join("plugins/screenshot/settings.ini")

@@ -1,5 +1,5 @@
 import { body, launcherShell, tauriInvoke, home, settingsState, extensionState, invoke, selectedServer, normalizeLauncherLog } from './runtime.js';
-import { renderChoice, setNestedValue, queueGameSettingsUpdate, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, hydrateSettings, renderServerSettings, renderGameSettingProgress } from './settings.js';
+import { renderChoice, setNestedValue, queueGameSettingsUpdate, queueBorderlessMonitorUpdate, graphicsRangeSelection, renderGraphicsRangePreview, queueObjectDistanceSelection, queueCameraZoomSelection, queueLauncherBehaviorUpdate, queueNativeResolutionOverrideUpdate, queuePadSetupUpdate, hydratePadSetup, hydrateSettings, renderServerSettings, renderGameSettingProgress } from './settings.js';
 import { hydrateExtensions, renderExtensionLibrary } from './extensions.js';
 import { repairState, refreshGameRepairStatus, startGameRepair, controlGameRepair } from './game-repair.js';
 import { renderNews, renderHome, renderLifecycleStrip, refreshGameStatus, refreshInstallSnapshot, refreshHomeStatus, restoreSession, chooseInstallFolder, startInstall, launchGame, handleSettingsAction } from './home.js';
@@ -215,6 +215,7 @@ function activateGamepadScreen(focusRegion = false) {
   document.querySelector('[data-utility="help"]').setAttribute('aria-pressed', 'false');
   updateGamepadPrompts(navigator.getGamepads ? [...navigator.getGamepads()] : []);
   hydrateConfigToolSupport();
+  hydratePadSetup();
   if (focusRegion) focusAdjacentRegion(1);
 }
 
@@ -388,6 +389,10 @@ document.addEventListener('click', event => {
     } else if (launcherSettingChoice.dataset.launcherSettingChoice === 'native_resolution_override') {
       queueNativeResolutionOverrideUpdate(value, launcherSettingChoice);
     }
+  }
+  const padSetupChoice = event.target.closest('[data-pad-setup-choice]');
+  if (padSetupChoice && !padSetupChoice.disabled) {
+    queuePadSetupUpdate(padSetupChoice.dataset.padSetupChoice === 'true', padSetupChoice);
   }
   const gamepadChoice = event.target.closest('[data-gamepad-choice]');
   if (gamepadChoice) {

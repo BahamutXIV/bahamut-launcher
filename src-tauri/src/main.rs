@@ -22,6 +22,7 @@ use bahamut_launcher::config::dirs;
 use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::logging;
 use bahamut_launcher::news;
+use commands::settings::{get_pad_setup, set_pad_setup};
 use commands::{
     apply_launcher_update, cancel_game_repair, cancel_install, check_launcher_update,
     config_tool_supported, control_window, create_backup, detect_game_install_command,
@@ -318,6 +319,8 @@ fn main() {
             set_borderless_monitor,
             get_launcher_behavior,
             set_close_on_game_start,
+            get_pad_setup,
+            set_pad_setup,
             set_native_resolution_override,
             launch_config_tool,
             config_tool_supported,

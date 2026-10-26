@@ -205,6 +205,8 @@ function evaluateScript() {
       launchDelayMs: 0,
       launchError: null,
       launcherBehavior: { close_on_game_start: true, native_resolution_override: false },
+      padSetup: { supported:false, enabled:false },
+      failPadSetupWrite: false,
       borderlessMonitors: {
         supported:true,
         monitors:[
@@ -448,6 +450,16 @@ function evaluateScript() {
       if (command === 'detect_game_install_command') return { detected: state.installPath || 'C:/game', source: 'preferences' };
       if (command === 'config_tool_supported') return state.configToolSupported !== false;
       if (command === 'get_launcher_behavior') return { ...state.launcherBehavior };
+      if (command === 'get_pad_setup') return { ...state.padSetup };
+      if (command === 'set_pad_setup') {
+        if (!state.padSetup.supported) throw new Error('Gamepad setup is available only on Linux.');
+        if (state.failPadSetupWrite) {
+          state.failPadSetupWrite = false;
+          throw new Error('fixture pad setup write failure');
+        }
+        state.padSetup.enabled = args.enabled;
+        return { ...state.padSetup };
+      }
       if (command === 'get_borderless_monitors') return structuredClone(state.borderlessMonitors);
       if (command === 'set_borderless_monitor') {
         state.borderlessMonitors.selected = args.monitorId;
@@ -2762,7 +2774,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 50));
     const screen = document.querySelector('#screen-gamepad');
     if (!screen.hasAttribute('data-active') || document.querySelector('[data-route][aria-selected="true"]')) throw new Error('Gamepad utility did not open its dedicated screen');
-    if (screen.querySelectorAll('.gamepad-card').length !== 2 || screen.querySelectorAll('[data-gamepad-region]').length !== 1 || screen.querySelector('h1').textContent !== 'Gamepad Settings') throw new Error('Gamepad screen does not have the functional and placeholder cards');
+    if (screen.querySelectorAll('.gamepad-card').length !== 2 || screen.querySelectorAll('[data-gamepad-region]').length !== 2 || screen.querySelector('h1').textContent !== 'Gamepad Settings') throw new Error('Gamepad screen does not have the functional and placeholder cards');
     const gamepadScreenRect = screen.getBoundingClientRect();
     const gamepadGridRect = screen.querySelector('.gamepad-grid').getBoundingClientRect();
     const gamepadCardRects = [...screen.querySelectorAll('.gamepad-card')].map(card => card.getBoundingClientRect());
@@ -2778,7 +2790,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const stubSettingRects = [...screen.querySelectorAll('.gamepad-card--stub .gamepad-setting')].map(row => row.getBoundingClientRect());
     const configRects = [...screen.querySelectorAll('.gamepad-config-action')].map(button => button.getBoundingClientRect());
     const separators = [...screen.querySelectorAll('.gamepad-setting')].filter(row => getComputedStyle(row).borderTopWidth !== '0px');
-    if (screen.textContent.includes('Enable Gamepad') || !screen.textContent.includes('Steam Deck not detected.') || screen.textContent.includes('support is unavailable') || screen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('Gamepad or Steam Deck support state is misleading');
+    if (screen.textContent.includes('Enable Gamepad') || !screen.textContent.includes('Steam Deck not detected.') || screen.textContent.includes('support is unavailable') || screen.querySelectorAll('.gamepad-card--stub .gamepad-setting:not([data-pad-setup-row]) button:not(:disabled), .gamepad-card--stub .gamepad-config-row button:not(:disabled), .gamepad-card--stub [data-pad-setup-choice]:not(:disabled)').length || screen.querySelectorAll('[data-pad-setup-choice]').length !== 2 || screen.querySelector('[data-pad-setup-choice="false"]').getAttribute('aria-pressed') !== 'true') throw new Error('Gamepad or Steam Deck support state is misleading');
     if (cardHeadingStyle.fontSize !== '22px' || cardHeadingStyle.lineHeight !== '33px' || settingStyle.minHeight !== '50px' || choiceRowStyle.gap !== '8px' || stubCardStyle.opacity !== '1' || stubSettingStyle.opacity !== '0.5' || separators.length) throw new Error('Gamepad card geometry drifted from Avalon: ' + JSON.stringify({ heading:cardHeadingStyle.fontSize, headingLine:cardHeadingStyle.lineHeight, settingHeight:settingStyle.minHeight, choiceGap:choiceRowStyle.gap, stubCardOpacity:stubCardStyle.opacity, stubSettingOpacity:stubSettingStyle.opacity, separators:separators.length }));
     const configCenters = configRects.map((rect, index) => Math.abs(rect.left + rect.width / 2 - (gamepadCardRects[index].left + gamepadCardRects[index].width / 2)));
     if (Math.abs(functionalSettingRect.top - stubSettingRects[0].top) >= .1 || Math.abs(stubSettingRects[1].top - stubSettingRects[0].top - 92) >= .1 || Math.abs(stubSettingRects[0].top - stubStatusRect.bottom - 22) >= .1 || Math.abs(configRects[0].top - functionalSettingRect.bottom - 42) >= .1 || Math.abs(configRects[1].top - stubSettingRects[1].bottom - 42) >= .1 || configCenters.some(offset => offset >= .1)) throw new Error('Gamepad rows or actions are not aligned to the Avalon rhythm');
@@ -2788,6 +2800,70 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 20));
     if (!state.calls.some(call => call.command === 'launch_config_tool')) throw new Error('Gamepad XIV Config action did not invoke the retail utility');
     if (screen.querySelector('.settings-description') || screen.textContent.includes('current controller remains active')) throw new Error('Gamepad page retained the removed ownership copy');
+  `);
+
+  await assertUi(`
+    const state = window.__launcherBrowserState;
+    const screen = document.querySelector('#screen-gamepad');
+    const deckCard = screen.querySelector('.gamepad-card--stub');
+    const padRow = screen.querySelector('[data-pad-setup-row]');
+    const padOn = screen.querySelector('[data-pad-setup-choice="true"]');
+    const padOff = screen.querySelector('[data-pad-setup-choice="false"]');
+    const padFeedback = () => screen.querySelector('[data-feedback]').textContent;
+    const settle = () => new Promise(resolve => setTimeout(resolve, 40));
+    const stubRowTops = () => [...screen.querySelectorAll('.gamepad-card--stub .gamepad-setting')].map(row => row.getBoundingClientRect().top);
+    const unsupportedTops = stubRowTops();
+    if (padRow.parentElement !== deckCard.querySelector('.gamepad-card-body') || padRow.querySelector('.gamepad-setting-label').textContent !== 'Force Auto-Detect Gamepad') throw new Error('pad setup row left the Steam Deck card or lost its label');
+    if (!padOn.disabled || !padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false' || getComputedStyle(padRow).opacity !== '0.5') throw new Error('unsupported pad setup row was not disabled with Off pressed');
+
+    state.padSetup = { supported:true, enabled:false };
+    state.calls.length = 0;
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (!state.calls.some(call => call.command === 'get_pad_setup') || padOn.disabled || padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false') throw new Error('supported pad setup row did not hydrate enabled with Off pressed');
+    const otherDeckEnabled = [...deckCard.querySelectorAll('button:not(:disabled)')].filter(button => !button.hasAttribute('data-pad-setup-choice'));
+    if (otherDeckEnabled.length || deckCard.querySelectorAll('button:disabled').length !== 3 || [...deckCard.querySelectorAll('.gamepad-setting-label')].map(label => label.textContent).join('|') !== 'Use Steam Deck Recommended Graphics|Force Auto-Detect Gamepad' || !deckCard.textContent.includes('Steam Deck not detected.')) throw new Error('other Steam Deck rows did not stay disabled and unchanged');
+    if (getComputedStyle(padRow).opacity !== '1' || getComputedStyle(padOn).pointerEvents !== 'auto' || document.elementFromPoint(padOn.getBoundingClientRect().left + 8, padOn.getBoundingClientRect().top + 8) !== padOn) throw new Error('supported pad setup row is still dimmed or blocked from pointer input');
+    if (stubRowTops().some((top, index) => Math.abs(top - unsupportedTops[index]) >= .1)) throw new Error('enabling the pad setup row moved the Steam Deck rows');
+
+    state.calls.length = 0;
+    padOn.click();
+    await settle();
+    const saves = state.calls.filter(call => call.command === 'set_pad_setup');
+    if (saves.length !== 1 || saves[0].args.enabled !== true || !state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true' || padOff.getAttribute('aria-pressed') !== 'false') throw new Error('mouse On did not persist through set_pad_setup');
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (padOn.getAttribute('aria-pressed') !== 'true') throw new Error('pad setup did not retain its saved selection after hydration');
+
+    screen.querySelector('[data-gamepad-region]').focus();
+    runControllerAction('next-region');
+    if (document.activeElement !== deckCard) throw new Error('RB did not reach the supported Steam Deck card');
+    runControllerAction('down');
+    if (document.activeElement !== padRow) throw new Error('D-pad did not focus the pad setup row');
+    state.calls.length = 0;
+    runControllerAction('confirm');
+    await settle();
+    if (document.activeElement !== padRow || state.calls.some(call => call.command === 'set_pad_setup')) throw new Error('Confirm changed the pad setup row instead of leaving it to X');
+    runControllerAction('secondary');
+    await settle();
+    if (document.activeElement !== padRow || state.padSetup.enabled || padOff.getAttribute('aria-pressed') !== 'true' || state.calls.filter(call => call.command === 'set_pad_setup').at(-1)?.args.enabled !== false) throw new Error('X did not cycle the pad setup row to Off while retaining row focus');
+    runControllerAction('secondary');
+    await settle();
+    if (document.activeElement !== padRow || !state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true') throw new Error('X did not cycle the pad setup row back to On');
+
+    state.calls.length = 0;
+    state.failPadSetupWrite = true;
+    runControllerAction('secondary');
+    await settle();
+    if (!state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true' || padOff.getAttribute('aria-pressed') !== 'false' || !padFeedback().includes("Couldn't save Force Auto-Detect Gamepad") || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.context === 'set_pad_setup')) throw new Error('failed pad setup write did not roll back and report: ' + padFeedback());
+    runControllerAction('secondary');
+    await settle();
+    if (state.padSetup.enabled || padOff.getAttribute('aria-pressed') !== 'true' || padFeedback()) throw new Error('pad setup did not recover and clear feedback after a failed write');
+
+    state.padSetup = { supported:false, enabled:true };
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (!padOn.disabled || !padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false' || getComputedStyle(padRow).opacity !== '0.5' || screen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('pad setup row did not return to its disabled state when unsupported');
   `);
 
   await assertUi(`
@@ -3110,11 +3186,13 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     document.querySelector('[data-utility="gamepad"]').click();
     const gamepadScreen = document.querySelector('#screen-gamepad');
     if (gamepadScreen.querySelectorAll('.gamepad-card').length !== 2 || getComputedStyle(gamepadScreen.querySelector('.gamepad-grid')).gridTemplateColumns.split(' ').length !== 2) throw new Error('Gamepad page is not the two-card layout');
-    if (!gamepadScreen.textContent.includes('Steam Deck not detected.') || gamepadScreen.textContent.includes('support is unavailable') || gamepadScreen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('Steam Deck placeholder is missing or implies working controls');
+    if (!gamepadScreen.textContent.includes('Steam Deck not detected.') || gamepadScreen.textContent.includes('support is unavailable') || gamepadScreen.querySelectorAll('.gamepad-card--stub .gamepad-setting:not([data-pad-setup-row]) button:not(:disabled), .gamepad-card--stub .gamepad-config-row button:not(:disabled), .gamepad-card--stub [data-pad-setup-choice]:not(:disabled)').length || gamepadScreen.querySelectorAll('[data-pad-setup-choice]:not(:disabled)').length) throw new Error('Steam Deck placeholder is missing or implies working controls');
     if (gamepadScreen.textContent.includes('current controller remains active') || gamepadScreen.textContent.includes('Applies to the launcher only')) throw new Error('Gamepad page retained the removed explanatory fluff');
     focusAdjacentRegion(1);
     const gamepadCard = gamepadScreen.querySelector('[data-gamepad-region]');
     if (document.activeElement !== gamepadCard) throw new Error('Gamepad page did not begin at the full card');
+    runControllerAction('next-region');
+    if (document.activeElement !== gamepadCard) throw new Error('unsupported Steam Deck card became a gamepad region');
     runControllerAction('down');
     const navigationRow = document.querySelector('[data-gamepad-choice="true"]').closest('[data-gamepad-settings-row]');
     if (document.activeElement !== navigationRow) throw new Error('D-pad did not enter the Launcher Gamepad Navigation row');

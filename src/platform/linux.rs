@@ -45,6 +45,7 @@ pub fn launch_game(
         "resolved Wine runtime"
     );
     runtime.ensure_prefix_initialized()?;
+    prepare_controller_pad(&runtime.prefix, options.gamepad_setup);
 
     // DXVK is best-effort; None selects the wined3d fallback.
     let dxvk_overrides = dxvk::ensure_dxvk(&runtime);
@@ -83,6 +84,16 @@ pub fn launch_game(
         options.verbose_wine_debug,
         dxvk_overrides.as_deref(),
     )
+}
+
+/// Best effort: runs after prefix creation so Wine's cache is readable, and never blocks Play.
+fn prepare_controller_pad(prefix: &Path, enabled: bool) {
+    let proc_devices = std::fs::read_to_string("/proc/bus/input/devices").ok();
+    let Ok(user_dir) = crate::config::dirs::retail_user_dir() else {
+        tracing::warn!("Controller pad setup = skipped (no Documents folder)");
+        return;
+    };
+    let _ = super::controller_setup::prepare(prefix, &user_dir, proc_devices.as_deref(), enabled);
 }
 
 /// Signature of [`plan_wine_extension_launch`]; tests substitute its ungated core.

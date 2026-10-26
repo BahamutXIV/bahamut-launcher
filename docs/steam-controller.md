@@ -17,6 +17,8 @@ and changes no Steam layouts.
   and that an action set which outputs gamepad buttons did not control the
   game. This page does not claim a fix for that. See
   [Controller not detected in Gaming Mode](troubleshooting.md#controller-not-detected-in-gaming-mode).
+  The opt-in [controller selection](configuration.md#controller-settings)
+  setting is untested on a Steam Deck.
 - The key assignments below follow the Type A keyboard defaults described in
   archived documentation for the 1.x client. Whether 1.23b uses Type A by
   default is not confirmed. The function column cites the 1.x client's Basic
