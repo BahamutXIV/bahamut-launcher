@@ -180,20 +180,29 @@ impl RepairShared {
     }
 
     pub fn request_pause(&self) {
-        let _guard = self.pause_lock.lock().expect("repair pause mutex poisoned");
+        let _guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if !self.phase().is_terminal() {
             self.pause_requested.store(true, Ordering::Release);
         }
     }
 
     pub fn request_resume(&self) {
-        let _guard = self.pause_lock.lock().expect("repair pause mutex poisoned");
+        let _guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         self.pause_requested.store(false, Ordering::Release);
         self.pause_changed.notify_all();
     }
 
     pub fn request_cancel(&self) {
-        let _guard = self.pause_lock.lock().expect("repair pause mutex poisoned");
+        let _guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if self.cancel_allowed.load(Ordering::Acquire) && !self.phase().is_terminal() {
             self.cancel_requested.store(true, Ordering::Release);
             self.pause_requested.store(false, Ordering::Release);
@@ -3718,5 +3727,46 @@ mod tests {
         assert_eq!(shared.phase(), RepairPhase::Cancelled);
         assert_eq!(fs::read(repaired_path).unwrap(), original_corrupt_bytes);
         assert!(!transaction.exists());
+    }
+
+    fn poison<T: Send>(mutex: &Mutex<T>) {
+        std::thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _guard = mutex.lock().unwrap();
+                    panic!("poison the mutex");
+                })
+                .join();
+        });
+        assert!(mutex.is_poisoned());
+    }
+
+    #[test]
+    fn poisoned_pause_lock_does_not_break_pause_controls() {
+        let shared = RepairShared::new();
+        poison(&shared.pause_lock);
+        shared.request_pause();
+        assert!(shared.is_pause_requested());
+        shared.request_resume();
+        assert!(!shared.is_pause_requested());
+        shared.request_pause();
+        shared.request_cancel();
+        assert!(shared.is_cancel_requested());
+        assert!(!shared.is_pause_requested());
+        shared.fail("after poison");
+        assert_eq!(shared.phase(), RepairPhase::Error);
+    }
+
+    #[test]
+    fn poisoned_error_and_context_mutexes_do_not_break_fail() {
+        let shared = RepairShared::new();
+        poison(&shared.error);
+        poison(&shared.failure_context);
+        poison(&shared.current_file);
+        shared.set_failure_context(Path::new("dest"), Path::new("cache"), "root");
+        shared.fail("after poison");
+        assert_eq!(shared.error().as_deref(), Some("after poison"));
+        assert_eq!(shared.current_file(), None);
+        assert_eq!(shared.phase(), RepairPhase::Error);
     }
 }

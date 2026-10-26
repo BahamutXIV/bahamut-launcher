@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use super::downloader::DownloadProgress;
 use super::http::{CheckpointAction, DownloadCheckpoint};
@@ -108,14 +108,20 @@ impl InstallShared {
 
     /// Pause at the next safe worker boundary.
     pub fn request_pause(&self) {
-        let _guard = self.pause_lock.lock().expect("pause mutex poisoned");
+        let _guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if !self.is_terminal() {
             self.pause_requested.store(true, Ordering::Release);
         }
     }
 
     pub fn request_resume(&self) {
-        let _guard = self.pause_lock.lock().expect("pause mutex poisoned");
+        let _guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         self.pause_requested.store(false, Ordering::Release);
         self.pause_changed.notify_all();
     }
@@ -130,13 +136,16 @@ impl InstallShared {
 
     /// Wait for Resume and report whether cancellation won while paused.
     pub(crate) fn wait_if_paused(&self) -> bool {
-        let mut guard = self.pause_lock.lock().expect("pause mutex poisoned");
+        let mut guard = self
+            .pause_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         while self.is_pause_requested() && !self.is_cancel_requested() {
             self.paused.store(true, Ordering::Release);
             guard = self
                 .pause_changed
                 .wait(guard)
-                .expect("pause mutex poisoned while waiting");
+                .unwrap_or_else(PoisonError::into_inner);
         }
         self.paused.store(false, Ordering::Release);
         self.is_cancel_requested()
@@ -151,7 +160,7 @@ impl InstallShared {
         *self
             .failure_context
             .lock()
-            .expect("install failure context mutex poisoned") = Some(FailureContext {
+            .unwrap_or_else(PoisonError::into_inner) = Some(FailureContext {
             destination: destination.display().to_string(),
             cache: cache.display().to_string(),
             content_root: content_root.to_owned(),
@@ -170,7 +179,7 @@ impl InstallShared {
         let context = self
             .failure_context
             .lock()
-            .expect("install failure context mutex poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .unwrap_or_else(|| FailureContext {
                 destination: "<unknown>".into(),
@@ -190,7 +199,9 @@ impl InstallShared {
     }
 
     fn lock_error(&self) -> std::sync::MutexGuard<'_, Option<String>> {
-        self.error_message.lock().expect("error mutex poisoned")
+        self.error_message
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -354,5 +365,73 @@ mod tests {
         ] {
             assert_eq!(Phase::from_u8(phase as u8), phase);
         }
+    }
+
+    fn poison<T: Send>(mutex: &Mutex<T>) {
+        thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _guard = mutex.lock().unwrap();
+                    panic!("poison the mutex");
+                })
+                .join();
+        });
+        assert!(mutex.is_poisoned());
+    }
+
+    #[test]
+    fn poisoned_pause_lock_does_not_break_pause_controls() {
+        let s = InstallShared::new();
+        poison(&s.pause_lock);
+        s.request_pause();
+        assert!(s.is_pause_requested());
+        s.request_resume();
+        assert!(!s.is_pause_requested());
+        assert!(!s.wait_if_paused());
+        s.request_pause();
+        s.request_cancel();
+        assert!(s.is_cancel_requested());
+        assert!(!s.is_pause_requested());
+        assert!(s.wait_if_paused());
+        s.set_phase(Phase::Cancelled);
+    }
+
+    #[test]
+    fn poisoning_while_a_waiter_is_paused_still_wakes_it() {
+        let s = InstallShared::new();
+        s.request_pause();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker_state = Arc::clone(&s);
+        let waiter = thread::spawn(move || {
+            done_tx.send(worker_state.wait_if_paused()).unwrap();
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !s.is_paused() {
+            assert!(std::time::Instant::now() < deadline, "waiter never paused");
+            thread::sleep(Duration::from_millis(1));
+        }
+        poison(&s.pause_lock);
+        s.request_cancel();
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn poisoned_error_mutex_does_not_break_fail_or_error() {
+        let s = InstallShared::new();
+        poison(&s.error_message);
+        s.fail("after poison");
+        assert_eq!(s.error().as_deref(), Some("after poison"));
+        assert_eq!(s.phase(), Phase::Error);
+    }
+
+    #[test]
+    fn poisoned_failure_context_does_not_break_fail() {
+        let s = InstallShared::new();
+        poison(&s.failure_context);
+        s.set_failure_context(Path::new("dest"), Path::new("cache"), "root");
+        s.fail("after poison");
+        assert_eq!(s.error().as_deref(), Some("after poison"));
+        assert_eq!(s.phase(), Phase::Error);
     }
 }
