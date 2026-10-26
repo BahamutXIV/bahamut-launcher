@@ -120,6 +120,81 @@ RGB digits; size must be an integer from 8 to 48. Each addon saves these
 choices in its settings file. FPS starts red; Distance and Target HP start
 white. All three start at size 13.
 
+### Enemy Cast
+
+Enemy Cast (`enemycast`) is experimental and disabled by default. Enable it
+in Extensions before the next game launch. Existing saved selections are
+preserved. `/enemycast lock` saves whether Shift-dragging is allowed.
+
+The overlay shows up to four copied enemy cast or engaged-idle rows. Unfinished
+casts take priority, followed by completed casts and then idle rows. Names fall
+back to an actor ID and `Ability <command ID>` when unknown. Incoming battle
+results supply cast-start, completion, and interruption cues. A matching
+interruption clears the cast; an engaged enemy can remain as an idle row.
+Passive/dead state, actor removal or ID reuse, and the implementation's despawn
+message clear that actor's rows. Clearing all actors, player identity or zone
+changes, and unavailable player state clear all rows.
+
+Progress is an estimate from the embedded Bahamut command catalog, with a
+3500 ms fallback and a minimum visible duration of 1800 ms. `Done` can mean
+either a matching completion message or that the estimate elapsed; it does
+not prove an observed cast duration. Completed rows remain for five seconds.
+Engaged-idle rows expire after fifteen seconds without relevant traffic.
+Live cast timing, interruption, actor reuse, transitions, and Wine behavior
+remain unverified. See [Packet evidence](#packet-evidence) for the opcode limits.
+
+### Custom Timer
+
+Custom Timer (`customtimer`) is experimental and disabled by default. Enable
+it in Extensions before the next game launch. Existing saved selections are
+preserved. `/customtimer lock` saves whether Shift-dragging is allowed.
+
+It displays one title, objective, and countdown from Bahamut-specific tagged
+incoming GenericData messages. It does not infer duty timers from chat or
+ordinary retail GenericData traffic. An open replaces the current timer;
+an objective update preserves its deadline; a close or elapsed deadline hides
+it. Disabling the addon hides its overlay but does not clear the native timer.
+The service has no zone/logout reset, so matching server close events are
+required to avoid showing a still-active timer after a transition or reload.
+Tagged delivery, duty cleanup, and transition behavior require live acceptance.
+
+The launcher accepts these application payloads, up to 192 bytes:
+
+| Bahamut tag | Parameters after the tag |
+|---|---|
+| `0x49575401` | Open: text and positive finish timestamp in Unix seconds |
+| `0x49575402` | Close: no parameters |
+| `0x49575403` | Update: objective text |
+
+Integers use type byte `0x00` and a signed 32-bit big-endian value. Strings
+use type byte `0x02`, valid UTF-8 of at most 64 bytes, and a NUL terminator.
+The parameter list ends with `0x0F` and optional zero padding. Unknown tags,
+malformed parameters, and truncated input leave the current timer unchanged.
+Open text may use `title|objective`; absent or empty components use
+`Instanced Content` and `Custom Objective` as appropriate. Whitespace is
+normalized. Remaining time starts at finish time minus the message timestamp,
+then follows a monotonic clock and rounds up to whole seconds. These tags,
+parameters, and limits are the [launcher consumer contract](../client/src/custom_timer.cpp),
+not retail timer facts.
+
+### Packet evidence
+
+The catalog reference is
+[`XIVLegacy/xivl-opcodes:opcodes.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/opcodes.json),
+in `MapClientbound`. Its `0x0133` GenericData record identifies the carrier;
+it does not establish Bahamut's timer tags. The `0x0134` actor-state byte is
+documented in
+[`XIVLegacy/xivl-opcodes:data/achievement_lifecycle.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/data/achievement_lifecycle.json),
+record `s2c-0134-actor-state`.
+
+The `0x0139` through `0x013C` battle-result routes and row capacities are
+documented in
+[`XIVLegacy/xivl-opcodes:data/battle_result_semantics.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/data/battle_result_semantics.json),
+the `rows` records for X01, X10, X18, and X00. The X18 (`0x013B`) record is
+static evidence with no retained capture. These records do not prove the
+addon's cast-start heuristics or duration estimates. Synthetic
+service tests establish consumer behavior, not live retail acceptance.
+
 ### Zone name
 
 The `zonename` addon is enabled by default. It shows an uppercase region
@@ -409,8 +484,8 @@ and clear the popup.
 ### Chat command dispatch
 
 The runtime recognizes the ASCII addon commands `/fps`, `/pos`, `/distance`,
-`/targethp`, `/wiki`, `/packetlogger`, and `/combatparser`. Addons handle their
-own arguments.
+`/targethp`, `/enemycast`, `/customtimer`, `/wiki`, `/packetlogger`, and
+`/combatparser`. Addons handle their own arguments.
 
 The host reads a bounded token vector from the retail parser. Malformed,
 unsupported, overlong, or unreadable inputs pass to retail. Recognition occurs
@@ -461,6 +536,26 @@ receives the bounded URL service.
 Setting keys contain 1-64 ASCII letters, digits, hyphens, underscores, or dots.
 Values are limited to 1024 bytes and cannot contain line breaks. Settings are
 saved in `config/addons/<id>/settings.ini`.
+
+### Experimental addon state
+
+- `bahamut.custom_timer()` is available only to addon ID `customtimer`. It
+  returns `nil` when no timer is active or the service is unavailable;
+  otherwise it returns `instance_name`, `objective`, and integer
+  `remaining_seconds`. See [Custom Timer](#custom-timer) for the tag and
+  lifetime limits.
+- `bahamut.enemy_casts()` is available only to addon ID `enemycast`. It
+  returns an array of at most four rows, or an empty table when no rows or
+  player state are available. Each row has `actor_id`, `command_id`, `name`,
+  `actor_name`, `remaining_seconds`, `duration_seconds`, `progress`, `casting`,
+  and `completed`. Unfinished casts sort by remaining time before completed
+  casts, followed by engaged-idle rows. `progress` ranges from 0 to 1;
+  `casting = false` denotes an idle row.
+  `completed` also becomes true when the estimate expires, as described in
+  [Enemy Cast](#enemy-cast).
+
+These functions expose copied state, not client memory or raw packets. Like
+other addon ID restrictions, they do not authenticate replacement packages.
 
 ### Drawing
 

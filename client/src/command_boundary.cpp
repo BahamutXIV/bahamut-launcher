@@ -126,7 +126,7 @@ bool ReadAsciiCommandBoundary(const unsigned char* input, unsigned char& boundar
     }
     const std::string_view text(storage.data(), length);
     for (const std::string_view command : {
-             "/pos", "/fps", "/wiki", "/distance", "/targethp", "/packetlogger", "/combatparser" })
+             "/pos", "/fps", "/wiki", "/distance", "/enemycast", "/targethp", "/customtimer", "/packetlogger", "/combatparser" })
     {
         if (text.starts_with(command))
         {
@@ -269,7 +269,7 @@ bool ReadCanonicalAddonCommand(const void* token, const void* tokenRangeBegin, c
         return false;
     }
     for (const std::string_view command : {
-             "/distance", "/targethp" })
+             "/distance", "/enemycast", "/targethp", "/customtimer" })
     {
         if (tokens[0] == command)
         {
@@ -685,7 +685,8 @@ CommandBoundaryInstallResult CommandBoundary::Install()
                    : CommandBoundaryInstallResult::RollbackFailed;
     }
     if (addonHost_ == nullptr || (!addonHost_->IsLoaded("pos") && !addonHost_->IsLoaded("fps") && !addonHost_->IsLoaded("wiki") &&
-                                  !addonHost_->IsLoaded("distance") && !addonHost_->IsLoaded("targethp") &&
+                                  !addonHost_->IsLoaded("distance") && !addonHost_->IsLoaded("enemycast") &&
+                                  !addonHost_->IsLoaded("targethp") && !addonHost_->IsLoaded("customtimer") &&
                                   !addonHost_->IsLoaded("combatparser")))
     {
         return CommandBoundaryInstallResult::Disabled;

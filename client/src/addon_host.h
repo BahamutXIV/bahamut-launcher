@@ -18,6 +18,8 @@ namespace bahamut_client
 
 class PlayerStateService;
 class TargetDistanceService;
+class CustomTimerService;
+class EnemyCastService;
 class ActorNameService;
 
 } // namespace bahamut_client
@@ -75,6 +77,8 @@ public:
 
     void SetPlayerStateService(bahamut_client::PlayerStateService* playerState);
     void SetTargetDistanceService(bahamut_client::TargetDistanceService* targetDistance);
+    void SetCustomTimerService(bahamut_client::CustomTimerService* customTimer);
+    void SetEnemyCastService(bahamut_client::EnemyCastService* enemyCast);
     void SetActorNameService(bahamut_client::ActorNameService* actorNames);
     void SetClipboardSink(const AddonClipboardSink& sink);
     void SetChatSink(const AddonChatSink& sink);
@@ -109,6 +113,8 @@ private:
     static int LuaPlayerState(lua_State* state);
     static int LuaTargetDistance(lua_State* state);
     static int LuaTargetHp(lua_State* state);
+    static int LuaCustomTimer(lua_State* state);
+    static int LuaEnemyCasts(lua_State* state);
     static int LuaWindow(lua_State* state);
     static int LuaRawText(lua_State* state);
     static int LuaClipboardSet(lua_State* state);
@@ -130,6 +136,8 @@ private:
         AddonHost*                             owner,
         bahamut_client::PlayerStateService*    playerState,
         bahamut_client::TargetDistanceService* targetDistance,
+        bahamut_client::CustomTimerService*    customTimer,
+        bahamut_client::EnemyCastService*      enemyCast,
         const AddonClipboardSink*              clipboardSink,
         const AddonChatSink*                   chatSink,
         const AddonUrlSink*                    urlSink);
@@ -175,6 +183,8 @@ private:
     std::filesystem::path                  chatLogsRoot_;
     bahamut_client::PlayerStateService*    playerState_    = nullptr;
     bahamut_client::TargetDistanceService* targetDistance_ = nullptr;
+    bahamut_client::CustomTimerService*    customTimer_    = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast_      = nullptr;
     AddonClipboardSink                     clipboardSink_;
     AddonChatSink                          chatSink_;
     AddonUrlSink                           urlSink_;

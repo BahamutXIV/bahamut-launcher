@@ -771,6 +771,7 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
     const bool playerStateHookInstalled = playerState != nullptr && playerState->IsInstalled();
     const bool packetObserverRequired   = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr &&
                                           (addonHost->IsLoaded("distance") || addonHost->IsLoaded("targethp") ||
+                                           addonHost->IsLoaded("enemycast") || addonHost->IsLoaded("customtimer") ||
                                            addonHost->IsLoaded("zonename") || addonHost->IsLoaded("packetlogger") ||
                                            addonHost->IsLoaded("combatparser") || addonHost->TargetlinesEnabled() ||
                                            bahamut_client::TargetlinesProbeRequested());

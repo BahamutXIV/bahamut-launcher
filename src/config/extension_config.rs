@@ -111,7 +111,9 @@ impl Default for ExtensionsConfig {
             addons: [
                 ("chatlogs", true),
                 ("combatparser", false),
+                ("customtimer", false),
                 ("distance", true),
+                ("enemycast", false),
                 ("fps", true),
                 ("packetlogger", false),
                 ("pos", true),
@@ -873,7 +875,9 @@ mod tests {
             [
                 ("chatlogs", true),
                 ("combatparser", false),
+                ("customtimer", false),
                 ("distance", true),
+                ("enemycast", false),
                 ("fps", true),
                 ("packetlogger", false),
                 ("pos", true),
@@ -892,10 +896,10 @@ mod tests {
             .unwrap();
         let reparsed = ExtensionsConfig::from_ini_str(&config.to_ini_string()).unwrap();
         assert_eq!(reparsed, config);
-        assert_eq!(reparsed.addons[9].id, "zeta");
-        assert!(reparsed.addons[9].enabled);
-        assert_eq!(reparsed.addons[10].id, "alpha");
-        assert!(!reparsed.addons[10].enabled);
+        assert_eq!(reparsed.addons[11].id, "zeta");
+        assert!(reparsed.addons[11].enabled);
+        assert_eq!(reparsed.addons[12].id, "alpha");
+        assert!(!reparsed.addons[12].enabled);
         assert!(!reparsed.plugin_enabled(SCREENSHOT_PLUGIN_ID));
         assert!(reparsed.plugin_enabled(CAMERA_ZOOM_PLUGIN_ID));
     }

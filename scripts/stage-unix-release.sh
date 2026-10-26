@@ -81,7 +81,9 @@ skeleton_dirs=(
     "addons/zonename"
     "addons/packetlogger"
     "addons/combatparser"
+    "addons/customtimer"
     "addons/distance"
+    "addons/enemycast"
     "addons/targethp"
     "addons/fps"
     "addons/pos"
@@ -124,7 +126,7 @@ add_copy "$repo_root/src-tauri/ui/assets/licenses/Cinzel-OFL.txt" "$destination/
 add_copy "$repo_root/src-tauri/ui/assets/licenses/JetBrainsMono-OFL.txt" "$destination/licenses/JetBrainsMono-OFL.txt"
 add_copy "$repo_root/src-tauri/ui/assets/licenses/MinGW-w64-runtime-COPYING.txt" "$destination/licenses/MinGW-w64-runtime-COPYING.txt"
 
-addon_names="chatlogs zonename packetlogger combatparser distance targethp fps pos wiki targetlines"
+addon_names="chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines"
 for name in $addon_names; do
     add_copy "$repo_root/addons/$name/addon.toml" "$destination/addons/$name/addon.toml"
     add_copy "$repo_root/addons/$name/$name.lua" "$destination/addons/$name/$name.lua"
@@ -222,8 +224,12 @@ expected_files=(
     'addons/packetlogger/packetlogger.lua'
     'addons/combatparser/addon.toml'
     'addons/combatparser/combatparser.lua'
+    'addons/customtimer/addon.toml'
+    'addons/customtimer/customtimer.lua'
     'addons/distance/addon.toml'
     'addons/distance/distance.lua'
+    'addons/enemycast/addon.toml'
+    'addons/enemycast/enemycast.lua'
     'addons/targethp/addon.toml'
     'addons/targethp/targethp.lua'
     'addons/fps/addon.toml'
@@ -246,7 +252,9 @@ expected_dirs=(
     "addons/zonename/"
     "addons/packetlogger/"
     "addons/combatparser/"
+    "addons/customtimer/"
     "addons/distance/"
+    "addons/enemycast/"
     "addons/targethp/"
     "addons/fps/"
     "addons/pos/"
