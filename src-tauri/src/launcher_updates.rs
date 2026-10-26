@@ -7,10 +7,15 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use bahamut_launcher::atomic_fs::{is_link_or_reparse, rename_replace};
 use bahamut_launcher::content::http::{self, CheckpointAction, ObjectSpec};
+use bahamut_launcher::digest::{is_lower_sha256_hex, sha256_hex, sha256_reader};
 use bahamut_launcher::release::{
     self, Channel, FileOwnership, Product, ReleaseInventory, ReleaseMetadata, ReleaseScope, Target,
     VerifiedRelease,
+};
+use bahamut_launcher::update_helper::{
+    HELPER_LOCK_FILE, OFFICIAL_OVERLAY_MANIFEST, PENDING_FILE, POINTER_FILE,
 };
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use serde::{Deserialize, Serialize};
@@ -23,13 +28,9 @@ const RECEIPT_DIR: &str = "config/launcher-release-receipts";
 const STATE_FILE: &str = "config/launcher-release-state.json";
 const INSTALLED_FILE: &str = "config/launcher-installed.json";
 const OFFER_FILE: &str = "config/launcher-update-offer.json";
-const PENDING_FILE: &str = "config/launcher-update-pending.json";
-const HELPER_POINTER: &str = "config/launcher-update-state.json";
-const HELPER_LOCK_FILE: &str = "config/launcher-update-helper.lock";
 const ARTIFACT_CACHE: &str = "cache/launcher-updates";
 const UPDATE_HELPER_FILE: &str = "bahamut-update-helper.exe";
 const OFFICIAL_OVERLAY_ROOT: &str = "plugins/dats/bahamut-dats-overlay/";
-const OFFICIAL_OVERLAY_MANIFEST: &str = "plugins/dats/bahamut-dats-overlay/overlay.toml";
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 const MAX_METADATA_BYTES: usize = release::MAX_METADATA_BYTES;
 const MAX_SIGNATURE_BYTES: usize = release::ED25519_SIGNATURE_BYTES;
@@ -114,7 +115,7 @@ impl LauncherUpdateConfig {
                     "Could not inspect launcher config directory: {error}"
                 ));
             }
-            Ok(details) if details.is_dir() && !is_reparse(&details) => {}
+            Ok(details) if details.is_dir() && !is_link_or_reparse(&details) => {}
             Ok(_) => return Err("Launcher config directory is not a plain directory.".into()),
         }
         let path = root.join("config").join(CONFIG_FILE);
@@ -561,7 +562,7 @@ pub(crate) fn recover_failed_launcher_update(
     if let Some(pending) = &pending {
         ensure_pending_matches_target(pending, &target)?;
     }
-    let pointer_path = target.join(HELPER_POINTER);
+    let pointer_path = target.join(POINTER_FILE);
     let pointer_exists = regular_file_exists(&pointer_path, "helper transaction pointer")?;
     if !pointer_exists {
         if let Some(pending) = pending {
@@ -695,7 +696,7 @@ pub(crate) fn recover_failed_launcher_update(
 
 fn local_status(root: &Path) -> Result<LauncherUpdateStatus, String> {
     let config = LauncherUpdateConfig::load(root)?;
-    if regular_file_exists(&root.join(HELPER_POINTER), "helper transaction pointer")?
+    if regular_file_exists(&root.join(POINTER_FILE), "helper transaction pointer")?
         || read_pending(root)?.is_some()
     {
         return Err("A launcher update handoff is pending. Restart to confirm the update or recover the previous release.".into());
@@ -778,7 +779,7 @@ fn cached_launcher_artifact(root: &Path, metadata: &ReleaseMetadata) -> Option<P
         metadata.artifact.sha256, metadata.artifact.length
     ));
     let details = fs::symlink_metadata(&path).ok()?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || is_link_or_reparse(&details) {
         return None;
     }
     release::verify_artifact_file(metadata, &path).ok()?;
@@ -1017,7 +1018,7 @@ fn persist_receipt(
 }
 
 fn load_receipt(root: &Path, key: &[u8], hash: &str) -> Result<Receipt, String> {
-    if !valid_sha256(hash) {
+    if !is_lower_sha256_hex(hash) {
         return Err("Launcher release receipt identity is invalid.".into());
     }
     let metadata = release::read_metadata_file(&receipt_metadata_path(root, hash))
@@ -1053,7 +1054,7 @@ fn inspect_launcher_file(
         };
         current.push(name);
         match fs::symlink_metadata(&current) {
-            Ok(details) if details.is_dir() && !is_reparse(&details) => {}
+            Ok(details) if details.is_dir() && !is_link_or_reparse(&details) => {}
             Ok(_) => return Ok(Some("unresolved")),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(Some("missing"));
@@ -1066,7 +1067,7 @@ fn inspect_launcher_file(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Some("missing")),
         Err(_) => return Ok(Some("unresolved")),
     };
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || is_link_or_reparse(&details) {
         return Ok(Some("unresolved"));
     }
     let (length, hash) = match hash_file(path) {
@@ -1107,7 +1108,7 @@ fn staged_helper_path(stage: &Path, metadata: &ReleaseMetadata) -> Result<PathBu
     let path = stage.join(UPDATE_HELPER_FILE);
     let details = fs::symlink_metadata(&path)
         .map_err(|_| "The staged bahamut-update-helper.exe is missing.".to_owned())?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || is_link_or_reparse(&details) {
         return Err("The staged bahamut-update-helper.exe is not a regular file.".into());
     }
     let (length, hash) = hash_file(&path)?;
@@ -1217,7 +1218,7 @@ fn create_sibling_stage(target: &Path) -> Result<PathBuf, String> {
 }
 
 fn reject_pending_transaction(root: &Path) -> Result<(), String> {
-    if regular_file_exists(&root.join(HELPER_POINTER), "helper transaction pointer")? {
+    if regular_file_exists(&root.join(POINTER_FILE), "helper transaction pointer")? {
         return Err("A launcher update transaction is pending. Restart the launcher to confirm it or recover the previous version first.".into());
     }
     if read_pending(root)?.is_some() {
@@ -1236,8 +1237,8 @@ fn read_pending(root: &Path) -> Result<Option<PendingUpdate>, String> {
     let pending: PendingUpdate = serde_json::from_slice(&bytes)
         .map_err(|_| "Launcher update receipt JSON is invalid.".to_owned())?;
     if pending.schema_version != 1
-        || !valid_sha256(&pending.previous_metadata_sha256)
-        || !valid_sha256(&pending.new_metadata_sha256)
+        || !is_lower_sha256_hex(&pending.previous_metadata_sha256)
+        || !is_lower_sha256_hex(&pending.new_metadata_sha256)
         || pending.helper_pid == Some(0)
     {
         return Err("Launcher update receipt fields are invalid.".into());
@@ -1301,7 +1302,7 @@ pub(crate) fn finalize_recovered_launcher_update(root: &Path) -> Result<(), Stri
         .ok_or_else(|| "No recovered launcher transaction was supplied.".to_owned())?;
     let target = checked_root(root)?;
     let _lock = UpdateLock::acquire(&target)?;
-    if regular_file_exists(&target.join(HELPER_POINTER), "helper transaction pointer")? {
+    if regular_file_exists(&target.join(POINTER_FILE), "helper transaction pointer")? {
         return Err("The recovered launcher transaction is still pending.".into());
     }
     let Some(pending) = read_pending(&target)? else {
@@ -1427,7 +1428,7 @@ fn read_pointer(path: &Path, label: &str) -> Result<Option<ReceiptPointer>, Stri
         .map_err(|error| format!("Could not read {label}: {error}"))?;
     let pointer: ReceiptPointer =
         serde_json::from_slice(&bytes).map_err(|_| format!("{label} JSON is invalid."))?;
-    if pointer.schema_version != 1 || !valid_sha256(&pointer.metadata_sha256) {
+    if pointer.schema_version != 1 || !is_lower_sha256_hex(&pointer.metadata_sha256) {
         return Err(format!("{label} fields are invalid."));
     }
     Ok(Some(pointer))
@@ -1490,16 +1491,11 @@ fn write_replace_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
         return Err(format!("Could not write launcher update state: {error}"));
     }
     drop(output);
-    if let Err(error) = replace_file(&temp, path) {
+    if let Err(error) = rename_replace(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(format!("Could not publish launcher update state: {error}"));
     }
     Ok(())
-}
-
-#[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
 }
 
 #[cfg(not(windows))]
@@ -1528,33 +1524,6 @@ fn move_new_file(source: &Path, destination: &Path) -> io::Result<()> {
             windows::core::PCWSTR(source.as_ptr()),
             windows::core::PCWSTR(destination.as_ptr()),
             MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(io::Error::other)
-    }
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain([0])
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain([0])
-        .collect::<Vec<_>>();
-    unsafe {
-        MoveFileExW(
-            windows::core::PCWSTR(source.as_ptr()),
-            windows::core::PCWSTR(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
         )
         .map_err(io::Error::other)
     }
@@ -1589,7 +1558,7 @@ fn remove_regular_file_if_present(path: &Path) -> Result<(), String> {
 fn remove_empty_directory(path: &Path) {
     if let Ok(details) = fs::symlink_metadata(path)
         && details.is_dir()
-        && !is_reparse(&details)
+        && !is_link_or_reparse(&details)
     {
         let _ = fs::remove_dir(path);
     }
@@ -1597,7 +1566,7 @@ fn remove_empty_directory(path: &Path) {
 
 fn regular_file_exists(path: &Path, label: &str) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
-        Ok(details) if details.is_file() && !is_reparse(&details) => Ok(true),
+        Ok(details) if details.is_file() && !is_link_or_reparse(&details) => Ok(true),
         Ok(_) => Err(format!("{label} is not a regular file.")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(format!("Could not inspect {label}: {error}")),
@@ -1606,7 +1575,7 @@ fn regular_file_exists(path: &Path, label: &str) -> Result<bool, String> {
 
 fn read_regular_file(path: &Path, maximum: usize, label: &str) -> io::Result<Vec<u8>> {
     let details = fs::symlink_metadata(path)?;
-    if !details.is_file() || is_reparse(&details) || details.len() > maximum as u64 {
+    if !details.is_file() || is_link_or_reparse(&details) || details.len() > maximum as u64 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("{label} is not a bounded regular file"),
@@ -1651,7 +1620,7 @@ fn ensure_plain_relative_directory(root: &Path, relative: &Path) -> Result<(), S
         };
         current.push(name);
         match fs::symlink_metadata(&current) {
-            Ok(details) if details.is_dir() && !is_reparse(&details) => {}
+            Ok(details) if details.is_dir() && !is_link_or_reparse(&details) => {}
             Ok(_) => {
                 return Err(format!(
                     "Launcher directory is not a plain directory: {}",
@@ -1680,7 +1649,7 @@ fn ensure_existing_directory(path: &Path, label: &str) -> Result<(), String> {
     ensure_path_has_no_reparse_ancestors(path)?;
     let details = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect {label}: {error}"))?;
-    if !details.is_dir() || is_reparse(&details) {
+    if !details.is_dir() || is_link_or_reparse(&details) {
         return Err(format!("{label} is not a plain directory."));
     }
     Ok(())
@@ -1707,7 +1676,7 @@ fn ensure_path_has_no_reparse_ancestors(path: &Path) -> Result<(), String> {
                         current.display()
                     )
                 })?;
-                if !details.is_dir() || is_reparse(&details) {
+                if !details.is_dir() || is_link_or_reparse(&details) {
                     return Err(format!(
                         "Launcher path contains a reparse point or non-directory parent: {}",
                         current.display()
@@ -1755,32 +1724,7 @@ fn normalize_path(path: &Path) -> Result<PathBuf, String> {
 fn hash_file(path: &Path) -> Result<(u64, String), String> {
     let mut file =
         File::open(path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    let mut digest = Sha256::new();
-    let mut length = 0_u64;
-    let mut buffer = [0_u8; IO_CHUNK];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("Could not hash {}: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        length = length
-            .checked_add(read as u64)
-            .ok_or_else(|| "Launcher file length overflowed.".to_owned())?;
-        digest.update(&buffer[..read]);
-    }
-    Ok((length, format!("{:x}", digest.finalize())))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    sha256_reader(&mut file).map_err(|error| format!("Could not hash {}: {error}", path.display()))
 }
 
 fn validate_version(value: &str) -> Result<(), String> {
@@ -1816,17 +1760,6 @@ fn compare_versions(left: &str, right: &str) -> Result<std::cmp::Ordering, Strin
     Ok(version_tuple(left)?.cmp(&version_tuple(right)?))
 }
 
-#[cfg(windows)]
-fn is_reparse(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
 struct UpdateLock(File);
 
 fn acquire_helper_lock(
@@ -1843,7 +1776,7 @@ fn acquire_helper_lock(
     })?;
     let details = fs::symlink_metadata(&path)
         .map_err(|error| format!("Could not inspect launcher update helper lock: {error}"))?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || is_link_or_reparse(&details) {
         return Err("Launcher update helper lock is not a regular file.".into());
     }
     Ok(lock)
@@ -1880,7 +1813,7 @@ fn acquire_helper_lock_wait(
         .map_err(|error| format!("Could not wait for launcher update helper lock: {error}"))?;
     let details = fs::symlink_metadata(&path)
         .map_err(|error| format!("Could not inspect launcher update helper lock: {error}"))?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || is_link_or_reparse(&details) {
         return Err("Launcher update helper lock is not a regular file.".into());
     }
     Ok(lock)
@@ -1898,7 +1831,7 @@ impl UpdateLock {
             .open(&path)
             .map_err(|error| format!("Could not open launcher update lock: {error}"))?;
         let details = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-        if !details.is_file() || is_reparse(&details) {
+        if !details.is_file() || is_link_or_reparse(&details) {
             return Err("Launcher update lock is not a regular file.".into());
         }
         file.lock()
