@@ -265,6 +265,12 @@ pub(crate) struct LauncherBehaviorView {
     pub(crate) native_resolution_override: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct PadSetupView {
+    pub(crate) supported: bool,
+    pub(crate) enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GameSettingsPayload {

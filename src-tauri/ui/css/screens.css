@@ -359,8 +359,8 @@
     .gamepad-config-row { display:flex; justify-content:center; margin-top:auto; padding-top:42px; }
     .gamepad-card:not(.gamepad-card--stub) .gamepad-config-row { margin-top:0; }
     .gamepad-config-action { width:min(100%,280px); min-height:50px; }
-    .gamepad-card--stub .gamepad-setting { opacity:var(--disabled-opacity); }
-    .gamepad-card--stub .choice-option, .gamepad-card--stub .settings-action { pointer-events:none; }
+    .gamepad-card--stub .gamepad-setting:not([data-pad-setup-supported]) { opacity:var(--disabled-opacity); }
+    .gamepad-card--stub .gamepad-setting:not([data-pad-setup-supported]) .choice-option, .gamepad-card--stub .settings-action { pointer-events:none; }
     @media (max-width:900px) {
       .settings-page { padding-right:0; padding-left:0; }
       .settings-tabs { align-self:stretch; overflow-x:auto; }
