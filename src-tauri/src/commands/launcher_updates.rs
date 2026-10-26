@@ -1,6 +1,8 @@
 use bahamut_launcher::config::dirs;
 
-use crate::launcher_updates::{self, LauncherUpdateResult, LauncherUpdateStatus};
+use crate::launcher_updates::{
+    self, LauncherUpdateResult, LauncherUpdateState, LauncherUpdateStatus,
+};
 use crate::state::{BackupIpcState, GameIpcState};
 
 #[tauri::command]
@@ -8,7 +10,7 @@ pub(crate) fn get_launcher_update_status() -> LauncherUpdateStatus {
     match dirs::state_root() {
         Ok(root) => launcher_updates::get_launcher_update_status(&root),
         Err(error) => LauncherUpdateStatus {
-            state: "blocked".into(),
+            state: LauncherUpdateState::Blocked,
             message: format!("Could not resolve the launcher state directory: {error}"),
             installed_version: None,
             offered_version: None,
@@ -54,7 +56,7 @@ pub(crate) async fn apply_launcher_update(
 
     if result
         .as_ref()
-        .is_ok_and(|result| result.state == "handoff")
+        .is_ok_and(|result| result.state == LauncherUpdateState::Handoff)
     {
         // Seal both admission gates while the reservations still cover the app.
         game.request_shutdown();
