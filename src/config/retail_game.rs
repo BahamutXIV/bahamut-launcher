@@ -7,9 +7,8 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::config::atomic_write::temporary_path;
 use crate::config::launcher_ini;
 use crate::config::preferences::{
     DisplayMode, GameSettings, Multisampling, SUPPORTED_RESOLUTIONS, ShadowDetail,
@@ -19,8 +18,6 @@ use crate::config::preferences::{
 pub const CONFIG_SYS_SIZE: usize = 684;
 pub const CONFIG_SYS_STAMP: u32 = 0x2012_0419;
 pub const BACKUP_SUFFIX: &str = ".bak";
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, thiserror::Error)]
 pub enum RetailGameError {
@@ -212,7 +209,7 @@ fn apply_image_for_preparation(
             return Err(error.into());
         }
     };
-    if let Err(error) = temporary_file.write_all(&updated).and_then(|_| {
+    if let Err(error) = temporary_file.write_all(&updated).and_then(|()| {
         temporary_file.flush()?;
         temporary_file.sync_all()
     }) {
@@ -264,7 +261,7 @@ fn create_at_path_for_preparation(
             return Err(error.into());
         }
     };
-    if let Err(error) = temporary_file.write_all(&image).and_then(|_| {
+    if let Err(error) = temporary_file.write_all(&image).and_then(|()| {
         temporary_file.flush()?;
         temporary_file.sync_all()
     }) {
@@ -502,20 +499,6 @@ fn write_word(bytes: &mut [u8], index: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-fn temporary_path(path: &Path) -> PathBuf {
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos() as u64);
-    let mut temporary = path.as_os_str().to_os_string();
-    temporary.push(format!(
-        ".tmp-{}-{}",
-        std::process::id(),
-        timestamp ^ counter
-    ));
-    PathBuf::from(temporary)
-}
-
 fn create_temporary(temporary: &Path, original: &Path) -> io::Result<File> {
     let file = OpenOptions::new()
         .write(true)
@@ -536,8 +519,8 @@ fn stage_backup(backup: &Path, original: &[u8]) -> Result<(PathBuf, bool), Retai
         .open(&staged)?;
     if let Err(error) = file
         .write_all(original)
-        .and_then(|_| file.flush())
-        .and_then(|_| file.sync_all())
+        .and_then(|()| file.flush())
+        .and_then(|()| file.sync_all())
     {
         drop(file);
         let _ = fs::remove_file(&staged);
