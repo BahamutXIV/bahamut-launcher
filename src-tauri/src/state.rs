@@ -1,10 +1,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 
 use bahamut_launcher::content::InstallShared;
 use bahamut_launcher::content::repair::RepairShared;
 use bahamut_launcher::platform::LaunchedGame;
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 pub(crate) struct InstallRun {
     pub(crate) shared: Arc<InstallShared>,
@@ -62,19 +66,13 @@ impl ContentIpcState {
         }
 
         self.shutdown_pending.store(true, Ordering::Release);
-        let mut guard = self
-            .install
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = lock(&self.install);
         let install_worker = guard.as_mut().and_then(|run| {
             run.shared.request_cancel();
             run.worker.take()
         });
         drop(guard);
-        let mut repair_guard = self
-            .repair
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut repair_guard = lock(&self.repair);
         let repair_worker = repair_guard.as_mut().and_then(|run| {
             run.shared.request_cancel();
             run.worker.take()
@@ -131,10 +129,7 @@ impl GameIpcState {
     }
 
     fn reserve(&self, operation: GameRun) -> Option<GameReservation> {
-        let mut run = self
-            .run
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut run = lock(&self.run);
         if self.closing.load(Ordering::Acquire) {
             return None;
         }
@@ -154,10 +149,7 @@ impl GameIpcState {
     }
 
     pub(crate) fn is_active(&self) -> bool {
-        let mut run = self
-            .run
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut run = lock(&self.run);
         if matches!(&*run, GameRun::Running(game) if game.has_exited()) {
             *run = GameRun::Idle;
         }
@@ -165,10 +157,7 @@ impl GameIpcState {
     }
 
     pub(crate) fn is_idle(&self) -> bool {
-        let mut run = self
-            .run
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut run = lock(&self.run);
         if matches!(&*run, GameRun::Running(game) if game.has_exited()) {
             *run = GameRun::Idle;
         }
@@ -177,18 +166,18 @@ impl GameIpcState {
 
     /// Seal admission before deciding whether native close must wait.
     pub(crate) fn request_shutdown(&self) -> bool {
-        let run = self.run.lock().unwrap_or_else(|error| error.into_inner());
+        let run = lock(&self.run);
         self.closing.store(true, Ordering::Release);
         matches!(&*run, GameRun::Starting | GameRun::Restoring)
     }
 
     pub(crate) fn wait_for_worker(&self) {
-        let mut run = self.run.lock().unwrap_or_else(|error| error.into_inner());
+        let mut run = lock(&self.run);
         while matches!(&*run, GameRun::Starting | GameRun::Restoring) {
             run = self
                 .completed
                 .wait(run)
-                .unwrap_or_else(|error| error.into_inner());
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 }
@@ -202,10 +191,7 @@ pub(crate) struct GameReservation {
 
 impl GameReservation {
     pub(crate) fn complete_launch(mut self, game: LaunchedGame) {
-        let mut run = self
-            .run
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut run = lock(&self.run);
         if matches!(&*run, GameRun::Starting) {
             *run = GameRun::Running(game);
             // An immediately exited game can admit a new reservation after this lock drops.
@@ -216,10 +202,7 @@ impl GameReservation {
 
 impl Drop for GameReservation {
     fn drop(&mut self) {
-        let mut run = self
-            .run
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut run = lock(&self.run);
         if !self.published && matches!(&*run, GameRun::Starting | GameRun::Restoring) {
             *run = GameRun::Idle;
         }
@@ -242,10 +225,7 @@ pub(crate) struct BackupIpcState {
 
 impl BackupIpcState {
     pub(crate) fn begin(&self) -> Result<BackupReservation, String> {
-        let mut operation = self
-            .operation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let mut operation = lock(&self.operation);
         if operation.closing {
             return Err("The launcher is closing. Wait for it to finish.".to_owned());
         }
@@ -260,32 +240,23 @@ impl BackupIpcState {
     }
 
     pub(crate) fn is_idle(&self) -> bool {
-        let operation = self
-            .operation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let operation = lock(&self.operation);
         !operation.closing && !operation.active
     }
 
     pub(crate) fn request_shutdown(&self) -> bool {
-        let mut operation = self
-            .operation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let mut operation = lock(&self.operation);
         operation.closing = true;
         operation.active
     }
 
     pub(crate) fn wait_for_worker(&self) {
-        let mut operation = self
-            .operation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let mut operation = lock(&self.operation);
         while operation.active {
             operation = self
                 .completed
                 .wait(operation)
-                .unwrap_or_else(|error| error.into_inner());
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 }
@@ -297,10 +268,7 @@ pub(crate) struct BackupReservation {
 
 impl Drop for BackupReservation {
     fn drop(&mut self) {
-        let mut operation = self
-            .operation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let mut operation = lock(&self.operation);
         operation.active = false;
         self.completed.notify_all();
     }
