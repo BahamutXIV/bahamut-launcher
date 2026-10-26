@@ -13,7 +13,6 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use crate::release::{
@@ -711,7 +710,7 @@ fn repair_snapshot_identity_map(
     let mut identities = BTreeMap::new();
     for identity in &snapshot.previous_managed_files {
         if !present.contains(identity.path.as_str())
-            || !valid_sha256(&identity.sha256)
+            || !crate::digest::is_lower_sha256_hex(&identity.sha256)
             || identities
                 .insert(identity.path.clone(), identity.clone())
                 .is_some()
@@ -1252,7 +1251,10 @@ fn reject_legacy_overlay_extras(
     for entry in entries {
         let entry = entry?;
         let details = fs::symlink_metadata(entry.path())?;
-        if entry.file_name() != "overlay.toml" || !details.is_file() || is_reparse(&details) {
+        if entry.file_name() != "overlay.toml"
+            || !details.is_file()
+            || crate::atomic_fs::is_link_or_reparse(&details)
+        {
             return Err(invalid(
                 "The legacy official overlay has extra files. Remove those files from plugins/dats/bahamut-dats-overlay (leave overlay.toml), or extract the new launcher into an empty folder, then retry.",
             ));
@@ -1413,10 +1415,10 @@ fn validate_old_managed_files(
 fn inspect_file(path: &Path) -> Result<Option<InventoryFile>> {
     match fs::symlink_metadata(path) {
         Ok(details) => {
-            if !details.is_file() || is_reparse(&details) {
+            if !details.is_file() || crate::atomic_fs::is_link_or_reparse(&details) {
                 return Err(invalid("Managed path is not a regular file."));
             }
-            let (length, sha256) = hash_file(path)?;
+            let (length, sha256) = crate::digest::sha256_reader(&mut File::open(path)?)?;
             Ok(Some(InventoryFile {
                 path: String::new(),
                 length,
@@ -1445,24 +1447,6 @@ fn same_bytes(actual: &InventoryFile, expected: &InventoryFile) -> bool {
     actual.length == expected.length && actual.sha256 == expected.sha256
 }
 
-fn hash_file(path: &Path) -> Result<(u64, String)> {
-    let mut input = File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut length = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = input.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        length = length
-            .checked_add(read as u64)
-            .ok_or_else(|| invalid("Managed file length overflows."))?;
-        digest.update(&buffer[..read]);
-    }
-    Ok((length, format!("{:x}", digest.finalize())))
-}
-
 fn install_file_atomically(
     transaction: &Path,
     target: &Path,
@@ -1472,7 +1456,7 @@ fn install_file_atomically(
     ensure_safe_parent(target, destination)?;
     let temporary = unique_path(transaction, ".bahamut-replace-");
     copy_new_file(source, &temporary)?;
-    let result = replace_file(&temporary, destination);
+    let result = crate::atomic_fs::rename_replace(&temporary, destination);
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
@@ -1481,7 +1465,7 @@ fn install_file_atomically(
 
 fn copy_new_file(source: &Path, destination: &Path) -> Result<()> {
     let details = fs::symlink_metadata(source)?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || crate::atomic_fs::is_link_or_reparse(&details) {
         return Err(invalid("Transaction input is not a regular file."));
     }
     let parent = destination
@@ -1495,7 +1479,7 @@ fn copy_new_file(source: &Path, destination: &Path) -> Result<()> {
         .open(destination)?;
     io::copy(&mut input, &mut output)?;
     output.sync_all()?;
-    sync_parent(parent)?;
+    crate::atomic_fs::sync_directory(parent)?;
     Ok(())
 }
 
@@ -1514,7 +1498,7 @@ fn create_safe_directories(root: &Path, destination: &Path) -> Result<()> {
         current.push(part);
         match fs::symlink_metadata(&current) {
             Ok(details) => {
-                if !details.is_dir() || is_reparse(&details) {
+                if !details.is_dir() || crate::atomic_fs::is_link_or_reparse(&details) {
                     return Err(invalid("Managed path contains a non-directory parent."));
                 }
             }
@@ -1555,7 +1539,7 @@ fn ensure_safe_parent(root: &Path, destination: &Path) -> Result<()> {
         current.push(part);
         match fs::symlink_metadata(&current) {
             Ok(details) => {
-                if !details.is_dir() || is_reparse(&details) {
+                if !details.is_dir() || crate::atomic_fs::is_link_or_reparse(&details) {
                     return Err(invalid("Managed destination has a reparse parent."));
                 }
             }
@@ -1582,7 +1566,7 @@ fn ensure_safe_inventory_path(root: &Path, relative: &str, create: bool) -> Resu
         current.push(part);
         match fs::symlink_metadata(&current) {
             Ok(details) => {
-                if !details.is_dir() || is_reparse(&details) {
+                if !details.is_dir() || crate::atomic_fs::is_link_or_reparse(&details) {
                     return Err(invalid("Managed path has a reparse parent."));
                 }
             }
@@ -1601,7 +1585,7 @@ fn acquire_transaction_lock(target: &Path) -> Result<crate::atomic_fs::Exclusive
     let path = target.join(HELPER_LOCK_FILE);
     let lock = crate::atomic_fs::lock_exclusive(&path)?;
     let details = fs::symlink_metadata(&path)?;
-    if !details.is_file() || is_reparse(&details) {
+    if !details.is_file() || crate::atomic_fs::is_link_or_reparse(&details) {
         return Err(invalid(
             "Launcher update helper lock is not a regular file.",
         ));
@@ -1632,8 +1616,8 @@ fn validate_launcher_handoff(
     if receipt.schema_version != 1
         || receipt.helper_pid != Some(std::process::id())
         || receipt.operation != mode
-        || !valid_sha256(&receipt.previous_metadata_sha256)
-        || !valid_sha256(&receipt.new_metadata_sha256)
+        || !crate::digest::is_lower_sha256_hex(&receipt.previous_metadata_sha256)
+        || !crate::digest::is_lower_sha256_hex(&receipt.new_metadata_sha256)
         || receipt.previous_metadata_sha256 != old_metadata_sha256
         || receipt.new_metadata_sha256 != new_metadata_sha256
         || !same_path(&receipt.target, target)?
@@ -1677,7 +1661,10 @@ fn same_path(left: &Path, right: &Path) -> Result<bool> {
 
 fn read_regular_bounded(path: &Path, max: usize, label: &str) -> Result<Vec<u8>> {
     let details = fs::symlink_metadata(path)?;
-    if !details.is_file() || is_reparse(&details) || details.len() > max as u64 {
+    if !details.is_file()
+        || crate::atomic_fs::is_link_or_reparse(&details)
+        || details.len() > max as u64
+    {
         return Err(invalid(&format!("{label} is not a bounded regular file.")));
     }
     let mut bytes = Vec::with_capacity(details.len() as usize);
@@ -1697,7 +1684,7 @@ fn read_pointer(target: &Path) -> Result<Option<TransactionPointer>> {
         .ok_or_else(|| invalid("Update pointer path has no parent."))?;
     match fs::symlink_metadata(config) {
         Ok(details) => {
-            if !details.is_dir() || is_reparse(&details) {
+            if !details.is_dir() || crate::atomic_fs::is_link_or_reparse(&details) {
                 return Err(invalid(
                     "Update pointer directory is not a regular directory.",
                 ));
@@ -1711,7 +1698,10 @@ fn read_pointer(target: &Path) -> Result<Option<TransactionPointer>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !details.is_file() || is_reparse(&details) || details.len() > 16 * 1024 {
+    if !details.is_file()
+        || crate::atomic_fs::is_link_or_reparse(&details)
+        || details.len() > 16 * 1024
+    {
         return Err(invalid("Update pointer is not a bounded regular file."));
     }
     let mut bytes = Vec::with_capacity(details.len() as usize);
@@ -1724,19 +1714,12 @@ fn read_pointer(target: &Path) -> Result<Option<TransactionPointer>> {
     let pointer: TransactionPointer = serde_json::from_slice(&bytes)?;
     if pointer.schema_version != JOURNAL_SCHEMA
         || !pointer.transaction.is_absolute()
-        || !valid_sha256(&pointer.new_metadata_sha256)
-        || !valid_sha256(&pointer.old_metadata_sha256)
+        || !crate::digest::is_lower_sha256_hex(&pointer.new_metadata_sha256)
+        || !crate::digest::is_lower_sha256_hex(&pointer.old_metadata_sha256)
     {
         return Err(invalid("Update pointer fields are invalid."));
     }
     Ok(Some(pointer))
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn publish_pointer(
@@ -1778,7 +1761,7 @@ fn publish_pointer(
         let _ = fs::remove_file(&temporary);
     }
     result?;
-    sync_parent(path.parent().expect("pointer has parent"))?;
+    crate::atomic_fs::sync_directory(path.parent().expect("pointer has parent"))?;
     Ok(())
 }
 
@@ -1844,7 +1827,7 @@ fn clear_pointer(
         return Err(invalid("Refusing to remove a changed update pointer."));
     }
     fs::remove_file(target.join(POINTER_FILE))?;
-    sync_parent(
+    crate::atomic_fs::sync_directory(
         target
             .join(POINTER_FILE)
             .parent()
@@ -1869,26 +1852,10 @@ fn canonicalize_target(path: &Path) -> Result<PathBuf> {
 fn reject_reparse(path: &Path) -> Result<()> {
     let details =
         fs::symlink_metadata(path).map_err(|_| invalid("Could not inspect update path."))?;
-    if is_reparse(&details) {
+    if crate::atomic_fs::is_link_or_reparse(&details) {
         return Err(invalid("Update path is a symbolic link or reparse point."));
     }
     Ok(())
-}
-
-fn is_reparse(details: &fs::Metadata) -> bool {
-    if details.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        details.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
 }
 
 fn ensure_outside_target(stage: &Path, target: &Path) -> Result<()> {
@@ -2026,46 +1993,14 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
         file.write_all(&bytes)?;
         file.sync_all()?;
     }
-    replace_file(&temporary, path)?;
-    sync_parent(parent)?;
+    crate::atomic_fs::rename_replace(&temporary, path)?;
+    crate::atomic_fs::sync_directory(parent)?;
     Ok(())
 }
 
 fn unique_path(parent: &Path, prefix: &str) -> PathBuf {
     let serial = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     parent.join(format!("{prefix}{}-{serial}", std::process::id()))
-}
-
-fn replace_file(temporary: &Path, destination: &Path) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows::Win32::Storage::FileSystem::{
-            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-        };
-        let temporary_wide = temporary
-            .as_os_str()
-            .encode_wide()
-            .chain([0])
-            .collect::<Vec<_>>();
-        let destination_wide = destination
-            .as_os_str()
-            .encode_wide()
-            .chain([0])
-            .collect::<Vec<_>>();
-        unsafe {
-            MoveFileExW(
-                windows::core::PCWSTR(temporary_wide.as_ptr()),
-                windows::core::PCWSTR(destination_wide.as_ptr()),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        }
-        .map_err(io::Error::other)
-    }
-    #[cfg(not(windows))]
-    {
-        fs::rename(temporary, destination)
-    }
 }
 
 fn move_file_without_replace(temporary: &Path, destination: &Path) -> io::Result<()> {
@@ -2109,18 +2044,6 @@ fn move_file_without_replace(temporary: &Path, destination: &Path) -> io::Result
     }
 }
 
-fn sync_parent(parent: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        File::open(parent)?.sync_all()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = parent;
-        Ok(())
-    }
-}
-
 fn remove_transaction(transaction: &Path) -> Result<()> {
     reject_reparse(transaction)?;
     remove_entry_safely(transaction)?;
@@ -2131,7 +2054,7 @@ fn remove_entry_safely(path: &Path) -> Result<()> {
     let mut pending = vec![(path.to_path_buf(), false)];
     while let Some((current, visited)) = pending.pop() {
         let details = fs::symlink_metadata(&current)?;
-        if is_reparse(&details) {
+        if crate::atomic_fs::is_link_or_reparse(&details) {
             if details.is_dir() {
                 fs::remove_dir(current)?;
             } else {
