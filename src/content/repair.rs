@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,7 @@ use super::manifest::{
     ArchiveLayout, BasePackage, InstallFile, validate_hash, validate_relative_path,
 };
 use super::require_space;
+use super::worker::control::ControlState;
 use crate::atomic_fs::{is_link_or_reparse, sync_directory};
 use crate::diagnostics::free_disk_bytes;
 use crate::digest::sha256_hex;
@@ -77,21 +78,9 @@ pub struct RepairShared {
     files_completed: AtomicUsize,
     files_total: AtomicUsize,
     current_file: Mutex<Option<String>>,
-    error: Mutex<Option<String>>,
-    failure_context: Mutex<Option<FailureContext>>,
-    pause_requested: AtomicBool,
-    paused: AtomicBool,
+    control: ControlState,
     cancel_requested: AtomicBool,
     cancel_allowed: AtomicBool,
-    pause_lock: Mutex<()>,
-    pause_changed: Condvar,
-}
-
-#[derive(Clone)]
-struct FailureContext {
-    destination: String,
-    cache: String,
-    content_root: String,
 }
 
 impl RepairShared {
@@ -103,14 +92,9 @@ impl RepairShared {
             files_completed: AtomicUsize::new(0),
             files_total: AtomicUsize::new(UNKNOWN_FILE_COUNT),
             current_file: Mutex::new(None),
-            error: Mutex::new(None),
-            failure_context: Mutex::new(None),
-            pause_requested: AtomicBool::new(false),
-            paused: AtomicBool::new(false),
+            control: ControlState::new(),
             cancel_requested: AtomicBool::new(false),
             cancel_allowed: AtomicBool::new(true),
-            pause_lock: Mutex::new(()),
-            pause_changed: Condvar::new(),
         })
     }
 
@@ -148,18 +132,15 @@ impl RepairShared {
     }
 
     pub fn error(&self) -> Option<String> {
-        self.error
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
+        self.control.error()
     }
 
     pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::Acquire)
+        self.control.is_paused()
     }
 
     pub fn is_pause_requested(&self) -> bool {
-        self.pause_requested.load(Ordering::Acquire)
+        self.control.is_pause_requested()
     }
 
     pub fn is_cancel_requested(&self) -> bool {
@@ -171,44 +152,23 @@ impl RepairShared {
     }
 
     fn set_failure_context(&self, destination: &Path, cache: &Path, content_root: &str) {
-        *self
-            .failure_context
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(FailureContext {
-            destination: destination.display().to_string(),
-            cache: cache.display().to_string(),
-            content_root: content_root.to_owned(),
-        });
+        self.control
+            .set_failure_context(destination, cache, content_root);
     }
 
     pub fn request_pause(&self) {
-        let _guard = self
-            .pause_lock
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if !self.phase().is_terminal() {
-            self.pause_requested.store(true, Ordering::Release);
-        }
+        self.control.request_pause(|| self.phase().is_terminal());
     }
 
     pub fn request_resume(&self) {
-        let _guard = self
-            .pause_lock
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        self.pause_requested.store(false, Ordering::Release);
-        self.pause_changed.notify_all();
+        self.control.request_resume();
     }
 
     pub fn request_cancel(&self) {
-        let _guard = self
-            .pause_lock
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let guard = self.control.lock_pause();
         if self.cancel_allowed.load(Ordering::Acquire) && !self.phase().is_terminal() {
             self.cancel_requested.store(true, Ordering::Release);
-            self.pause_requested.store(false, Ordering::Release);
-            self.pause_changed.notify_all();
+            self.control.release_pause(&guard);
         }
     }
 
@@ -255,20 +215,18 @@ impl RepairShared {
 
     fn checkpoint(&self) -> Result<(), String> {
         let mut guard = self
-            .pause_lock
-            .lock()
+            .control
+            .lock_pause_strict()
             .map_err(|_| "Repair control state is unavailable.".to_owned())?;
-        while self.pause_requested.load(Ordering::Acquire)
-            && !self.cancel_requested.load(Ordering::Acquire)
-        {
-            self.paused.store(true, Ordering::Release);
+        while self.control.is_pause_requested() && !self.cancel_requested.load(Ordering::Acquire) {
+            self.control.set_paused(true);
             let wait = self
-                .pause_changed
+                .control
                 .wait_timeout(guard, PAUSE_POLL)
                 .map_err(|_| "Repair control state is unavailable.".to_owned())?;
             guard = wait.0;
         }
-        self.paused.store(false, Ordering::Release);
+        self.control.set_paused(false);
         if self.cancel_requested.load(Ordering::Acquire) {
             Err("Game repair was cancelled.".into())
         } else {
@@ -281,13 +239,13 @@ impl RepairShared {
         loop {
             self.checkpoint()?;
             let guard = self
-                .pause_lock
-                .lock()
+                .control
+                .lock_pause_strict()
                 .map_err(|_| "Repair control state is unavailable.".to_owned())?;
             if self.cancel_requested.load(Ordering::Acquire) {
                 return Err("Game repair was cancelled.".into());
             }
-            if self.pause_requested.load(Ordering::Acquire) {
+            if self.control.is_pause_requested() {
                 drop(guard);
                 continue;
             }
@@ -300,33 +258,15 @@ impl RepairShared {
     }
 
     fn download_checkpoint(&self, durable: bool) -> super::http::CheckpointAction {
-        use super::http::CheckpointAction;
-        if self.is_cancel_requested() {
-            return CheckpointAction::Cancel;
-        }
-        if self.is_pause_requested() {
-            if !durable {
-                return CheckpointAction::Pause;
-            }
-            if self.checkpoint().is_err() {
-                return CheckpointAction::Cancel;
-            }
-        }
-        CheckpointAction::Continue
+        self.control
+            .download_checkpoint(self.is_cancel_requested(), durable, || {
+                self.checkpoint().is_err()
+            })
     }
 
     pub fn fail(&self, message: impl Into<String>) {
         let message = message.into();
-        let context = self
-            .failure_context
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .unwrap_or_else(|| FailureContext {
-                destination: "<unknown>".into(),
-                cache: "<unknown>".into(),
-                content_root: "<unknown>".into(),
-            });
+        let context = self.control.failure_context();
         tracing::error!(
             action = "repair",
             destination = %context.destination,
@@ -335,7 +275,7 @@ impl RepairShared {
             diagnostic = %message,
             "game repair failed"
         );
-        *self.error.lock().unwrap_or_else(|error| error.into_inner()) = Some(message);
+        self.control.set_error(message);
         self.finish_phase(RepairPhase::Error);
     }
 
@@ -3725,7 +3665,7 @@ mod tests {
     #[test]
     fn poisoned_pause_lock_does_not_break_pause_controls() {
         let shared = RepairShared::new();
-        poison(&shared.pause_lock);
+        poison(shared.control.pause_mutex());
         shared.request_pause();
         assert!(shared.is_pause_requested());
         shared.request_resume();
@@ -3741,8 +3681,8 @@ mod tests {
     #[test]
     fn poisoned_error_and_context_mutexes_do_not_break_fail() {
         let shared = RepairShared::new();
-        poison(&shared.error);
-        poison(&shared.failure_context);
+        poison(shared.control.error_mutex());
+        poison(shared.control.failure_context_mutex());
         poison(&shared.current_file);
         shared.set_failure_context(Path::new("dest"), Path::new("cache"), "root");
         shared.fail("after poison");
