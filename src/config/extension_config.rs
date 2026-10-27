@@ -101,11 +101,11 @@ impl Default for ExtensionsConfig {
                 },
                 ExtensionPreference {
                     id: OBJECT_DISTANCE_PLUGIN_ID.into(),
-                    enabled: true,
+                    enabled: false,
                 },
                 ExtensionPreference {
                     id: CAMERA_ZOOM_PLUGIN_ID.into(),
-                    enabled: true,
+                    enabled: false,
                 },
             ],
             addons: [
@@ -865,7 +865,19 @@ mod tests {
     #[test]
     fn extension_defaults_and_order_round_trip() {
         let mut config = ExtensionsConfig::default();
-        assert!(config.plugins.iter().all(|plugin| plugin.enabled));
+        assert_eq!(
+            config
+                .plugins
+                .iter()
+                .map(|plugin| (plugin.id.as_str(), plugin.enabled))
+                .collect::<Vec<_>>(),
+            [
+                ("screenshot", true),
+                ("discord-rpc", true),
+                ("object-distance", false),
+                ("camera-zoom", false),
+            ]
+        );
         assert_eq!(
             config
                 .addons
@@ -936,8 +948,10 @@ mod tests {
     #[test]
     fn graphics_choice_updates_enablement_and_value_together() {
         let mut config = ExtensionsConfig::default();
-        assert_eq!(config.object_distance_selection(), Some(200));
-        assert_eq!(config.camera_zoom_selection(), Some(15));
+        assert_eq!(config.object_distance_selection(), None);
+        assert_eq!(config.camera_zoom_selection(), None);
+        assert_eq!(config.object_distance_percent, 200);
+        assert_eq!(config.camera_zoom_limit, 15);
         config.set_object_distance_selection(Some(150)).unwrap();
         config.set_camera_zoom_selection(Some(12)).unwrap();
         assert_eq!(config.object_distance_selection(), Some(150));
