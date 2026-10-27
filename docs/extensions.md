@@ -385,9 +385,10 @@ client memory API.
 ## Extended Draw Distance
 
 Extended Draw Distance multiplies the supported 1.23b client's final object
-distance result by 1.25x, 1.5x, 1.75x, or 2x. Off leaves it unchanged. Settings
-> Graphics provides one stepped bar with Off and these multipliers. The
-selection is saved in `config/extensions.ini` and applies on the next launch.
+distance result by 1.25x, 1.5x, 1.75x, or 2x. Off, the shipped default, leaves
+it unchanged. Settings > Graphics provides one stepped bar with Off and these
+multipliers. The selection is saved in `config/extensions.ini` and applies on
+the next launch.
 
 The native hook validates the retail function signature before installation.
 It changes the object cutoff, not scenery LOD selection or server visibility.
@@ -395,9 +396,10 @@ It changes the object cutoff, not scenery LOD selection or server visibility.
 ## Extended Camera Zoom
 
 Extended Camera Zoom raises the supported 1.23b client's camera distance
-setter ceiling from 10 to a value from 11 through 15. Settings > Graphics
-provides one stepped bar with Off and these ceilings. The selection is saved
-in `config/extensions.ini` and applies on the next launch.
+setter ceiling from 10 to a value from 11 through 15. Off, the shipped default,
+keeps the client's ceiling. Settings > Graphics provides one stepped bar with
+Off and these ceilings. The selection is saved in `config/extensions.ini` and
+applies on the next launch.
 
 The hook validates the setter signature. Distances at or below 10 and
 nonfinite inputs pass to the original setter. Larger finite inputs are capped

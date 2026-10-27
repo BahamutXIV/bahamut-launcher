@@ -457,11 +457,11 @@ enabled = true
 
 [plugin.3]
 id = object-distance
-enabled = true
+enabled = false
 
 [plugin.4]
 id = camera-zoom
-enabled = true
+enabled = false
 
 [addons]
 
@@ -507,8 +507,9 @@ Each numbered row records an installed or previously installed package.
 load order within each package kind; toggling a package leaves its row in
 place. IDs must be unique lowercase ASCII identifiers within that kind.
 
-The shipped defaults enable every packaged plugin and addon except Custom
-Timer, Enemy Cast, and Targetlines. New addons without a row start disabled.
+The shipped defaults enable Screenshot, DiscordRPC, and every packaged addon
+except Custom Timer, Enemy Cast, and Targetlines. Extended Draw Distance and
+Extended Camera Zoom start Off. New addons without a row start disabled.
 Existing selections are preserved, and rows for missing packages are ignored
 at launch.
 
