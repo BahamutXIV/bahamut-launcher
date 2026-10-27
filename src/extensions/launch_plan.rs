@@ -38,6 +38,7 @@ pub const CAMERA_ZOOM_ENABLED_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_E
 pub const CAMERA_ZOOM_LIMIT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_LIMIT";
 pub const BORDERLESS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS";
 pub const BORDERLESS_MONITOR_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS_MONITOR";
+pub const LAUNCHER_VERSION_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_LAUNCHER_VERSION";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionLaunchRequest {
@@ -337,6 +338,10 @@ fn helper_environment(
         CAMERA_ZOOM_LIMIT_ENVIRONMENT.into(),
         request.camera_zoom_limit.to_string().into(),
     ));
+    environment.push((
+        LAUNCHER_VERSION_ENVIRONMENT.into(),
+        env!("BAHAMUT_GIT_DESCRIBE").into(),
+    ));
     Ok(environment)
 }
 
@@ -449,7 +454,7 @@ mod tests {
         assert_eq!(args[7], "3132372E302E302E3100");
         assert_eq!(args[8], "--launch-argument");
         assert_eq!(args[9], request().launch_argument);
-        assert_eq!(invocation.environment.len(), 21);
+        assert_eq!(invocation.environment.len(), 22);
         assert_eq!(invocation.environment[0].0, STARTUP_SCRIPT_ENVIRONMENT);
         assert_eq!(invocation.environment[0].1, request().startup_script_path);
         assert_eq!(invocation.environment[1].0, SCREENSHOT_PLUGIN_ENVIRONMENT);
@@ -529,6 +534,11 @@ mod tests {
         assert_eq!(invocation.environment[19].1, "false");
         assert_eq!(invocation.environment[20].0, CAMERA_ZOOM_LIMIT_ENVIRONMENT);
         assert_eq!(invocation.environment[20].1, "15");
+        assert_eq!(invocation.environment[21].0, LAUNCHER_VERSION_ENVIRONMENT);
+        assert_eq!(
+            invocation.environment[21].1,
+            OsString::from(env!("BAHAMUT_GIT_DESCRIBE"))
+        );
     }
 
     #[test]
@@ -723,7 +733,7 @@ mod tests {
     fn wine_plan_maps_path_environment_and_keeps_scalars() {
         let wine = wine_plan(&request());
         let host = plan_verified_extension_launch(&request()).unwrap();
-        assert_eq!(wine.environment.len(), 21);
+        assert_eq!(wine.environment.len(), 22);
         let mapped = [
             (
                 STARTUP_SCRIPT_ENVIRONMENT,

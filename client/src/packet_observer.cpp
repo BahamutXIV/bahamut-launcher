@@ -36,7 +36,7 @@ struct ObserverImplementation
 {
     static void Dispatch(PacketObserver*    observer,
                          const GameMessage& message) noexcept;
-    static void DispatchFrame(PacketObserver* observer, Direction direction, std::span<const std::uint8_t> frame) noexcept;
+    static void DispatchFrame(PacketObserver* observer, const FrameInfo& frame) noexcept;
     static bool Install(PacketObserver* observer) noexcept;
     static bool Shutdown(PacketObserver* observer) noexcept;
 };
@@ -55,6 +55,15 @@ constexpr std::size_t   kMaximumTrackedStreams       = 128u;
 constexpr std::size_t   kMaximumWsabufs              = 64u;
 constexpr std::size_t   kCopyChunkSize               = 4096u;
 constexpr std::uint16_t kGameMessageSubpacketType    = 0x03u;
+
+// Lobby lanes open with c2s clear type 0x0009 (0x000A is secure-session setup):
+// XIVLegacy/xivl-captures:studies/lobby-handshake-triage/derived/record-census.md.
+constexpr std::uint16_t kLobbyOpeningSubpacketType  = 0x09u;
+constexpr std::uint16_t kSecureSessionSubpacketType = 0x0Au;
+// Game lanes open with c2s clear type 0x0001: retail 1.23b login capture sha256
+// 28e06b54fe559870031f077f8549b9244caafa7e5177dbca08a7feae6c2b1b62, packets 913 and 923
+// (XIVLegacy/xivl-captures:studies/lobby-handshake-triage/derived/triage.md lane table).
+constexpr std::uint16_t kGameOpeningSubpacketType = 0x01u;
 
 // Retail layout offsets from XIVLegacy/xivl-client-structs:
 // manifests/structs.json BCS-S-0001, BCS-S-0002, and BCS-S-0003.
@@ -148,13 +157,15 @@ thread_local std::uint32_t   gHookDepth = 0;
 
 struct StreamState
 {
-    std::mutex                mutex;
-    std::vector<std::uint8_t> pending;
-    Direction                 direction         = Direction::Incoming;
-    std::size_t               activeCalls       = 0;
-    bool                      transportResolved = false;
-    bool                      isTcp             = false;
-    bool                      disabled          = false;
+    // Shared by both directions of a socket; written once by the first outgoing frame.
+    std::shared_ptr<std::atomic<std::uint8_t>> kind;
+    std::mutex                                 mutex;
+    std::vector<std::uint8_t>                  pending;
+    Direction                                  direction         = Direction::Incoming;
+    std::size_t                                activeCalls       = 0;
+    bool                                       transportResolved = false;
+    bool                                       isTcp             = false;
+    bool                                       disabled          = false;
 };
 
 void DisableStream(StreamState& state) noexcept;
@@ -183,6 +194,22 @@ struct StreamKeyHash
 
 std::mutex                                                                 gStreamsMutex;
 std::unordered_map<StreamKey, std::shared_ptr<StreamState>, StreamKeyHash> gStreams;
+
+// Callers hold gStreamsMutex.
+std::shared_ptr<StreamState> CreateStreamLocked(std::uintptr_t socket, Direction direction)
+{
+    const Direction opposite =
+        direction == Direction::Incoming ? Direction::Outgoing : Direction::Incoming;
+    auto state       = std::make_shared<StreamState>();
+    state->direction = direction;
+    const auto peer  = gStreams.find(StreamKey{ socket, opposite });
+    state->kind      = peer != gStreams.end()
+                           ? peer->second->kind
+                           : std::make_shared<std::atomic<std::uint8_t>>(
+                                 static_cast<std::uint8_t>(StreamKind::Unclassified));
+    gStreams.emplace(StreamKey{ socket, direction }, state);
+    return state;
+}
 
 class HookCallScope
 {
@@ -297,9 +324,7 @@ std::shared_ptr<StreamState> BeginStreamCall(SOCKET socket, Direction direction)
                 {
                     return {};
                 }
-                state            = std::make_shared<StreamState>();
-                state->direction = direction;
-                gStreams.emplace(key, state);
+                state = CreateStreamLocked(key.socket, direction);
             }
         }
 
@@ -320,8 +345,7 @@ std::shared_ptr<StreamState> BeginStreamCall(SOCKET socket, Direction direction)
         }
         if (state->activeCalls != 0)
         {
-            state->disabled = true;
-            state->pending.clear();
+            DisableStream(*state);
         }
         ++state->activeCalls;
         return state;
@@ -347,9 +371,7 @@ void DisableSocketStream(SOCKET socket, Direction direction) noexcept
             }
             else if (gStreams.size() < kMaximumTrackedStreams)
             {
-                state            = std::make_shared<StreamState>();
-                state->direction = direction;
-                gStreams.emplace(key, state);
+                state = CreateStreamLocked(key.socket, direction);
             }
         }
         if (state)
@@ -439,7 +461,8 @@ bool InflateZlibOrRaw(std::span<const std::uint8_t> input,
 
 bool ParseSubpackets(std::span<const std::uint8_t> body,
                      std::uint16_t                 subpacketCount,
-                     std::vector<GameMessageView>& messages)
+                     std::vector<GameMessageView>& messages,
+                     std::vector<Subpacket>&       subpackets)
 {
     if (subpacketCount > body.size() / kSubpacketHeaderSize)
     {
@@ -448,6 +471,8 @@ bool ParseSubpackets(std::span<const std::uint8_t> body,
     messages.clear();
     messages.reserve(std::min<std::size_t>(
         subpacketCount, body.size() / kGameMessageSubpacketPrefix));
+    subpackets.clear();
+    subpackets.reserve(subpacketCount);
 
     std::size_t offset = 0;
     for (std::uint32_t index = 0; index < subpacketCount; ++index)
@@ -474,6 +499,10 @@ bool ParseSubpackets(std::span<const std::uint8_t> body,
             }
             const std::uint8_t* const gameMessage =
                 subpacket + kSubpacketHeaderSize;
+            subpackets.push_back(Subpacket{
+                subpacketType,
+                ReadU16(gameMessage + kGameMessageOpcodeOffset),
+            });
             messages.push_back(GameMessageView{
                 ReadU16(gameMessage + kGameMessageOpcodeOffset),
                 ReadU32(subpacket + kSubpacketSourceIdOffset),
@@ -482,6 +511,10 @@ bool ParseSubpackets(std::span<const std::uint8_t> body,
                 gameMessage + kGameMessageHeaderSize,
                 subpacketSize - kGameMessageSubpacketPrefix,
             });
+        }
+        else
+        {
+            subpackets.push_back(Subpacket{ subpacketType, 0u });
         }
         offset += subpacketSize;
     }
@@ -502,10 +535,46 @@ bool ParseSubpackets(std::span<const std::uint8_t> body,
                        });
 }
 
+void MarkOtherIfUnclassified(StreamState& state) noexcept
+{
+    std::uint8_t expected = static_cast<std::uint8_t>(StreamKind::Unclassified);
+    state.kind->compare_exchange_strong(expected, static_cast<std::uint8_t>(StreamKind::Other));
+}
+
+bool IsGameOpening(std::span<const Subpacket> subpackets) noexcept
+{
+    bool opensGame = false;
+    for (const Subpacket& subpacket : subpackets)
+    {
+        if (subpacket.type == kLobbyOpeningSubpacketType ||
+            subpacket.type == kSecureSessionSubpacketType)
+        {
+            return false;
+        }
+        opensGame = opensGame || subpacket.type == kGameOpeningSubpacketType;
+    }
+    return opensGame;
+}
+
+// The first complete outgoing frame decides the socket's kind once.
+StreamKind ResolveStreamKind(StreamState& state, bool parsed, std::span<const Subpacket> subpackets) noexcept
+{
+    if (state.direction == Direction::Outgoing)
+    {
+        std::uint8_t expected = static_cast<std::uint8_t>(StreamKind::Unclassified);
+        state.kind->compare_exchange_strong(
+            expected,
+            static_cast<std::uint8_t>(parsed && IsGameOpening(subpackets) ? StreamKind::Game
+                                                                          : StreamKind::Other));
+    }
+    return static_cast<StreamKind>(state.kind->load());
+}
+
 bool DecodeFrame(std::span<const std::uint8_t> frame,
                  PacketObserver*               observer,
-                 Direction                     direction)
+                 StreamState&                  state)
 {
+    const Direction direction = state.direction;
     if (frame.size() < kBaseHeaderSize ||
         frame[kBaseCompressedOffset] > 1u ||
         ReadU16(frame.data() + kBaseFrameSizeOffset) != frame.size())
@@ -513,23 +582,44 @@ bool DecodeFrame(std::span<const std::uint8_t> frame,
         return false;
     }
 
-    ObserverImplementation::DispatchFrame(observer, direction, frame);
-
     std::vector<std::uint8_t>     inflated;
-    std::span<const std::uint8_t> body = frame.subspan(kBaseHeaderSize);
+    std::span<const std::uint8_t> body   = frame.subspan(kBaseHeaderSize);
+    bool                          parsed = true;
     if (frame[kBaseCompressedOffset] != 0u)
     {
-        if (!InflateZlibOrRaw(body, inflated))
+        if (InflateZlibOrRaw(body, inflated))
         {
-            return false;
+            body = inflated;
         }
-        body = inflated;
+        else
+        {
+            parsed = false;
+        }
     }
 
     std::vector<GameMessageView> views;
-    if (!ParseSubpackets(body,
-                         ReadU16(frame.data() + kBaseSubpacketCountOffset),
-                         views))
+    std::vector<Subpacket>       subpackets;
+    if (parsed)
+    {
+        parsed = ParseSubpackets(body,
+                                 ReadU16(frame.data() + kBaseSubpacketCountOffset),
+                                 views,
+                                 subpackets);
+    }
+    if (!parsed)
+    {
+        views.clear();
+        subpackets.clear();
+    }
+
+    FrameInfo info;
+    info.direction  = direction;
+    info.stream     = ResolveStreamKind(state, parsed, subpackets);
+    info.parsed     = parsed;
+    info.bytes      = frame;
+    info.subpackets = subpackets;
+    ObserverImplementation::DispatchFrame(observer, info);
+    if (!parsed)
     {
         return false;
     }
@@ -556,6 +646,11 @@ void DisableStream(StreamState& state) noexcept
 {
     state.disabled = true;
     state.pending.clear();
+    // An outgoing stream that stops before classifying is never Game.
+    if (state.direction == Direction::Outgoing && state.kind)
+    {
+        MarkOtherIfUnclassified(state);
+    }
 }
 
 bool AppendObservedBytes(StreamState&        state,
@@ -604,7 +699,7 @@ bool AppendObservedBytes(StreamState&        state,
         offset += amount;
         if (state.pending.size() == frameSize)
         {
-            if (!DecodeFrame(state.pending, observer, state.direction))
+            if (!DecodeFrame(state.pending, observer, state))
             {
                 DisableStream(state);
                 break;
@@ -976,9 +1071,7 @@ std::shared_ptr<StreamState> StartObservedStreamCall(PacketObserver* observer,
 
 } // namespace
 
-void ObserverImplementation::DispatchFrame(PacketObserver*               observer,
-                                           Direction                     direction,
-                                           std::span<const std::uint8_t> frame) noexcept
+void ObserverImplementation::DispatchFrame(PacketObserver* observer, const FrameInfo& frame) noexcept
 {
     if (observer == nullptr)
     {
@@ -993,7 +1086,7 @@ void ObserverImplementation::DispatchFrame(PacketObserver*               observe
         }
         if (sink)
         {
-            sink(direction, frame);
+            sink(frame);
         }
     }
     catch (...)
@@ -1306,13 +1399,16 @@ int WSAAPI HookedCloseSocket(SOCKET socket)
         return SOCKET_ERROR;
     }
 
-    beforeCall.Restore();
-    const int            result = original(socket);
-    const LastErrorState afterCall;
-    if (scope.IsOutermost() && result == 0)
+    // Retire both directions before the handle can be reused, so a new socket
+    // with the same handle never inherits this socket's classification. A close
+    // that fails leaves the socket unclassified, which writes nothing: fail-safe.
+    if (scope.IsOutermost())
     {
         EraseSocketStreams(socket);
     }
+    beforeCall.Restore();
+    const int            result = original(socket);
+    const LastErrorState afterCall;
     afterCall.Restore();
     return result;
 }

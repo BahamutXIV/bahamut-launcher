@@ -15,6 +15,14 @@ enum class Direction : std::uint8_t
     Outgoing,
 };
 
+// Per-socket classification shared by both directions of a socket.
+enum class StreamKind : std::uint8_t
+{
+    Unclassified,
+    Game,
+    Other,
+};
+
 struct GameMessage
 {
     Direction     direction = Direction::Incoming;
@@ -26,11 +34,26 @@ struct GameMessage
     std::vector<std::uint8_t> payload;
 };
 
+struct Subpacket
+{
+    std::uint16_t type   = 0;
+    std::uint16_t opcode = 0; // Set only for type 0x0003.
+};
+
+struct FrameInfo
+{
+    Direction                     direction = Direction::Incoming;
+    StreamKind                    stream    = StreamKind::Unclassified;
+    bool                          parsed    = false; // Inflate and subpacket parse succeeded.
+    std::span<const std::uint8_t> bytes;             // Original frame bytes.
+    std::span<const Subpacket>    subpackets;        // Empty unless parsed.
+};
+
 class PacketObserver
 {
 public:
     using Sink      = std::function<void(const GameMessage&)>;
-    using FrameSink = std::function<void(Direction, std::span<const std::uint8_t>)>;
+    using FrameSink = std::function<void(const FrameInfo&)>;
 
     PacketObserver();
     ~PacketObserver();

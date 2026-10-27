@@ -177,6 +177,9 @@ add_library(bahamut SHARED
     src/enemy_cast.h
     src/player_state.cpp
     src/player_state.h
+    src/packet_capture.cpp
+    src/packet_capture.h
+    src/packet_capture_policy.h
     src/packet_observer.cpp
     src/packet_observer.h
     src/target_distance.cpp
@@ -285,6 +288,9 @@ add_library(bahamut-test-enemy-cast-objects OBJECT src/enemy_cast.cpp)
 target_include_directories(bahamut-test-enemy-cast-objects PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-test-enemy-cast-objects PRIVATE minhook)
 
+add_library(bahamut-test-packet-capture-objects OBJECT src/packet_capture.cpp)
+target_include_directories(bahamut-test-packet-capture-objects PRIVATE src)
+
 add_library(bahamut-test-addon-host-objects OBJECT src/addon_host.cpp)
 target_include_directories(bahamut-test-addon-host-objects PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-test-addon-host-objects PRIVATE lua51 minhook)
@@ -382,6 +388,9 @@ add_executable(bahamut-addon-host-tests
     $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
     src/enemy_cast.h
     $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
     src/player_state.h
     src/target_distance.h
     tests/addon_host_tests.cpp
@@ -409,6 +418,9 @@ add_executable(bahamut-command-boundary-tests
     $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
     src/enemy_cast.h
     $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
     src/player_state.h
     src/retail_identity.cpp
     src/retail_identity.h
@@ -540,10 +552,19 @@ target_link_libraries(bahamut-object-distance-tests PRIVATE minhook)
 add_executable(bahamut-packet-observer-tests
     src/packet_observer.cpp
     src/packet_observer.h
+    src/packet_capture_policy.h
     tests/packet_observer_tests.cpp
 )
 target_include_directories(bahamut-packet-observer-tests PRIVATE src vendor/minhook/include vendor/miniz)
 target_link_libraries(bahamut-packet-observer-tests PRIVATE minhook miniz ws2_32)
+
+add_executable(bahamut-packet-capture-tests
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    tests/packet_capture_tests.cpp
+)
+target_include_directories(bahamut-packet-capture-tests PRIVATE src)
 
 enable_testing()
 add_test(
@@ -571,6 +592,7 @@ add_test(NAME bahamut-dat-overlay COMMAND bahamut-dat-overlay-tests)
 add_test(NAME bahamut-camera-zoom COMMAND bahamut-camera-zoom-tests)
 add_test(NAME bahamut-object-distance COMMAND bahamut-object-distance-tests)
 add_test(NAME bahamut-packet-observer COMMAND bahamut-packet-observer-tests)
+add_test(NAME bahamut-packet-capture COMMAND bahamut-packet-capture-tests)
 add_test(
     NAME bahamut-addon-host
     COMMAND bahamut-addon-host-tests

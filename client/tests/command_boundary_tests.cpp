@@ -91,7 +91,7 @@ int wmain()
         return 1;
     }
 
-    const std::array<std::pair<std::string_view, bool>, 30> recognition = { {
+    const std::array<std::pair<std::string_view, bool>, 31> recognition = { {
         { "/pos", true },
         { "/pos ", true },
         { "/pos\targ", true },
@@ -118,6 +118,7 @@ int wmain()
         { "/customtimer", true },
         { "/packetlogger", true },
         { "/packetlogger start", true },
+        { "/packetlogger split", true },
         { "/packetloggers", false },
         { "/combatparser reset", true },
         { "/combatparser", true },
@@ -267,6 +268,10 @@ int wmain()
                  "packetlogger start command was not dispatched") ||
         !Require(handleLookup({ "/packetlogger", "stop" }) == -2 && dispatch.lastCommand == "/packetlogger stop",
                  "packetlogger stop command was not dispatched") ||
+        !Require(handleLookup({ "/packetlogger", "split" }) == -2 && dispatch.lastCommand == "/packetlogger split",
+                 "packetlogger split command was not dispatched") ||
+        !Require(handleLookup({ "/packetlogger", "split", "extra" }) == 42,
+                 "packetlogger split extra argument did not forward") ||
         !Require(handleLookup({ "/packetlogger", "status" }) == -2 && dispatch.lastCommand == "/packetlogger status",
                  "packetlogger status command was not dispatched") ||
         !Require(handleLookup({ "/combatparser" }) == -2 && dispatch.lastCommand == "/combatparser",
@@ -290,7 +295,7 @@ int wmain()
     }
     if (!Require(handleLookup({ "/wiki", "help", "extra" }) == -2 && dispatch.lastCommand == "/wiki help extra",
                  "wiki multi-word query was not accepted") ||
-        !Require(dispatch.calls == 31,
+        !Require(dispatch.calls == 32,
                  "accepted command dispatch count was incorrect"))
     {
         return 1;
