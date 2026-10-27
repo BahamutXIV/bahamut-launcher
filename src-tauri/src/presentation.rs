@@ -169,22 +169,14 @@ pub(crate) fn resolve_home_lifecycle(
 
 pub(crate) fn home_presentation(state: HomeLifecycleState) -> HomePresentation {
     match state {
-        HomeLifecycleState::NoValidInstall => HomePresentation {
-            eyebrow: "",
-            title: "Account Login",
-            primary_action: "Install",
-        },
-        HomeLifecycleState::OutdatedInstall => HomePresentation {
-            eyebrow: "",
-            title: "Account Login",
-            primary_action: "Install",
-        },
-        HomeLifecycleState::LoggedOut => HomePresentation {
-            eyebrow: "",
-            title: "Account Login",
-            primary_action: "Play",
-        },
-        HomeLifecycleState::Ready => HomePresentation {
+        HomeLifecycleState::NoValidInstall | HomeLifecycleState::OutdatedInstall => {
+            HomePresentation {
+                eyebrow: "",
+                title: "Account Login",
+                primary_action: "Install",
+            }
+        }
+        HomeLifecycleState::LoggedOut | HomeLifecycleState::Ready => HomePresentation {
             eyebrow: "",
             title: "Account Login",
             primary_action: "Play",
@@ -263,6 +255,12 @@ pub(crate) struct GameSettingsView {
 pub(crate) struct LauncherBehaviorView {
     pub(crate) close_on_game_start: bool,
     pub(crate) native_resolution_override: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct PadSetupView {
+    pub(crate) supported: bool,
+    pub(crate) enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

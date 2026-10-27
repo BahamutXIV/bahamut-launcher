@@ -23,7 +23,7 @@ LINUX = REPO / "packaging" / "linux"
 TOP = "bahamut-launcher"
 LABEL = "bahamut-launcher-test-linux-x86_64"
 PE_NAMES = ["bahamut-loader.exe", "bahamut.dll", "screenshot.dll", "discord-rpc.dll"]
-ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "distance", "targethp", "fps", "pos", "wiki", "targetlines"]
+ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "customtimer", "distance", "enemycast", "targethp", "fps", "pos", "wiki", "targetlines"]
 LICENSES = [
     "MinHook-LICENSE.txt",
     "Dear-ImGui-LICENSE.txt",
@@ -205,6 +205,29 @@ class LinuxPackageTests(unittest.TestCase):
             (self.payload / "share/applications/bahamut-launcher.desktop").read_bytes(),
             (LINUX / "bahamut-launcher.desktop").read_bytes(),
         )
+
+        result = run(self.payload / "install-dependencies.sh", "--bogus", env=self.env)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+
+        desktop = LINUX / "bahamut-launcher.desktop"
+        self.assertEqual(desktop.stem, "bahamut-launcher")
+        self.assertEqual(desktop_values(desktop)["StartupWMClass"], "bahamut-launcher")
+        self.assertTrue((self.payload / "bahamut-launcher").is_file())
+
+        def keys(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    yield key
+                    yield from keys(value)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from keys(value)
+
+        config = json.loads((REPO / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertNotIn("enableGTKAppId", set(keys(config)))
+
+        if shutil.which("desktop-file-validate"):
+            self.assert_ok(run("desktop-file-validate", self.payload / "share/applications/bahamut-launcher.desktop"))
 
     def test_user_install_and_payload_uninstall(self):
         prefix = self.root / "prefix"
@@ -688,36 +711,16 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertIn("cannot check the libraries; nothing to install", result.stdout)
         self.assertNotIn("+ ", result.stdout)
 
-    def test_dependency_script_rejects_unknown_argument(self):
-        result = run(self.payload / "install-dependencies.sh", "--bogus", env=self.env)
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-
-    def test_window_class_names_agree(self):
-        desktop = LINUX / "bahamut-launcher.desktop"
-        self.assertEqual(desktop.stem, "bahamut-launcher")
-        self.assertEqual(desktop_values(desktop)["StartupWMClass"], "bahamut-launcher")
-        self.assertTrue((self.payload / "bahamut-launcher").is_file())
-
-        def keys(node):
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    yield key
-                    yield from keys(value)
-            elif isinstance(node, list):
-                for value in node:
-                    yield from keys(value)
-
-        config = json.loads((REPO / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
-        self.assertNotIn("enableGTKAppId", set(keys(config)))
-
-    @unittest.skipUnless(shutil.which("desktop-file-validate"), "desktop-file-validate is not installed")
-    def test_shipped_desktop_entry_validates(self):
-        self.assert_ok(run("desktop-file-validate", self.payload / "share/applications/bahamut-launcher.desktop"))
-
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "the dependency check reads ELF files on a Linux host")
 class DependencyClassificationTests(unittest.TestCase):
     """Feed install-dependencies.sh a stub ldd listing for a real ELF file."""
+
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.filtered_path = path_without(Path(temporary.name).resolve() / "filtered", "wine", "tar", "xz")
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -893,7 +896,7 @@ class DependencyClassificationTests(unittest.TestCase):
     LIBS_OK = "\tlibc.so.6 => /lib/libc.so.6\n"
     LIBS_MISSING = "\tlibwebkit2gtk-4.1.so.0 => not found\n"
 
-    def simulate_host(self, arch="x86_64", exclude=(), missing_tools=()):
+    def simulate_host(self, arch="x86_64", missing_tools=()):
         """Make the launcher and `uname -m` report ARCH, with a PATH that has no Wine unless a test adds one."""
         data = bytearray(self.elf.read_bytes())
         data[18:20] = b"\x3e\x00" if arch == "x86_64" else b"\xb7\x00"
@@ -904,12 +907,11 @@ class DependencyClassificationTests(unittest.TestCase):
             encoding="utf-8",
         )
         uname.chmod(0o755)
-        filtered = path_without(self.root / "filtered", "wine", "tar", "xz", *exclude)
         for tool in ("tar", "xz"):
             if tool not in missing_tools:
                 (self.tools / tool).write_text(PLACEHOLDER, encoding="utf-8")
                 (self.tools / tool).chmod(0o755)
-        self.env["PATH"] = f"{self.tools}{os.pathsep}{filtered}"
+        self.env["PATH"] = f"{self.tools}{os.pathsep}{self.filtered_path}"
         self.env.pop("BAHAMUT_WINE", None)
 
     ENGINE_LIBS = [
@@ -1358,15 +1360,11 @@ cp -R "$repo/plugins/dats/bahamut-dats-overlay" "$destination/plugins/dats/"
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
             members = archive.getmembers()
+            packaged = archive.extractfile(f"{TOP}/README.md").read()
         names = {m.name for m in members if m.isfile()}
         self.assertIn(f"{TOP}/scripts/default.txt", names)
         self.assertIn(f"{TOP}/plugins/dats/bahamut-dats-overlay/data/a b.txt", names)
         self.assertNotIn(f"{TOP}/config", {m.name.rstrip("/") for m in members})
-
-    def test_staged_readme_is_replaced_by_the_linux_readme(self):
-        self.assertEqual(self.package().returncode, 0)
-        with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
-            packaged = archive.extractfile(f"{TOP}/README.md").read()
         self.assertEqual(packaged, (LINUX / "README.md").read_bytes())
         self.assertNotEqual(packaged, b"synthetic README.md")
 

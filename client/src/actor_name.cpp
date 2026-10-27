@@ -16,12 +16,11 @@
 namespace
 {
 
-constexpr std::uint16_t kActorNameOpcode    = 0x013Du;
-constexpr std::uint16_t kActorDespawnOpcode = 0x0114u;
-constexpr std::uint16_t kRemoveActorOpcode  = 0x00CBu;
-constexpr std::uint16_t kDeleteAllActors    = 0x0007u;
-constexpr std::size_t   kMaximumActorNames  = 2048u;
-constexpr std::size_t   kNameBytes          = 32u;
+constexpr std::uint16_t kActorNameOpcode   = 0x013Du;
+constexpr std::uint16_t kRemoveActorOpcode = 0x00CBu;
+constexpr std::uint16_t kDeleteAllActors   = 0x0007u;
+constexpr std::size_t   kMaximumActorNames = 2048u;
+constexpr std::size_t   kNameBytes         = 32u;
 
 struct DisplayName
 {
@@ -108,14 +107,12 @@ void ActorNameService::Observe(const packet_observer::GameMessage& message)
         return;
     }
 
-    if (message.opcode != kActorNameOpcode &&
-        message.opcode != kActorDespawnOpcode &&
-        message.opcode != kRemoveActorOpcode)
+    if (message.opcode != kActorNameOpcode && message.opcode != kRemoveActorOpcode)
     {
         return;
     }
 
-    if (message.opcode == kActorDespawnOpcode || message.opcode == kRemoveActorOpcode)
+    if (message.opcode == kRemoveActorOpcode)
     {
         std::lock_guard lock(mutex_);
         if (IsActorId(localActorId_) && message.sourceId == localActorId_)

@@ -11,6 +11,8 @@ pub const EXTENSIONS_CONFIG_FILE: &str = "extensions.ini";
 
 pub const DATS_CONFIG_FILE: &str = "dats.ini";
 
+pub const CONTROLLER_CONFIG_FILE: &str = "controller.ini";
+
 pub const PORTABLE_CONFIG_DIR_NAME: &str = "config";
 
 pub const PORTABLE_DATA_DIR_NAME: &str = "data";
@@ -194,11 +196,6 @@ pub fn state_root() -> Result<PathBuf, ConfigDirError> {
     launcher_roots().map(|roots| roots.state)
 }
 
-/// Resolve the state root and create it when it is missing.
-pub fn ensure_state_root() -> Result<PathBuf, ConfigDirError> {
-    launcher_roots()?.ensure_state()
-}
-
 /// Resolve the data directory and create it when it is missing, before the Wine code first
 /// writes there.
 pub fn ensure_data_dir() -> Result<PathBuf, ConfigDirError> {
@@ -231,6 +228,10 @@ pub fn extensions_config_path() -> Result<PathBuf, ConfigDirError> {
 
 pub fn dats_config_path() -> Result<PathBuf, ConfigDirError> {
     portable_config_dir().map(|dir| dir.join(DATS_CONFIG_FILE))
+}
+
+pub fn controller_config_path() -> Result<PathBuf, ConfigDirError> {
+    portable_config_dir().map(|dir| dir.join(CONTROLLER_CONFIG_FILE))
 }
 
 pub fn screenshot_settings_path() -> Result<PathBuf, ConfigDirError> {
@@ -322,7 +323,7 @@ pub fn webview_data_dir() -> Result<PathBuf, ConfigDirError> {
 
 /// Resolve the long-lived `XIVLegacy_Downloads/` download cache from Documents, falling back to [`data_dir`].
 pub fn default_download_cache_dir() -> Result<PathBuf, ConfigDirError> {
-    match directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf())) {
+    match directories::UserDirs::new().and_then(|u| u.document_dir().map(Path::to_path_buf)) {
         Some(documents) => Ok(default_download_cache_dir_under(&documents)),
         None => data_dir().map(|dir| dir.join(DEFAULT_DOWNLOAD_CACHE_DIR_NAME)),
     }
@@ -700,6 +701,10 @@ mod tests {
             config.join("extensions.ini")
         );
         assert_eq!(dats_config_path().unwrap(), config.join("dats.ini"));
+        assert_eq!(
+            controller_config_path().unwrap(),
+            config.join("controller.ini")
+        );
         assert_eq!(
             screenshot_settings_path().unwrap(),
             config.join("plugins/screenshot/settings.ini")

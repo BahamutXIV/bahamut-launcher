@@ -180,6 +180,37 @@ async function connectDevTools(port) {
   throw new Error('Timed out waiting for the browser DevTools endpoint.');
 }
 
+async function setupBrowserTest(t) {
+  const server = createServer(serveUiFixture);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const httpPort = server.address().port;
+  const debugPort = await freePort();
+  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
+  const browser = spawn(browserPath(), [
+    '--headless=new', '--disable-gpu', '--no-sandbox',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
+    'about:blank',
+  ], { stdio: 'ignore' });
+  let devtools = null;
+
+  t.after(async () => {
+    if (devtools) {
+      await devtools.send('Browser.close').catch(() => {});
+      devtools.socket.close();
+    }
+    await stopChild(browser);
+    await delay(1000);
+    await new Promise(resolve => server.close(resolve));
+    removeTempRoot(profileDir);
+  });
+
+  devtools = await connectDevTools(debugPort);
+  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
+  await devtools.send('Page.enable');
+  await devtools.send('Runtime.enable');
+  return { devtools, httpPort };
+}
+
 function evaluateScript() {
   return `(() => {
     const state = {
@@ -205,6 +236,8 @@ function evaluateScript() {
       launchDelayMs: 0,
       launchError: null,
       launcherBehavior: { close_on_game_start: true, native_resolution_override: false },
+      padSetup: { supported:false, enabled:false },
+      failPadSetupWrite: false,
       borderlessMonitors: {
         supported:true,
         monitors:[
@@ -448,6 +481,16 @@ function evaluateScript() {
       if (command === 'detect_game_install_command') return { detected: state.installPath || 'C:/game', source: 'preferences' };
       if (command === 'config_tool_supported') return state.configToolSupported !== false;
       if (command === 'get_launcher_behavior') return { ...state.launcherBehavior };
+      if (command === 'get_pad_setup') return { ...state.padSetup };
+      if (command === 'set_pad_setup') {
+        if (!state.padSetup.supported) throw new Error('Gamepad setup is available only on Linux.');
+        if (state.failPadSetupWrite) {
+          state.failPadSetupWrite = false;
+          throw new Error('fixture pad setup write failure');
+        }
+        state.padSetup.enabled = args.enabled;
+        return { ...state.padSetup };
+      }
       if (command === 'get_borderless_monitors') return structuredClone(state.borderlessMonitors);
       if (command === 'set_borderless_monitor') {
         state.borderlessMonitors.selected = args.monitorId;
@@ -670,6 +713,13 @@ async function exposeFrontendModules(devtools) {
       import('/js/extensions.js'),
       import('/js/game-repair.js'),
     ]);
+    window.waitForBrowserReady = async (predicate, description) => {
+      const deadline = performance.now() + 5000;
+      while (!predicate()) {
+        if (performance.now() >= deadline) throw new Error('Timed out after 5000ms waiting for ' + description);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    };
     window.__launcherModules = { main, homeModule, extensions, gameRepair };
     window.__launcherHome = runtime.home;
     window.__launcherSettings = runtime.settingsState;
@@ -706,25 +756,7 @@ async function exposeFrontendModules(devtools) {
 }
 
 test('failure_feedback_stays_in_cards_and_logs_after_navigation', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), ['--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`, 'about:blank'], { stdio:'ignore' });
-  const devtools = await connectDevTools(debugPort);
-  t.after(async () => {
-    await devtools.send('Browser.close').catch(() => {});
-    devtools.socket.close();
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source:evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort: port } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', { width:1280, height:900, screenWidth:1280, screenHeight:900, deviceScaleFactor:1, mobile:false });
   await devtools.send('Page.navigate', { url:`http://127.0.0.1:${port}/index.html` });
   await evaluate(devtools, `new Promise(resolve => { const check = () => document.querySelector('#launcher-version')?.textContent === 'browser-test' ? resolve() : setTimeout(check, 10); check(); })`);
@@ -1066,33 +1098,7 @@ test('failure_feedback_stays_in_cards_and_logs_after_navigation', async t => {
 });
 
 test('home_auth_and_terminal_install_states', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width: 1280,
     height: 800,
@@ -1795,31 +1801,7 @@ test('home_auth_and_terminal_install_states', async t => {
 });
 
 test('settings_keyboard_and_accessibility_tree', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Accessibility.enable');
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width:1280, height:800, screenWidth:1280, screenHeight:800,
@@ -1924,33 +1906,7 @@ test('settings_keyboard_and_accessibility_tree', async t => {
 });
 
 test('flat_settings_and_extensions_match_backend_contract', async t => {
-  const server = createServer(serveUiFixture);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const httpPort = server.address().port;
-  const debugPort = await freePort();
-  const profileDir = mkdtempSync(join(tmpdir(), 'bahamut-launcher-browser-'));
-  const browser = spawn(browserPath(), [
-    '--headless=new', '--disable-gpu', '--no-sandbox',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profileDir}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  let devtools = null;
-
-  t.after(async () => {
-    if (devtools) {
-      await devtools.send('Browser.close').catch(() => {});
-      devtools.socket.close();
-    }
-    await stopChild(browser);
-    await delay(1000);
-    await new Promise(resolve => server.close(resolve));
-    removeTempRoot(profileDir);
-  });
-
-  devtools = await connectDevTools(debugPort);
-  await devtools.send('Page.addScriptToEvaluateOnNewDocument', { source: evaluateScript() });
-  await devtools.send('Page.enable');
-  await devtools.send('Runtime.enable');
+  const { devtools, httpPort } = await setupBrowserTest(t);
   await devtools.send('Emulation.setDeviceMetricsOverride', {
     width: 1280,
     height: 800,
@@ -2001,7 +1957,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const monitorFixture = state.borderlessMonitors;
     if (monitorRow.hidden || !monitorSelect.disabled || monitorSelect.value !== 'removed-display-id' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)' || ![...monitorSelect.options].some(option => option.value === 'display-primary-id') || state.calls.some(call => call.command === 'set_borderless_monitor')) throw new Error('monitor initial values ' + JSON.stringify({fixture:state.borderlessMonitors,hidden:monitorRow.hidden,disabled:monitorSelect.disabled,value:monitorSelect.value,selected:monitorSelect.selectedOptions[0]?.textContent,options:[...monitorSelect.options].map(option=>[option.value,option.textContent]),mode:state.gameSettings.settings.display_mode,settingsError:document.querySelector('[data-settings-pane="misc"] [data-feedback]').textContent,gameSettingsError:document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent,apiCalls:state.calls.filter(call=>call.command.includes('borderless_monitor'))}));
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="borderless"]').click();
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'borderless' && window.__launcherSettings.gameSettings.settings.display_mode === 'borderless' && !monitorSelect.disabled, "Borderless display mode save");
     if (state.gameSettings.settings.display_mode !== 'borderless' || monitorSelect.disabled || monitorSelect.value !== 'removed-display-id') throw new Error('Borderless mode did not enable the retained monitor identity');
     const monitorRegion = generalCards[1];
     monitorRegion.focus();
@@ -2010,21 +1966,21 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     window.runControllerAction('confirm');
     if (document.activeElement !== monitorSelect) throw new Error('gamepad confirm did not focus the monitor selector');
     window.runControllerAction('confirm');
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === 'display-primary-id' && window.__launcherSettings.borderlessMonitors.selected === 'display-primary-id', "gamepad primary monitor save");
     if (state.borderlessMonitors.selected !== 'display-primary-id' || !state.calls.some(call => call.command === 'set_borderless_monitor' && call.args.monitorId === 'display-primary-id')) throw new Error('gamepad monitor selection did not round-trip its OS identity');
     monitorSelect.value = 'display-secondary-id';
     monitorSelect.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === 'display-secondary-id' && window.__launcherSettings.borderlessMonitors.selected === 'display-secondary-id', "secondary monitor save");
     if (state.borderlessMonitors.selected !== 'display-secondary-id' || monitorSelect.value !== 'display-secondary-id' || !state.calls.some(call => call.command === 'set_borderless_monitor' && call.args.monitorId === 'display-secondary-id')) throw new Error('monitor selection did not round-trip the selected display identity');
     monitorSelect.value = '';
     monitorSelect.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.borderlessMonitors.selected === null && window.__launcherSettings.borderlessMonitors.selected === null, "default monitor save");
     if (state.borderlessMonitors.selected !== null || monitorSelect.value !== '') throw new Error('Default Monitor did not clear the persisted display identity');
     monitorFixture.selected = 'unavailable-after-reopen';
     window.renderBorderlessMonitorSettings(structuredClone(monitorFixture));
     if (monitorSelect.value !== 'unavailable-after-reopen' || monitorSelect.selectedOptions[0].textContent !== 'Unavailable display (uses primary)') throw new Error('missing display identity was not preserved after re-render');
     generalPane.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="windowed"]').click();
-    await new Promise(resolve => setTimeout(resolve, 60));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'windowed' && window.__launcherSettings.gameSettings.settings.display_mode === 'windowed' && monitorSelect.disabled, "Windowed display mode save");
     await window.queueGameSettingsUpdate(() => {});
     if (state.gameSettings.settings.display_mode !== 'windowed' || !monitorSelect.disabled) throw new Error('monitor selector remained enabled outside Borderless mode');
     window.renderBorderlessMonitorSettings({ supported:false, monitors:[], selected:null });
@@ -2182,23 +2138,23 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
 
     state.calls.length = 0;
     closeOff.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.launcherBehavior.close_on_game_start === false && closeOff.getAttribute('aria-pressed') === 'true', "Close Launcher on Game Start save");
     if (!state.calls.some(call => call.command === 'set_close_on_game_start' && call.args.closeOnGameStart === false) || state.launcherBehavior.close_on_game_start || closeOff.getAttribute('aria-pressed') !== 'true') throw new Error('close-on-launch did not persist through its launcher-owned command');
 
     state.calls.length = 0;
     nativeResolutionOn.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.launcherBehavior.native_resolution_override === true && nativeResolutionOn.getAttribute('aria-pressed') === 'true', "Native Resolution Override save");
     if (!state.calls.some(call => call.command === 'set_native_resolution_override' && call.args.nativeResolutionOverride === true) || !state.launcherBehavior.native_resolution_override || nativeResolutionOn.getAttribute('aria-pressed') !== 'true') throw new Error('native resolution override did not persist through its launcher-owned command');
 
     state.calls.length = 0;
     borderless.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'borderless' && borderless.getAttribute('aria-pressed') === 'true', "strict Borderless settings save");
     let save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.display_mode !== 'borderless' || state.gameSettings.settings.display_mode !== 'borderless' || 'initialized' in save.args.settings) throw new Error('borderless display mode did not persist through the strict typed save contract');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="display_mode"][data-game-setting-value="fullscreen"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.display_mode === 'fullscreen' && window.__launcherSettings.gameSettings.settings.display_mode === 'fullscreen', "Fullscreen settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.display_mode !== 'fullscreen' || 'initialized' in save.args.settings) throw new Error('display mode did not use the strict typed save contract');
     if (state.gameSettings.settings.display_mode !== 'fullscreen' || document.querySelector('[data-settings-pane][data-active] [data-feedback]').textContent) throw new Error('display mode did not persist silently');
@@ -2206,25 +2162,25 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     state.calls.length = 0;
     resolution.value = '1920x1080';
     resolution.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.width === 1920 && state.gameSettings.settings.height === 1080 && window.__launcherSettings.gameSettings.settings.width === 1920 && window.__launcherSettings.gameSettings.settings.height === 1080, "resolution settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.width !== 1920 || save.args.settings.height !== 1080) throw new Error('resolution did not persist as its verified width/height pair');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="graphics.hardware_mouse"][data-game-setting-value="false"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.hardware_mouse === false && window.__launcherSettings.gameSettings.settings.graphics.hardware_mouse === false, "Hardware Mouse settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.graphics.hardware_mouse !== false || state.gameSettings.settings.graphics.hardware_mouse !== false) throw new Error('Hardware Mouse did not persist its typed value');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="audio.enabled"][data-game-setting-value="false"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.audio.enabled === false && window.__launcherSettings.gameSettings.settings.audio.enabled === false, "Sound settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.audio.enabled !== false || state.gameSettings.settings.audio.enabled !== false) throw new Error('Sound did not persist its typed value');
 
     state.calls.length = 0;
     settingsScreen.querySelector('[data-game-setting-choice="audio.play_in_background"][data-game-setting-value="true"]').click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.audio.play_in_background === true && window.__launcherSettings.gameSettings.settings.audio.play_in_background === true, "Always Play Sound settings save");
     save = state.calls.find(call => call.command === 'set_game_settings');
     if (!save || save.args.settings.audio.play_in_background !== true || state.gameSettings.settings.audio.play_in_background !== true || 'initialized' in save.args.settings) throw new Error('Always Play Sound did not persist its typed value');
 
@@ -2240,30 +2196,30 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     if (!state.calls.some(call => call.command === 'get_object_distance_selection') || distanceRange.disabled || distanceRange.value !== '0' || distanceRange.getAttribute('aria-valuetext') !== 'Off') throw new Error('Draw Distance did not hydrate to Off');
     state.calls.length = 0;
     chooseGraphicsStep(distanceRange, 2);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.objectDistanceEnabled && state.objectDistancePercent === 150 && window.__launcherSettings.objectDistanceSelection === 150, "Draw Distance multiplier save");
     if (state.calls.filter(call => call.command === 'set_object_distance_selection').length !== 1 || state.calls.find(call => call.command === 'set_object_distance_selection').args.percent !== 150 || !state.objectDistanceEnabled || state.objectDistancePercent !== 150 || distanceRange.value !== '2' || distanceRange.getAttribute('aria-valuetext') !== '1.5x') throw new Error('Draw Distance bar did not save its multiplier');
     await hydrateSettings();
     if (distanceRange.value !== '2') throw new Error('Draw Distance did not retain its saved selection after hydration');
     state.failObjectDistanceWrite = true;
     chooseGraphicsStep(distanceRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.failObjectDistanceWrite && document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Draw Distance"), "Draw Distance failed save");
     if (!state.objectDistanceEnabled || distanceRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Draw Distance")) throw new Error('failed Draw Distance write did not restore the saved selection');
     chooseGraphicsStep(distanceRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.objectDistanceEnabled && window.__launcherSettings.objectDistanceSelection === null, "Draw Distance Off save");
     if (state.objectDistanceEnabled || distanceRange.value !== '0' || state.objectDistancePercent !== 150) throw new Error('Draw Distance Off did not disable the hook and retain the saved multiplier');
     if (!state.calls.some(call => call.command === 'get_camera_zoom_selection') || zoomRange.disabled || zoomRange.value !== '0' || zoomRange.getAttribute('aria-valuetext') !== 'Off') throw new Error('Camera Zoom did not hydrate to Off');
     state.calls.length = 0;
     chooseGraphicsStep(zoomRange, 2);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.cameraZoomEnabled && state.cameraZoomLimit === 12 && window.__launcherSettings.cameraZoomSelection === 12, "Camera Zoom cap save");
     if (state.calls.filter(call => call.command === 'set_camera_zoom_selection').length !== 1 || state.calls.find(call => call.command === 'set_camera_zoom_selection').args.limit !== 12 || !state.cameraZoomEnabled || state.cameraZoomLimit !== 12 || zoomRange.value !== '2' || zoomRange.getAttribute('aria-valuetext') !== '12') throw new Error('Camera Zoom bar did not save its cap');
     await hydrateSettings();
     if (zoomRange.value !== '2') throw new Error('Camera Zoom did not retain its saved selection after hydration');
     state.failCameraZoomWrite = true;
     chooseGraphicsStep(zoomRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.failCameraZoomWrite && document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Camera Zoom"), "Camera Zoom failed save");
     if (!state.cameraZoomEnabled || zoomRange.value !== '2' || !document.querySelector('[data-settings-pane="graphics"] [data-feedback]').textContent.includes("Couldn't save Extended Camera Zoom")) throw new Error('failed Camera Zoom write did not restore the saved selection');
     chooseGraphicsStep(zoomRange, 0);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => !state.cameraZoomEnabled && window.__launcherSettings.cameraZoomSelection === null, "Camera Zoom Off save");
     if (state.cameraZoomEnabled || zoomRange.value !== '0' || state.cameraZoomLimit !== 12) throw new Error('Camera Zoom Off did not disable the hook and retain the saved cap');
     const textureQuality = settingsScreen.querySelector('[data-game-setting-choice="graphics.texture_quality"][data-game-setting-value="low"]');
     const textureFiltering = settingsScreen.querySelector('[data-game-setting="graphics.texture_filtering"]');
@@ -2273,12 +2229,12 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     textureFiltering.value = '3';
     textureFiltering.dispatchEvent(new Event('input', { bubbles:true }));
     textureFiltering.dispatchEvent(new Event('change', { bubbles:true }));
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.texture_filtering === 'highest' && window.__launcherSettings.gameSettings.settings.graphics.texture_filtering === 'highest', "Texture Filtering Highest save");
     if (!state.calls.some(call => call.command === 'set_game_settings' && call.args.settings.graphics.texture_filtering === 'highest') || state.gameSettings.settings.graphics.texture_filtering !== 'highest' || textureFiltering.value !== '3') throw new Error('Texture Filtering bar did not persist Highest');
     state.calls.length = 0;
     const multisampling = settingsScreen.querySelector('[data-game-setting-choice="graphics.multisampling"][data-game-setting-value="4x"]');
     multisampling.click();
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await window.waitForBrowserReady(() => state.gameSettings.settings.graphics.multisampling === '4x' && multisampling.getAttribute('aria-pressed') === 'true', "multisampling 4x save");
     if (!state.calls.some(call => call.command === 'set_game_settings' && call.args.settings.graphics.multisampling === '4x')) throw new Error('graphics enum did not persist');
 
     state.gameSettingsWriteDelayMs = 60;
@@ -2762,7 +2718,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 50));
     const screen = document.querySelector('#screen-gamepad');
     if (!screen.hasAttribute('data-active') || document.querySelector('[data-route][aria-selected="true"]')) throw new Error('Gamepad utility did not open its dedicated screen');
-    if (screen.querySelectorAll('.gamepad-card').length !== 2 || screen.querySelectorAll('[data-gamepad-region]').length !== 1 || screen.querySelector('h1').textContent !== 'Gamepad Settings') throw new Error('Gamepad screen does not have the functional and placeholder cards');
+    if (screen.querySelectorAll('.gamepad-card').length !== 2 || screen.querySelectorAll('[data-gamepad-region]').length !== 2 || screen.querySelector('h1').textContent !== 'Gamepad Settings') throw new Error('Gamepad screen does not have the functional and placeholder cards');
     const gamepadScreenRect = screen.getBoundingClientRect();
     const gamepadGridRect = screen.querySelector('.gamepad-grid').getBoundingClientRect();
     const gamepadCardRects = [...screen.querySelectorAll('.gamepad-card')].map(card => card.getBoundingClientRect());
@@ -2778,7 +2734,7 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     const stubSettingRects = [...screen.querySelectorAll('.gamepad-card--stub .gamepad-setting')].map(row => row.getBoundingClientRect());
     const configRects = [...screen.querySelectorAll('.gamepad-config-action')].map(button => button.getBoundingClientRect());
     const separators = [...screen.querySelectorAll('.gamepad-setting')].filter(row => getComputedStyle(row).borderTopWidth !== '0px');
-    if (screen.textContent.includes('Enable Gamepad') || !screen.textContent.includes('Steam Deck not detected.') || screen.textContent.includes('support is unavailable') || screen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('Gamepad or Steam Deck support state is misleading');
+    if (screen.textContent.includes('Enable Gamepad') || !screen.textContent.includes('Steam Deck not detected.') || screen.textContent.includes('support is unavailable') || screen.querySelectorAll('.gamepad-card--stub .gamepad-setting:not([data-pad-setup-row]) button:not(:disabled), .gamepad-card--stub .gamepad-config-row button:not(:disabled), .gamepad-card--stub [data-pad-setup-choice]:not(:disabled)').length || screen.querySelectorAll('[data-pad-setup-choice]').length !== 2 || screen.querySelector('[data-pad-setup-choice="false"]').getAttribute('aria-pressed') !== 'true') throw new Error('Gamepad or Steam Deck support state is misleading');
     if (cardHeadingStyle.fontSize !== '22px' || cardHeadingStyle.lineHeight !== '33px' || settingStyle.minHeight !== '50px' || choiceRowStyle.gap !== '8px' || stubCardStyle.opacity !== '1' || stubSettingStyle.opacity !== '0.5' || separators.length) throw new Error('Gamepad card geometry drifted from Avalon: ' + JSON.stringify({ heading:cardHeadingStyle.fontSize, headingLine:cardHeadingStyle.lineHeight, settingHeight:settingStyle.minHeight, choiceGap:choiceRowStyle.gap, stubCardOpacity:stubCardStyle.opacity, stubSettingOpacity:stubSettingStyle.opacity, separators:separators.length }));
     const configCenters = configRects.map((rect, index) => Math.abs(rect.left + rect.width / 2 - (gamepadCardRects[index].left + gamepadCardRects[index].width / 2)));
     if (Math.abs(functionalSettingRect.top - stubSettingRects[0].top) >= .1 || Math.abs(stubSettingRects[1].top - stubSettingRects[0].top - 92) >= .1 || Math.abs(stubSettingRects[0].top - stubStatusRect.bottom - 22) >= .1 || Math.abs(configRects[0].top - functionalSettingRect.bottom - 42) >= .1 || Math.abs(configRects[1].top - stubSettingRects[1].bottom - 42) >= .1 || configCenters.some(offset => offset >= .1)) throw new Error('Gamepad rows or actions are not aligned to the Avalon rhythm');
@@ -2788,6 +2744,70 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     await new Promise(resolve => setTimeout(resolve, 20));
     if (!state.calls.some(call => call.command === 'launch_config_tool')) throw new Error('Gamepad XIV Config action did not invoke the retail utility');
     if (screen.querySelector('.settings-description') || screen.textContent.includes('current controller remains active')) throw new Error('Gamepad page retained the removed ownership copy');
+  `);
+
+  await assertUi(`
+    const state = window.__launcherBrowserState;
+    const screen = document.querySelector('#screen-gamepad');
+    const deckCard = screen.querySelector('.gamepad-card--stub');
+    const padRow = screen.querySelector('[data-pad-setup-row]');
+    const padOn = screen.querySelector('[data-pad-setup-choice="true"]');
+    const padOff = screen.querySelector('[data-pad-setup-choice="false"]');
+    const padFeedback = () => screen.querySelector('[data-feedback]').textContent;
+    const settle = () => new Promise(resolve => setTimeout(resolve, 40));
+    const stubRowTops = () => [...screen.querySelectorAll('.gamepad-card--stub .gamepad-setting')].map(row => row.getBoundingClientRect().top);
+    const unsupportedTops = stubRowTops();
+    if (padRow.parentElement !== deckCard.querySelector('.gamepad-card-body') || padRow.querySelector('.gamepad-setting-label').textContent !== 'Force Auto-Detect Gamepad') throw new Error('pad setup row left the Steam Deck card or lost its label');
+    if (!padOn.disabled || !padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false' || getComputedStyle(padRow).opacity !== '0.5') throw new Error('unsupported pad setup row was not disabled with Off pressed');
+
+    state.padSetup = { supported:true, enabled:false };
+    state.calls.length = 0;
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (!state.calls.some(call => call.command === 'get_pad_setup') || padOn.disabled || padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false') throw new Error('supported pad setup row did not hydrate enabled with Off pressed');
+    const otherDeckEnabled = [...deckCard.querySelectorAll('button:not(:disabled)')].filter(button => !button.hasAttribute('data-pad-setup-choice'));
+    if (otherDeckEnabled.length || deckCard.querySelectorAll('button:disabled').length !== 3 || [...deckCard.querySelectorAll('.gamepad-setting-label')].map(label => label.textContent).join('|') !== 'Use Steam Deck Recommended Graphics|Force Auto-Detect Gamepad' || !deckCard.textContent.includes('Steam Deck not detected.')) throw new Error('other Steam Deck rows did not stay disabled and unchanged');
+    if (getComputedStyle(padRow).opacity !== '1' || getComputedStyle(padOn).pointerEvents !== 'auto' || document.elementFromPoint(padOn.getBoundingClientRect().left + 8, padOn.getBoundingClientRect().top + 8) !== padOn) throw new Error('supported pad setup row is still dimmed or blocked from pointer input');
+    if (stubRowTops().some((top, index) => Math.abs(top - unsupportedTops[index]) >= .1)) throw new Error('enabling the pad setup row moved the Steam Deck rows');
+
+    state.calls.length = 0;
+    padOn.click();
+    await settle();
+    const saves = state.calls.filter(call => call.command === 'set_pad_setup');
+    if (saves.length !== 1 || saves[0].args.enabled !== true || !state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true' || padOff.getAttribute('aria-pressed') !== 'false') throw new Error('mouse On did not persist through set_pad_setup');
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (padOn.getAttribute('aria-pressed') !== 'true') throw new Error('pad setup did not retain its saved selection after hydration');
+
+    screen.querySelector('[data-gamepad-region]').focus();
+    runControllerAction('next-region');
+    if (document.activeElement !== deckCard) throw new Error('RB did not reach the supported Steam Deck card');
+    runControllerAction('down');
+    if (document.activeElement !== padRow) throw new Error('D-pad did not focus the pad setup row');
+    state.calls.length = 0;
+    runControllerAction('confirm');
+    await settle();
+    if (document.activeElement !== padRow || state.calls.some(call => call.command === 'set_pad_setup')) throw new Error('Confirm changed the pad setup row instead of leaving it to X');
+    runControllerAction('secondary');
+    await settle();
+    if (document.activeElement !== padRow || state.padSetup.enabled || padOff.getAttribute('aria-pressed') !== 'true' || state.calls.filter(call => call.command === 'set_pad_setup').at(-1)?.args.enabled !== false) throw new Error('X did not cycle the pad setup row to Off while retaining row focus');
+    runControllerAction('secondary');
+    await settle();
+    if (document.activeElement !== padRow || !state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true') throw new Error('X did not cycle the pad setup row back to On');
+
+    state.calls.length = 0;
+    state.failPadSetupWrite = true;
+    runControllerAction('secondary');
+    await settle();
+    if (!state.padSetup.enabled || padOn.getAttribute('aria-pressed') !== 'true' || padOff.getAttribute('aria-pressed') !== 'false' || !padFeedback().includes("Couldn't save Force Auto-Detect Gamepad") || !state.calls.some(call => call.command === 'record_ui_failure' && call.args.context === 'set_pad_setup')) throw new Error('failed pad setup write did not roll back and report: ' + padFeedback());
+    runControllerAction('secondary');
+    await settle();
+    if (state.padSetup.enabled || padOff.getAttribute('aria-pressed') !== 'true' || padFeedback()) throw new Error('pad setup did not recover and clear feedback after a failed write');
+
+    state.padSetup = { supported:false, enabled:true };
+    document.querySelector('[data-utility="gamepad"]').click();
+    await settle();
+    if (!padOn.disabled || !padOff.disabled || padOff.getAttribute('aria-pressed') !== 'true' || padOn.getAttribute('aria-pressed') !== 'false' || getComputedStyle(padRow).opacity !== '0.5' || screen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('pad setup row did not return to its disabled state when unsupported');
   `);
 
   await assertUi(`
@@ -3110,11 +3130,13 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     document.querySelector('[data-utility="gamepad"]').click();
     const gamepadScreen = document.querySelector('#screen-gamepad');
     if (gamepadScreen.querySelectorAll('.gamepad-card').length !== 2 || getComputedStyle(gamepadScreen.querySelector('.gamepad-grid')).gridTemplateColumns.split(' ').length !== 2) throw new Error('Gamepad page is not the two-card layout');
-    if (!gamepadScreen.textContent.includes('Steam Deck not detected.') || gamepadScreen.textContent.includes('support is unavailable') || gamepadScreen.querySelectorAll('.gamepad-card--stub button:not(:disabled)').length) throw new Error('Steam Deck placeholder is missing or implies working controls');
+    if (!gamepadScreen.textContent.includes('Steam Deck not detected.') || gamepadScreen.textContent.includes('support is unavailable') || gamepadScreen.querySelectorAll('.gamepad-card--stub .gamepad-setting:not([data-pad-setup-row]) button:not(:disabled), .gamepad-card--stub .gamepad-config-row button:not(:disabled), .gamepad-card--stub [data-pad-setup-choice]:not(:disabled)').length || gamepadScreen.querySelectorAll('[data-pad-setup-choice]:not(:disabled)').length) throw new Error('Steam Deck placeholder is missing or implies working controls');
     if (gamepadScreen.textContent.includes('current controller remains active') || gamepadScreen.textContent.includes('Applies to the launcher only')) throw new Error('Gamepad page retained the removed explanatory fluff');
     focusAdjacentRegion(1);
     const gamepadCard = gamepadScreen.querySelector('[data-gamepad-region]');
     if (document.activeElement !== gamepadCard) throw new Error('Gamepad page did not begin at the full card');
+    runControllerAction('next-region');
+    if (document.activeElement !== gamepadCard) throw new Error('unsupported Steam Deck card became a gamepad region');
     runControllerAction('down');
     const navigationRow = document.querySelector('[data-gamepad-choice="true"]').closest('[data-gamepad-settings-row]');
     if (document.activeElement !== navigationRow) throw new Error('D-pad did not enter the Launcher Gamepad Navigation row');
@@ -3166,31 +3188,31 @@ test('flat_settings_and_extensions_match_backend_contract', async t => {
     window.__launcherBrowserState.registerMode = 'network';
     submit.click();
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration network duplicate-submit result");
     if (state.calls.filter(call => call.command === 'register').length !== 1 || !document.querySelector('#screen-register [data-feedback]').textContent) throw new Error('Registration allowed duplicate submissions while the first request was pending');
     window.__launcherBrowserState.registerMode = 'username-taken';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration username-taken result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== 'That username is already taken.') throw new Error('Taken-username copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'network';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration network result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't reach the server to create your account. Copy logs from the Help page for support.") throw new Error('Registration network-error copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'rate-limited';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration rate-limited result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== 'Too many attempts. Wait a few minutes.') throw new Error('Registration rate-limit copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'create-failed';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration create-failed result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration create-failure copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'server';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && Boolean(document.querySelector('#screen-register [data-feedback]').textContent), "registration server result");
     if (document.querySelector('#screen-register [data-feedback]').textContent !== "Couldn't create your account. Copy logs from the Help page for support.") throw new Error('Registration fallback copy drifted from Avalon');
     window.__launcherBrowserState.registerMode = 'username-invalid';
     submit.click();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await window.waitForBrowserReady(() => !submit.disabled && usernameError.textContent === 'Username is rejected by this server.' && username.getAttribute('aria-invalid') === 'true', "registration username-invalid result");
     if (usernameError.textContent !== 'Username is rejected by this server.' || username.getAttribute('aria-invalid') !== 'true') throw new Error('Server username validation did not use the reserved field-error slot');
     submit.focus();
     if (document.activeElement.type !== 'submit') throw new Error('Create Account navigation did not reach submit');

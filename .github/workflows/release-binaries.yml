@@ -128,6 +128,60 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
           cat "$RUNNER_TEMP/commit/$TARGET"
 
+      - name: Resolve the official overlay DAT source
+        id: overlaydats
+        shell: bash
+        env:
+          ASSETS_TOKEN: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
+          PUBLISH: ${{ needs.resolve.outputs.publish }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          manifest=manifests/official-overlay-dats.json
+          # Older tags without a pin retain their original package contents.
+          if [[ "$PUBLISH" != true || "$REPOSITORY" != BahamutXIV/bahamut-launcher || ! -f "$manifest" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Pinned official overlay files are disabled for this build."
+            exit 0
+          fi
+          if [[ -z "${ASSETS_TOKEN:-}" ]]; then
+            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files. See docs/releasing.md."
+            exit 1
+          fi
+          {
+            echo "enabled=true"
+            printf 'repository=%s\n' "$(jq -er '.repository' "$manifest")"
+            printf 'commit=%s\n' "$(jq -er '.commit' "$manifest")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.overlaydats.outputs.repository }}
+          ref: ${{ steps.overlaydats.outputs.commit }}
+          token: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
+          path: .official-overlay-assets
+          filter: blob:none
+          sparse-checkout: bahamut-dats-overlay/data/
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python for the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I scripts/official-overlay-dats.py install --source .official-overlay-assets
+          rm -rf .official-overlay-assets
+
       - name: Install Tauri Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -470,6 +524,60 @@ jobs:
           mkdir -p "$RUNNER_TEMP/commit"
           git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
           cat "$RUNNER_TEMP/commit/$TARGET"
+
+      - name: Resolve the official overlay DAT source
+        id: overlaydats
+        shell: bash
+        env:
+          ASSETS_TOKEN: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
+          PUBLISH: ${{ needs.resolve.outputs.publish }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          manifest=manifests/official-overlay-dats.json
+          # Older tags without a pin retain their original package contents.
+          if [[ "$PUBLISH" != true || "$REPOSITORY" != BahamutXIV/bahamut-launcher || ! -f "$manifest" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Pinned official overlay files are disabled for this build."
+            exit 0
+          fi
+          if [[ -z "${ASSETS_TOKEN:-}" ]]; then
+            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files. See docs/releasing.md."
+            exit 1
+          fi
+          {
+            echo "enabled=true"
+            printf 'repository=%s\n' "$(jq -er '.repository' "$manifest")"
+            printf 'commit=%s\n' "$(jq -er '.commit' "$manifest")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.overlaydats.outputs.repository }}
+          ref: ${{ steps.overlaydats.outputs.commit }}
+          token: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
+          path: .official-overlay-assets
+          filter: blob:none
+          sparse-checkout: bahamut-dats-overlay/data/
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python for the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the official overlay DATs
+        if: steps.overlaydats.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I scripts/official-overlay-dats.py install --source .official-overlay-assets
+          rm -rf .official-overlay-assets
 
       # The package needs Flatpak 1.15.6 or newer for --device=input; 24.04 ships 1.14.6.
       # The PPA supplies flatpak and a newer flatpak-builder than the distribution.

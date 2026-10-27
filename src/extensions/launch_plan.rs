@@ -38,6 +38,7 @@ pub const CAMERA_ZOOM_ENABLED_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_E
 pub const CAMERA_ZOOM_LIMIT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_LIMIT";
 pub const BORDERLESS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS";
 pub const BORDERLESS_MONITOR_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS_MONITOR";
+pub const LAUNCHER_VERSION_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_LAUNCHER_VERSION";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionLaunchRequest {
@@ -163,23 +164,29 @@ fn plan_verified_extension_launch(
     plan_verified_extension_launch_mapped(request, &host_path)
 }
 
+/// Host paths mapped through the guest mapper, in the order the planner maps them.
+struct GuestPaths {
+    client: OsString,
+    client_module: OsString,
+    environment: EnvironmentPaths,
+}
+
+/// Mapped paths that travel to the helper as environment values.
+struct EnvironmentPaths {
+    startup_script: OsString,
+    screenshots: OsString,
+    addon_settings: OsString,
+    chat_logs: OsString,
+    screenshot_plugin: OsString,
+    discord_rpc_plugin: OsString,
+}
+
 fn plan_verified_extension_launch_mapped(
     request: &ExtensionLaunchRequest,
     guest: GuestPathMapper<'_>,
 ) -> Result<HelperInvocation, LaunchPlanError> {
     validate_helper_path(&request.helper_path)?;
-    let client_path = guest_path_arg(guest, "client", &request.game_dir.join("ffxivgame.exe"))?;
-    let client_module_path = guest_path_arg(guest, "client module", &request.client_module_path)?;
-    let startup_script_path =
-        guest_path_arg(guest, "startup script", &request.startup_script_path)?;
-    let screenshots_path = guest_path_arg(guest, "screenshots", &request.screenshots_path)?;
-    let addon_settings_path =
-        guest_path_arg(guest, "addon settings", &request.addon_settings_path)?;
-    let chat_logs_path = guest_path_arg(guest, "chat logs", &request.chat_logs_path)?;
-    let screenshot_plugin_path =
-        guest_path_arg(guest, "screenshot plugin", &request.screenshot_plugin_path)?;
-    let discord_rpc_plugin_path =
-        guest_path_arg(guest, "DiscordRPC plugin", &request.discord_rpc_plugin_path)?;
+    let paths = map_guest_paths(request, guest)?;
     reject_empty(
         "Discord application id",
         &request.discord_rpc_application_id,
@@ -189,6 +196,49 @@ fn plan_verified_extension_launch_mapped(
     reject_empty("launch-argument", &request.launch_argument)?;
     let current_dir = path_arg("working directory", &request.game_dir)?;
 
+    let args = helper_args(request, paths.client, paths.client_module);
+    let environment = helper_environment(request, guest, paths.environment)?;
+    Ok(HelperInvocation {
+        program: request.helper_path.clone(),
+        args,
+        environment,
+        current_dir,
+    })
+}
+
+fn map_guest_paths(
+    request: &ExtensionLaunchRequest,
+    guest: GuestPathMapper<'_>,
+) -> Result<GuestPaths, HelperPlanError> {
+    let client = guest_path_arg(guest, "client", &request.game_dir.join("ffxivgame.exe"))?;
+    let client_module = guest_path_arg(guest, "client module", &request.client_module_path)?;
+    let startup_script = guest_path_arg(guest, "startup script", &request.startup_script_path)?;
+    let screenshots = guest_path_arg(guest, "screenshots", &request.screenshots_path)?;
+    let addon_settings = guest_path_arg(guest, "addon settings", &request.addon_settings_path)?;
+    let chat_logs = guest_path_arg(guest, "chat logs", &request.chat_logs_path)?;
+    let screenshot_plugin =
+        guest_path_arg(guest, "screenshot plugin", &request.screenshot_plugin_path)?;
+    let discord_rpc_plugin =
+        guest_path_arg(guest, "DiscordRPC plugin", &request.discord_rpc_plugin_path)?;
+    Ok(GuestPaths {
+        client,
+        client_module,
+        environment: EnvironmentPaths {
+            startup_script,
+            screenshots,
+            addon_settings,
+            chat_logs,
+            screenshot_plugin,
+            discord_rpc_plugin,
+        },
+    })
+}
+
+fn helper_args(
+    request: &ExtensionLaunchRequest,
+    client_path: OsString,
+    client_module_path: OsString,
+) -> Vec<OsString> {
     let mut args = Vec::with_capacity(10);
     push_path_arg(&mut args, ARG_CLIENT, client_path);
     push_path_arg(&mut args, ARG_MODULE, client_module_path);
@@ -198,9 +248,20 @@ fn plan_verified_extension_launch_mapped(
     args.push(encode_hex(&request.lobby_host_patch).into());
     args.push(ARG_LAUNCH_ARGUMENT.into());
     args.push(request.launch_argument.clone().into());
-    let mut environment = vec![(STARTUP_SCRIPT_ENVIRONMENT.into(), startup_script_path)];
-    environment.push((SCREENSHOT_PLUGIN_ENVIRONMENT.into(), screenshot_plugin_path));
-    environment.push((SCREENSHOTS_ENVIRONMENT.into(), screenshots_path));
+    args
+}
+
+fn helper_environment(
+    request: &ExtensionLaunchRequest,
+    guest: GuestPathMapper<'_>,
+    paths: EnvironmentPaths,
+) -> Result<Vec<(OsString, OsString)>, LaunchPlanError> {
+    let mut environment = vec![(STARTUP_SCRIPT_ENVIRONMENT.into(), paths.startup_script)];
+    environment.push((
+        SCREENSHOT_PLUGIN_ENVIRONMENT.into(),
+        paths.screenshot_plugin,
+    ));
+    environment.push((SCREENSHOTS_ENVIRONMENT.into(), paths.screenshots));
     environment.push((
         SCREENSHOT_FORMAT_ENVIRONMENT.into(),
         request.screenshot_format.to_string().into(),
@@ -219,7 +280,7 @@ fn plan_verified_extension_launch_mapped(
     ));
     environment.push((
         DISCORD_RPC_PLUGIN_ENVIRONMENT.into(),
-        discord_rpc_plugin_path,
+        paths.discord_rpc_plugin,
     ));
     environment.push((
         DISCORD_RPC_APPLICATION_ID_ENVIRONMENT.into(),
@@ -237,8 +298,8 @@ fn plan_verified_extension_launch_mapped(
         ADDON_MANIFESTS_ENVIRONMENT.into(),
         encode_path_list(guest, "addon manifest", &request.addon_manifests)?,
     ));
-    environment.push((ADDON_SETTINGS_ENVIRONMENT.into(), addon_settings_path));
-    environment.push((CHAT_LOGS_ENVIRONMENT.into(), chat_logs_path));
+    environment.push((ADDON_SETTINGS_ENVIRONMENT.into(), paths.addon_settings));
+    environment.push((CHAT_LOGS_ENVIRONMENT.into(), paths.chat_logs));
     environment.push((
         DAT_PACKAGE_ROOTS_ENVIRONMENT.into(),
         encode_path_list(guest, "DAT overlay root", &request.dat_roots)?,
@@ -277,12 +338,11 @@ fn plan_verified_extension_launch_mapped(
         CAMERA_ZOOM_LIMIT_ENVIRONMENT.into(),
         request.camera_zoom_limit.to_string().into(),
     ));
-    Ok(HelperInvocation {
-        program: request.helper_path.clone(),
-        args,
-        environment,
-        current_dir,
-    })
+    environment.push((
+        LAUNCHER_VERSION_ENVIRONMENT.into(),
+        env!("BAHAMUT_GIT_DESCRIBE").into(),
+    ));
+    Ok(environment)
 }
 
 fn guest_path_arg(
@@ -394,7 +454,7 @@ mod tests {
         assert_eq!(args[7], "3132372E302E302E3100");
         assert_eq!(args[8], "--launch-argument");
         assert_eq!(args[9], request().launch_argument);
-        assert_eq!(invocation.environment.len(), 21);
+        assert_eq!(invocation.environment.len(), 22);
         assert_eq!(invocation.environment[0].0, STARTUP_SCRIPT_ENVIRONMENT);
         assert_eq!(invocation.environment[0].1, request().startup_script_path);
         assert_eq!(invocation.environment[1].0, SCREENSHOT_PLUGIN_ENVIRONMENT);
@@ -474,6 +534,11 @@ mod tests {
         assert_eq!(invocation.environment[19].1, "false");
         assert_eq!(invocation.environment[20].0, CAMERA_ZOOM_LIMIT_ENVIRONMENT);
         assert_eq!(invocation.environment[20].1, "15");
+        assert_eq!(invocation.environment[21].0, LAUNCHER_VERSION_ENVIRONMENT);
+        assert_eq!(
+            invocation.environment[21].1,
+            OsString::from(env!("BAHAMUT_GIT_DESCRIBE"))
+        );
     }
 
     #[test]
@@ -668,7 +733,7 @@ mod tests {
     fn wine_plan_maps_path_environment_and_keeps_scalars() {
         let wine = wine_plan(&request());
         let host = plan_verified_extension_launch(&request()).unwrap();
-        assert_eq!(wine.environment.len(), 21);
+        assert_eq!(wine.environment.len(), 22);
         let mapped = [
             (
                 STARTUP_SCRIPT_ENVIRONMENT,

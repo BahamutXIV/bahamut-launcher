@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn packetlogger_is_a_discoverable_opt_in_addon() {
+    fn packetlogger_is_a_discoverable_default_addon() {
         let manifest =
             toml::from_str::<AddonManifest>(include_str!("../../addons/packetlogger/addon.toml"))
                 .unwrap();
@@ -343,7 +343,12 @@ mod tests {
                 .iter()
                 .map(|command| command.usage.as_str())
                 .collect::<Vec<_>>(),
-            ["/packetlogger", "/packetlogger start", "/packetlogger stop"]
+            [
+                "/packetlogger",
+                "/packetlogger start",
+                "/packetlogger stop",
+                "/packetlogger split"
+            ]
         );
         assert!(manifest.capabilities.contains(&"chat.print".to_string()));
     }
@@ -362,7 +367,15 @@ mod tests {
     fn gameplay_overlay_lock_commands_are_discoverable() {
         for (id, text) in [
             ("distance", include_str!("../../addons/distance/addon.toml")),
+            (
+                "enemycast",
+                include_str!("../../addons/enemycast/addon.toml"),
+            ),
             ("targethp", include_str!("../../addons/targethp/addon.toml")),
+            (
+                "customtimer",
+                include_str!("../../addons/customtimer/addon.toml"),
+            ),
         ] {
             let manifest = toml::from_str::<AddonManifest>(text).unwrap();
             assert_eq!(manifest.id, id);
@@ -377,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn combatparser_is_a_discoverable_opt_in_addon() {
+    fn combatparser_is_a_discoverable_default_addon() {
         let manifest =
             toml::from_str::<AddonManifest>(include_str!("../../addons/combatparser/addon.toml"))
                 .unwrap();
@@ -453,6 +466,48 @@ mod tests {
         let found = discover_addons_layered(shipped.path(), user.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].manifest_path, std::fs::canonicalize(fps).unwrap());
+    }
+
+    #[test]
+    fn custom_packetlogger_package_cannot_replace_the_shipped_one() {
+        let shipped = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let shipped_dir = shipped.path().join("packetlogger");
+        std::fs::create_dir_all(&shipped_dir).unwrap();
+        std::fs::write(shipped_dir.join("packetlogger.lua"), "-- shipped\n").unwrap();
+        std::fs::write(
+            shipped_dir.join(ADDON_MANIFEST_FILE_NAME),
+            include_str!("../../addons/packetlogger/addon.toml"),
+        )
+        .unwrap();
+        let user_dir = user.path().join("packetlogger");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::write(user_dir.join("packetlogger.lua"), "-- custom\n").unwrap();
+        std::fs::write(
+            user_dir.join(ADDON_MANIFEST_FILE_NAME),
+            format!(
+                "{}# custom copy
+",
+                include_str!("../../addons/packetlogger/addon.toml")
+            ),
+        )
+        .unwrap();
+
+        let shipped_manifest =
+            std::fs::canonicalize(shipped_dir.join(ADDON_MANIFEST_FILE_NAME)).unwrap();
+        let found = discover_addons_layered(shipped.path(), user.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "packetlogger");
+        assert_eq!(found[0].manifest_path, shipped_manifest);
+
+        let selected = select_addon_manifests(
+            &found,
+            &[AddonPreference {
+                id: "packetlogger".into(),
+                enabled: true,
+            }],
+        );
+        assert_eq!(selected, [shipped_manifest]);
     }
 
     #[test]

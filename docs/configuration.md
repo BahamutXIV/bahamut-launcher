@@ -18,6 +18,7 @@ Each file has a separate purpose:
 | `config/plugins/` and `config/addons/` | Settings owned by individual extensions |
 | `config/addons/layout.ini` | Addon overlay positions shared by all characters |
 | `config/news.toml` | Announcements shown on Home |
+| `config/controller.ini` | Linux game controller selection setting, created when the setting is first saved |
 
 Tracked starter files are in [`configs/`](../configs/). The launcher creates
 missing live files from the current defaults. When saving, it validates the
@@ -44,6 +45,7 @@ marker:
     addons/layout.ini                   <- shared addon overlay positions
     plugins/screenshot/settings.ini     <- Screenshot-owned settings
     news.toml                           <- announcements rendered on the Home screen
+    controller.ini                      <- Linux game controller selection setting
 ```
 
 The executable in a portable Linux or macOS tree is `bahamut-launcher`; the
@@ -420,9 +422,9 @@ confirmation. It cannot run while this launcher owns a starting or running
 game, and it reserves the operation until it finishes. Close games and
 configuration utilities started outside this launcher before restoring.
 
-Backup, restore, and HUD reset run on workers so the window stays responsive.
-Only one can run at a time. HUD reset also blocks game launch. Closing the
-launcher waits for these operations and launch preparation to finish.
+Backup and restore run on workers so the window stays responsive. Only one
+can run at a time. Closing the launcher waits for these operations and launch
+preparation to finish.
 
 Restore stages files on the same volume, rejects entries outside the
 allowlist, validates owned files, and keeps rollback storage until replacement
@@ -505,8 +507,8 @@ Each numbered row records an installed or previously installed package.
 load order within each package kind; toggling a package leaves its row in
 place. IDs must be unique lowercase ASCII identifiers within that kind.
 
-The shipped defaults enable every packaged plugin and addon except
-Combatparser and Packetlogger. New addons without a row start disabled.
+The shipped defaults enable every packaged plugin and addon except Custom
+Timer, Enemy Cast, and Targetlines. New addons without a row start disabled.
 Existing selections are preserved, and rows for missing packages are ignored
 at launch.
 
@@ -567,6 +569,65 @@ through `f9` in `hotkey` or a `/bind` line; you may need to hold fn. `insert`
 suits an external PC keyboard. See
 [Platform support](extensions.md#platform-support) for capture status under
 Wine.
+
+## Controller settings
+
+The retail client uses a game controller only when its per-user `config.pad`
+names that controller's exact DirectInput identity. Without a matching
+`config.pad`, it selects no controller. The public
+[controller mapping](https://github.com/XIVLegacy/xivl-decomp/blob/main/docs/input/controller-mapping.md#file-fields)
+and [game controller startup](https://github.com/XIVLegacy/xivl-decomp/blob/main/docs/input/game-controller-startup.md)
+findings document the file layout and this selection rule for the 1.23b
+client. Under Wine, each prefix assigns a
+controller its own identity, so a `config.pad` saved in another prefix, such
+as one made by Proton, does not match in the launcher's prefix.
+
+**Force Auto-Detect Gamepad** on the Gamepad Settings screen's Steam Deck card
+lets Play write that selection. It is off by default, is available only on
+Linux, and is saved in `config/controller.ini`:
+
+```ini
+[controller]
+pad_setup = false
+```
+
+A missing file means off. Unknown keys are ignored. If the file cannot be
+read, Play continues with the setting off and logs a warning.
+
+When the setting is on, each Play on Linux checks
+`<Documents>/My Games/FINAL FANTASY XIV/config.pad` against the controllers
+that Wine has recorded in the launcher's prefix and that the host currently
+reports:
+
+- If `config.pad` already names a present controller, it is left unchanged,
+  including its button map.
+- If it names no present controller, only the controller identity is
+  replaced. The button map, flags, and remaining bytes are kept.
+- If it is missing or invalid, a new file is created with the client's
+  defaults.
+- The client's "XInput Compliant Gamepad" button map is written only when
+  every button is unassigned and the controller reports the Xbox 360
+  controller ID `045e:028e`. Other controllers get the identity only and keep
+  their existing button map; the launcher does not assign their buttons.
+- If no recorded controller is present, or several are present and none of
+  them is `045e:028e`, nothing is written.
+
+Before replacing a file, Play saves the previous bytes as `config.pad.bak` in
+the same folder, replacing an older backup. A failure in this step is logged
+and never stops Play. To undo it, turn the setting off, then copy
+`config.pad.bak` over `config.pad`, or delete `config.pad` so the client uses
+its defaults.
+The [User Settings and Macros](#user-settings-and-macros) backup also includes
+`config.pad`.
+
+Wine records a controller only after a program in the prefix has seen it. The
+first Play after the prefix is created, or after a new controller is first
+connected, therefore cannot select that controller; the next Play can. The
+step does not change the game's own Gamepad option, which the game stores
+separately under its `user` folder. Whether this selection makes a controller
+work in the game on a Steam Deck is unverified. See
+[Controller not detected in Gaming Mode](troubleshooting.md#controller-not-detected-in-gaming-mode)
+for the log lines it writes.
 
 ## Client controls
 
@@ -661,11 +722,13 @@ addons/<addon-id>/addon.toml
 addons/<addon-id>/<entry>.lua
 config/addons/<addon-id>/settings.ini
 config/bahamut.ini
+config/controller.ini
 config/dats.ini
 config/extensions.ini
 config/plugins/screenshot/settings.ini
 logs/chat/YYYY-MM-DD.log
-logs/packets/YYYY-MM-DD.csv
+logs/packets/capture-<UTC time>.csv
+logs/packets/capture-<UTC time>-part<NNNN>.csv
 logs/launcher/bahamut-launcher.log
 logs/launcher/bahamut-launcher.previous.log
 plugins/dats/

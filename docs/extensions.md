@@ -120,6 +120,81 @@ RGB digits; size must be an integer from 8 to 48. Each addon saves these
 choices in its settings file. FPS starts red; Distance and Target HP start
 white. All three start at size 13.
 
+### Enemy Cast
+
+Enemy Cast (`enemycast`) is experimental and disabled by default. Enable it
+in Extensions before the next game launch. Existing saved selections are
+preserved. `/enemycast lock` saves whether Shift-dragging is allowed.
+
+The overlay shows up to four copied enemy cast or engaged-idle rows. Unfinished
+casts take priority, followed by completed casts and then idle rows. Names fall
+back to an actor ID and `Ability <command ID>` when unknown. Incoming battle
+results supply cast-start, completion, and interruption cues. A matching
+interruption clears the cast; an engaged enemy can remain as an idle row.
+Passive/dead state, actor removal or ID reuse, and the implementation's despawn
+message clear that actor's rows. Clearing all actors, player identity or zone
+changes, and unavailable player state clear all rows.
+
+Progress is an estimate from the embedded Bahamut command catalog, with a
+3500 ms fallback and a minimum visible duration of 1800 ms. `Done` can mean
+either a matching completion message or that the estimate elapsed; it does
+not prove an observed cast duration. Completed rows remain for five seconds.
+Engaged-idle rows expire after fifteen seconds without relevant traffic.
+Live cast timing, interruption, actor reuse, transitions, and Wine behavior
+remain unverified. See [Packet evidence](#packet-evidence) for the opcode limits.
+
+### Custom Timer
+
+Custom Timer (`customtimer`) is experimental and disabled by default. Enable
+it in Extensions before the next game launch. Existing saved selections are
+preserved. `/customtimer lock` saves whether Shift-dragging is allowed.
+
+It displays one title, objective, and countdown from Bahamut-specific tagged
+incoming GenericData messages. It does not infer duty timers from chat or
+ordinary retail GenericData traffic. An open replaces the current timer;
+an objective update preserves its deadline; a close or elapsed deadline hides
+it. Disabling the addon hides its overlay but does not clear the native timer.
+The service has no zone/logout reset, so matching server close events are
+required to avoid showing a still-active timer after a transition or reload.
+Tagged delivery, duty cleanup, and transition behavior require live acceptance.
+
+The launcher accepts these application payloads, up to 192 bytes:
+
+| Bahamut tag | Parameters after the tag |
+|---|---|
+| `0x49575401` | Open: text and positive finish timestamp in Unix seconds |
+| `0x49575402` | Close: no parameters |
+| `0x49575403` | Update: objective text |
+
+Integers use type byte `0x00` and a signed 32-bit big-endian value. Strings
+use type byte `0x02`, valid UTF-8 of at most 64 bytes, and a NUL terminator.
+The parameter list ends with `0x0F` and optional zero padding. Unknown tags,
+malformed parameters, and truncated input leave the current timer unchanged.
+Open text may use `title|objective`; absent or empty components use
+`Instanced Content` and `Custom Objective` as appropriate. Whitespace is
+normalized. Remaining time starts at finish time minus the message timestamp,
+then follows a monotonic clock and rounds up to whole seconds. These tags,
+parameters, and limits are the [launcher consumer contract](../client/src/custom_timer.cpp),
+not retail timer facts.
+
+### Packet evidence
+
+The catalog reference is
+[`XIVLegacy/xivl-opcodes:opcodes.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/opcodes.json),
+in `MapClientbound`. Its `0x0133` GenericData record identifies the carrier;
+it does not establish Bahamut's timer tags. The `0x0134` actor-state byte is
+documented in
+[`XIVLegacy/xivl-opcodes:data/achievement_lifecycle.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/data/achievement_lifecycle.json),
+record `s2c-0134-actor-state`.
+
+The `0x0139` through `0x013C` battle-result routes and row capacities are
+documented in
+[`XIVLegacy/xivl-opcodes:data/battle_result_semantics.json`](https://github.com/XIVLegacy/xivl-opcodes/blob/main/data/battle_result_semantics.json),
+the `rows` records for X01, X10, X18, and X00. The X18 (`0x013B`) record is
+static evidence with no retained capture. These records do not prove the
+addon's cast-start heuristics or duration estimates. Synthetic
+service tests establish consumer behavior, not live retail acceptance.
+
 ### Zone name
 
 The `zonename` addon is enabled by default. It shows an uppercase region
@@ -128,7 +203,7 @@ divider. The panel appears for six seconds, fading in over 0.4 seconds and out
 over the final 1.4 seconds. It uses Georgia when installed, or the overlay
 font otherwise. Shift-dragging moves the panel.
 
-Unknown area names are not displayed. Local subarea labels are deferred.
+Unknown area names are not displayed. Local subarea labels are unavailable.
 
 ### Wiki
 
@@ -157,35 +232,93 @@ client's embedded line break marker to a normal line break.
 
 ### Packetlogger
 
-Packetlogger is disabled by default. Enabling it starts a CSV capture session
-under `logs/packets/`, named with the UTC date. Each row contains the host's
-capture time, direction, frame size, and full frame hex. It does not emit or
-modify outgoing packets.
+Packetlogger is enabled by default on new installs; existing selections are
+kept. While enabled, each game launch starts a CSV capture session under
+`logs/packets/`, named with the UTC date. Turn it off on the Extensions page.
+Each row contains the host's capture time, direction, frame size, and frame
+hex or a stub. It does not emit or modify outgoing packets.
 
-**Captures may contain chat and other private game data. Keep them private
+**Captures contain in-game names, positions, and party data. Keep them private
 when sharing diagnostics.**
+
+#### Capture scope
+
+By default Packetlogger records only game-world connections. The host
+identifies the connection from its first frames; the lobby and login
+connection is never written. Frames seen before the connection is identified
+are skipped and counted as `skipped`. Game-world frames are written as full hex
+rows, except that handshake and control records, chat, tell, party, and
+linkshell messages, mail-compose messages, search profile updates, and
+search results with comments are written as stub rows. A stub row keeps the
+original frame size and carries only item markers instead of bytes:
+
+```text
+1700000000001,outgoing,77,stub:op=0003
+1700000000002,incoming,310,stub:op=00C8;t=0001
+```
+
+The stub payload is `stub:` followed by `;`-separated items in frame order:
+`op=XXXX` for a game message with that opcode and `t=XXXX` for any other
+subpacket type, each as four uppercase hex digits. Stub rows count as written.
+
+Setting `capture_scope=full` in `config/addons/packetlogger/settings.ini`
+records every observed TCP frame as hex, including the login connection and
+the session ticket. Use it only when a developer asks for it, and do not share
+those captures. The scope is read when the addon loads or reloads.
 
 - `/packetlogger start` starts recording. Each start after a stop creates a
   new file.
 - `/packetlogger stop` stops recording without disabling the addon. Frames
-  already queued remain in their original session.
-- `/packetlogger status` shows the current part filename, cumulative
-  captured/written/dropped counts since enablement, current queue length, and
-  highest observed queue length.
+  already queued are written to their original session first.
+- `/packetlogger split` closes the current part with a `split` end row and
+  continues in the next part of the same session, with the same session id and
+  new meta rows. It does nothing while capture is stopped.
+- `/packetlogger status` shows the current part filename (with the part number
+  after the first part), cumulative captured/written/dropped counts since
+  enablement, current queue length, highest observed queue length, and the
+  number of frames skipped by the capture scope.
 
-Each CSV part is capped at 16 MiB. Later parts use `-part0002.csv`,
-`-part0003.csv`, and so on, with the same header. Rows are never split between
-parts. Old parts are not deleted automatically. Disabling the addon stops
-capture and discards queued messages. A callback fault stops recording.
+The host writes rows on its own writer thread, so the addon does no per-frame
+work. Rows reach the file within about 250 ms. A session file can be read while
+recording. Each CSV part is capped at 8 MiB. Later parts use `-part0002.csv`,
+`-part0003.csv`, and so on, with the same header and meta rows, which count
+toward the cap. Rows are never split between parts. Disabling the addon stops
+capture after the queued frames are written.
+
+When capture starts, the first update after chat accepts it prints `Packet
+capture: on, logs/packets, <N> MiB used. Pause with /packetlogger stop. Turn
+off on the launcher Extensions page`, where `<N>` is the size of the capture
+files rounded to whole MiB. The notice is retried each update until chat
+accepts it, then not printed again for that load of the addon.
+
+The first Lua fault in Packetlogger closes the session with a `fault` end row,
+restarts the addon in a new session, and prints `Packet capture: recording again
+after an addon error`. A second fault stops recording and prints `Packet capture:
+stopped after an addon error`. Enabling, reloading, or disabling the addon resets the
+count. The restart runs at the end of the host update on the game thread;
+packet hooks never call into Lua.
+
+Captures under `logs/packets/` are limited to 256 MiB in total and the newest
+10 sessions. When a session starts or a part rotates, the host deletes the
+oldest whole sessions first. If the active session alone exceeds 256 MiB, its
+oldest parts are deleted. The active part is never deleted. The host deletes
+only files that match its own capture names, never directories or links, and
+skips pruning if `logs/packets` is itself a link. A session that wrote no
+frames is removed when it stops, and older header-only single-part sessions
+are removed at the next start. A file that cannot be deleted is skipped.
+
+If a write fails, capture continues once in a fresh session and prints
+`Packet capture: recording again after a save error`. A second failure stops
+recording and prints `Packet capture: stopped after a save error`.
 See [Packet callbacks](#packet-callbacks) for capture limits.
 
 ### Combatparser
 
-Combatparser is disabled by default. Its movable meter has no header, a dark
-background, and a stable minimum width. The default DPS view ranks up to five
-observed players by DPS and shows damage, DPS, accuracy, and class-colored
-bars. When the selected mode has no positive results, the meter shows its
-`DPS` or `HPS` heading.
+Combatparser is enabled by default on new installs. Its movable meter has no
+header, a dark background, and a stable minimum width. The default DPS view
+ranks up to five observed players by DPS and shows damage, DPS, accuracy, and
+class-colored bars. When the selected mode has no positive results, the meter
+shows its `DPS` or `HPS` heading.
 
 - `/combatparser mode` switches between DPS and a separate healing view ranked
   by HPS.
@@ -359,9 +492,6 @@ end
 function area_changed(zone_id, area_name, region_name)
 end
 
-function packet(direction, capture_unix_ms_utc, size, frame_hex)
-end
-
 function unload()
 end
 ```
@@ -378,19 +508,47 @@ to print a short error through the current chat sink.
 
 ### Packet callbacks
 
-Only the enabled addon with ID `packetlogger` receives `packet`. It receives
-copied, complete transport frames on a later update, never on the Winsock hook
-thread.
-
-- `direction` is `incoming` or `outgoing`.
-- `capture_unix_ms_utc` is the host capture time in Unix-epoch milliseconds.
-- `frame_hex` contains the original bytes as uppercase hex, including protocol
-  headers and any compression.
+Addons receive no packet callback. The host copies complete transport frames
+on the Winsock hook thread and the Packetlogger writer thread formats them, so
+no addon code runs per frame.
 
 The host observes synchronous `recv`, `WSARecv`, `send`, and `WSASend`
 completions. It does not log asynchronous completions or unframed data.
-The queue holds at most 256 frames and 4 MiB of data, delivers at most 32
-frames per update, and drops new frames when full.
+The writer queue holds at most 4096 frames and 4 MiB of frame data, and drops
+new frames when full; stub rows count by the length of their text. Each part
+starts with the header `capture_unix_ms_utc,direction,size,frame_hex`, and
+each row holds:
+
+- `capture_unix_ms_utc`, the host capture time in Unix-epoch milliseconds.
+- `direction`, `incoming` or `outgoing`.
+- `size`, the frame length in bytes.
+- `frame_hex`, the original bytes as uppercase hex, including protocol
+  headers and any compression, or a `stub:` payload as described under
+  [Capture scope](#capture-scope).
+
+Every row has four columns of printable ASCII and no commas inside a column.
+Besides frame rows, a part holds three other kinds of row, which carry a fixed
+word in the `direction` column and `0` in `size`:
+
+- Meta rows, written right after the header at the top of every part, one
+  `key=value` per row in this order: `format=2`, `session=` (16 lowercase hex
+  characters, shared by all parts of one session), `part=` (the part number),
+  `launcher=` (the launcher version, or `unknown`), `runtime_api=`,
+  `client=2012.09.19.0001`, `os=windows-<major>.<minor>.<build>`,
+  `wine=` (the Wine version, or `none`), and `scope=standard` or `scope=full`.
+  Values have commas and non-printable characters replaced by spaces.
+- Zone rows, written when the game reports a map change while recording:
+  `<ms>,zone,0,id=<decimal zone id>;name=<area name>`. The name is empty for
+  zones without a known name.
+- End rows, written as the last row of a part when capture stops
+  (`reason=stop`), the addon is disabled or reloaded (`disable`), the part
+  fills and rotates (`rotate`), `/packetlogger split` closes it (`split`), or a
+  write error or Lua fault stops it
+  (`fault`):
+  `<ms>,end,0,reason=<reason>;captured=<n>;written=<n>;skipped=<n>;dropped=<n>;queue_high_water=<n>`.
+  The counts are the cumulative status counters since enablement at the moment
+  the row is written. A part without an end row is incomplete, because a game
+  exit is not observed.
 
 See [Packetlogger](#packetlogger) for recording commands, CSV parts, status,
 and privacy warnings.
@@ -409,8 +567,8 @@ and clear the popup.
 ### Chat command dispatch
 
 The runtime recognizes the ASCII addon commands `/fps`, `/pos`, `/distance`,
-`/targethp`, `/wiki`, `/packetlogger`, and `/combatparser`. Addons handle their
-own arguments.
+`/targethp`, `/enemycast`, `/customtimer`, `/wiki`, `/packetlogger`, and
+`/combatparser`. Addons handle their own arguments.
 
 The host reads a bounded token vector from the retail parser. Malformed,
 unsupported, overlong, or unreadable inputs pass to retail. Recognition occurs
@@ -462,6 +620,26 @@ Setting keys contain 1-64 ASCII letters, digits, hyphens, underscores, or dots.
 Values are limited to 1024 bytes and cannot contain line breaks. Settings are
 saved in `config/addons/<id>/settings.ini`.
 
+### Experimental addon state
+
+- `bahamut.custom_timer()` is available only to addon ID `customtimer`. It
+  returns `nil` when no timer is active or the service is unavailable;
+  otherwise it returns `instance_name`, `objective`, and integer
+  `remaining_seconds`. See [Custom Timer](#custom-timer) for the tag and
+  lifetime limits.
+- `bahamut.enemy_casts()` is available only to addon ID `enemycast`. It
+  returns an array of at most four rows, or an empty table when no rows or
+  player state are available. Each row has `actor_id`, `command_id`, `name`,
+  `actor_name`, `remaining_seconds`, `duration_seconds`, `progress`, `casting`,
+  and `completed`. Unfinished casts sort by remaining time before completed
+  casts, followed by engaged-idle rows. `progress` ranges from 0 to 1;
+  `casting = false` denotes an idle row.
+  `completed` also becomes true when the estimate expires, as described in
+  [Enemy Cast](#enemy-cast).
+
+These functions expose copied state, not client memory or raw packets. Like
+other addon ID restrictions, they do not authenticate replacement packages.
+
 ### Drawing
 
 These functions submit content during `draw`:
@@ -497,17 +675,19 @@ These functions submit content during `draw`:
 - `bahamut.chatlog_write(text)` is available only to the packaged `chatlogs`
   addon. It appends nonempty valid UTF-8 text of at most 8192 bytes to the
   current daily log after cleaning display control characters.
-- `bahamut.packetlog_write(line)` is available only to the enabled addon with
-  ID `packetlogger`, and only during its `packet` callback. It appends one
-  printable ASCII CSV row of at most 131200 bytes to the frame's capture
-  session part under `logs/packets/`, returning whether the write succeeded.
-  It accepts no file path. Session files use the header
-  `capture_unix_ms_utc,direction,size,frame_hex`.
-- `bahamut.packetlog_start()` and `bahamut.packetlog_stop()` control recording
-  for the enabled Packetlogger and return whether the operation succeeded.
-- `bahamut.packetlog_status()` returns `recording`, `file`, `captured`,
-  `written`, `dropped`, `queued`, and `queue_high_water`. The start, stop,
-  and status functions are available only to the addon with ID `packetlogger`.
+- `bahamut.packetlog_start()`, `bahamut.packetlog_stop()`, and
+  `bahamut.packetlog_split()` control recording for the enabled Packetlogger
+  and return whether the operation succeeded.
+  Each waits up to 2 seconds for the writer thread. Starting while recording
+  keeps the current session.
+- `bahamut.packetlog_status()` returns `recording`, `file`, `part`, `captured`,
+  `written`, `dropped`, `skipped`, `queued`, `queue_high_water`,
+  `bytes_on_disk`, and `error`. `bytes_on_disk` is the size of the capture
+  files after the last retention scan plus bytes written since. `file` is the
+  current part filename only, and `error` is an empty string unless a write
+  error stopped capture. The start, stop, and status functions are available
+  only to the addon with ID `packetlogger`. Addons cannot write capture rows
+  or choose capture paths.
 
 ### Clipboard and URLs
 

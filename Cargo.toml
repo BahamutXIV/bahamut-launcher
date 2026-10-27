@@ -31,10 +31,6 @@ name = "bahamut_launcher"
 path = "src/lib.rs"
 
 [[bin]]
-name = "bahamut-launcher"
-path = "src/main.rs"
-
-[[bin]]
 name = "release-metadata"
 path = "src/bin/release-metadata.rs"
 

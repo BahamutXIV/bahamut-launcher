@@ -171,8 +171,15 @@ add_library(bahamut SHARED
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/custom_timer.cpp
+    src/custom_timer.h
+    src/enemy_cast.cpp
+    src/enemy_cast.h
     src/player_state.cpp
     src/player_state.h
+    src/packet_capture.cpp
+    src/packet_capture.h
+    src/packet_capture_policy.h
     src/packet_observer.cpp
     src/packet_observer.h
     src/target_distance.cpp
@@ -258,9 +265,45 @@ target_include_directories(bahamut-loader PRIVATE api)
 target_link_libraries(bahamut-loader PRIVATE advapi32 bcrypt psapi)
 bahamut_unicode_entry(bahamut-loader)
 
+# Keep shared test objects separate from the runtime DLL's export/probe variants.
+add_library(bahamut-test-monitor-selection-objects OBJECT src/monitor_selection.cpp)
+target_include_directories(bahamut-test-monitor-selection-objects PRIVATE src)
+
+add_library(bahamut-test-actor-name-objects OBJECT src/actor_name.cpp)
+target_include_directories(bahamut-test-actor-name-objects PRIVATE api src)
+target_link_libraries(bahamut-test-actor-name-objects PRIVATE minhook)
+
+add_library(bahamut-test-target-distance-objects OBJECT src/target_distance.cpp)
+target_include_directories(bahamut-test-target-distance-objects PRIVATE api src)
+target_link_libraries(bahamut-test-target-distance-objects PRIVATE minhook)
+
+add_library(bahamut-test-player-state-objects OBJECT src/player_state.cpp)
+target_include_directories(bahamut-test-player-state-objects PRIVATE api src)
+target_link_libraries(bahamut-test-player-state-objects PRIVATE minhook)
+
+add_library(bahamut-test-custom-timer-objects OBJECT src/custom_timer.cpp)
+target_include_directories(bahamut-test-custom-timer-objects PRIVATE src)
+
+add_library(bahamut-test-enemy-cast-objects OBJECT src/enemy_cast.cpp)
+target_include_directories(bahamut-test-enemy-cast-objects PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-test-enemy-cast-objects PRIVATE minhook)
+
+add_library(bahamut-test-packet-capture-objects OBJECT src/packet_capture.cpp)
+target_include_directories(bahamut-test-packet-capture-objects PRIVATE src)
+
+add_library(bahamut-test-addon-host-objects OBJECT src/addon_host.cpp)
+target_include_directories(bahamut-test-addon-host-objects PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-test-addon-host-objects PRIVATE lua51 minhook)
+
+add_library(bahamut-test-world-projection-objects OBJECT src/world_projection.cpp)
+target_include_directories(bahamut-test-world-projection-objects PRIVATE src)
+
+add_library(bahamut-test-targetlines-mobs-objects OBJECT src/targetlines_mobs.cpp)
+target_include_directories(bahamut-test-targetlines-mobs-objects PRIVATE src)
+
 add_executable(bahamut-test-client WIN32
     src/test_client.cpp
-    src/monitor_selection.cpp
+    $<TARGET_OBJECTS:bahamut-test-monitor-selection-objects>
 )
 target_include_directories(bahamut-test-client PRIVATE api src)
 target_link_libraries(bahamut-test-client PRIVATE d3d9 user32)
@@ -286,14 +329,14 @@ add_dependencies(bahamut-test-client bahamut-test-xinput)
 
 add_executable(bahamut-loader-tests
     tests/loader_tests.cpp
-    src/monitor_selection.cpp
+    $<TARGET_OBJECTS:bahamut-test-monitor-selection-objects>
 )
 target_include_directories(bahamut-loader-tests PRIVATE src)
 target_link_libraries(bahamut-loader-tests PRIVATE user32)
 bahamut_unicode_entry(bahamut-loader-tests)
 
 add_executable(bahamut-monitor-selection-tests
-    src/monitor_selection.cpp
+    $<TARGET_OBJECTS:bahamut-test-monitor-selection-objects>
     tests/monitor_selection_tests.cpp
 )
 target_include_directories(bahamut-monitor-selection-tests PRIVATE src)
@@ -311,14 +354,44 @@ add_executable(bahamut-input-policy-tests
 )
 target_include_directories(bahamut-input-policy-tests PRIVATE src)
 
-add_executable(bahamut-addon-host-tests
-    src/actor_name.cpp
+add_executable(bahamut-custom-timer-tests
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    tests/custom_timer_tests.cpp
+)
+target_include_directories(bahamut-custom-timer-tests PRIVATE src)
+
+add_executable(bahamut-enemy-cast-tests
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
     src/actor_name.h
-    src/addon_host.cpp
-    src/addon_host.h
-    src/player_state.cpp
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
     src/player_state.h
-    src/target_distance.cpp
+    tests/enemy_cast_tests.cpp
+)
+target_include_directories(bahamut-enemy-cast-tests PRIVATE
+    api
+    src
+    vendor/minhook/include
+)
+target_link_libraries(bahamut-enemy-cast-tests PRIVATE minhook)
+
+add_executable(bahamut-addon-host-tests
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    src/actor_name.h
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    src/player_state.h
     src/target_distance.h
     tests/addon_host_tests.cpp
 )
@@ -331,19 +404,26 @@ target_link_libraries(bahamut-addon-host-tests PRIVATE lua51 minhook)
 bahamut_unicode_entry(bahamut-addon-host-tests)
 
 add_executable(bahamut-command-boundary-tests
-    src/actor_name.cpp
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
     src/actor_name.h
-    src/addon_host.cpp
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
     src/addon_host.h
     src/chat_boundary.cpp
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
-    src/player_state.cpp
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
     src/player_state.h
     src/retail_identity.cpp
     src/retail_identity.h
-    src/target_distance.cpp
     src/target_distance.h
     tests/command_boundary_tests.cpp
 )
@@ -356,7 +436,7 @@ target_link_libraries(bahamut-command-boundary-tests PRIVATE bcrypt lua51 minhoo
 bahamut_unicode_entry(bahamut-command-boundary-tests)
 
 add_executable(bahamut-player-state-tests
-    src/player_state.cpp
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
     src/player_state.h
     tests/player_state_tests.cpp
 )
@@ -369,11 +449,11 @@ target_link_libraries(bahamut-player-state-tests PRIVATE minhook)
 bahamut_unicode_entry(bahamut-player-state-tests)
 
 add_executable(bahamut-target-distance-tests
-    src/actor_name.cpp
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
     src/actor_name.h
-    src/player_state.cpp
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
     src/player_state.h
-    src/target_distance.cpp
     src/target_distance.h
     tests/target_distance_tests.cpp
 )
@@ -393,7 +473,7 @@ target_include_directories(bahamut-startup-script-tests PRIVATE src)
 bahamut_unicode_entry(bahamut-startup-script-tests)
 
 add_executable(bahamut-world-projection-tests
-    src/world_projection.cpp
+    $<TARGET_OBJECTS:bahamut-test-world-projection-objects>
     src/world_projection.h
     tests/world_projection_tests.cpp
 )
@@ -402,24 +482,24 @@ target_include_directories(bahamut-world-projection-tests PRIVATE src)
 add_executable(bahamut-targetlines-arc-tests
     src/targetlines_arc.cpp
     src/targetlines_arc.h
-    src/world_projection.cpp
+    $<TARGET_OBJECTS:bahamut-test-world-projection-objects>
     tests/targetlines_arc_tests.cpp
 )
 target_include_directories(bahamut-targetlines-arc-tests PRIVATE src)
 
 add_executable(bahamut-targetlines-tests
-    src/actor_name.cpp
-    src/player_state.cpp
-    src/target_distance.cpp
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
     src/targetlines.cpp
-    src/targetlines_mobs.cpp
+    $<TARGET_OBJECTS:bahamut-test-targetlines-mobs-objects>
     tests/targetlines_tests.cpp
 )
 target_include_directories(bahamut-targetlines-tests PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-targetlines-tests PRIVATE minhook)
 
 add_executable(bahamut-targetlines-mobs-tests
-    src/targetlines_mobs.cpp
+    $<TARGET_OBJECTS:bahamut-test-targetlines-mobs-objects>
     tests/targetlines_mobs_tests.cpp
 )
 target_include_directories(bahamut-targetlines-mobs-tests PRIVATE src)
@@ -435,7 +515,7 @@ endif()
 add_executable(bahamut-targetlines-projection-tests
     src/targetlines_projection.cpp
     src/targetlines_projection.h
-    src/world_projection.cpp
+    $<TARGET_OBJECTS:bahamut-test-world-projection-objects>
     tests/targetlines_projection_tests.cpp
 )
 target_include_directories(bahamut-targetlines-projection-tests PRIVATE src)
@@ -472,10 +552,19 @@ target_link_libraries(bahamut-object-distance-tests PRIVATE minhook)
 add_executable(bahamut-packet-observer-tests
     src/packet_observer.cpp
     src/packet_observer.h
+    src/packet_capture_policy.h
     tests/packet_observer_tests.cpp
 )
 target_include_directories(bahamut-packet-observer-tests PRIVATE src vendor/minhook/include vendor/miniz)
 target_link_libraries(bahamut-packet-observer-tests PRIVATE minhook miniz ws2_32)
+
+add_executable(bahamut-packet-capture-tests
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    tests/packet_capture_tests.cpp
+)
+target_include_directories(bahamut-packet-capture-tests PRIVATE src)
 
 enable_testing()
 add_test(
@@ -503,6 +592,7 @@ add_test(NAME bahamut-dat-overlay COMMAND bahamut-dat-overlay-tests)
 add_test(NAME bahamut-camera-zoom COMMAND bahamut-camera-zoom-tests)
 add_test(NAME bahamut-object-distance COMMAND bahamut-object-distance-tests)
 add_test(NAME bahamut-packet-observer COMMAND bahamut-packet-observer-tests)
+add_test(NAME bahamut-packet-capture COMMAND bahamut-packet-capture-tests)
 add_test(
     NAME bahamut-addon-host
     COMMAND bahamut-addon-host-tests
@@ -515,13 +605,17 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/packetlogger/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fault-packetlogger/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/distance/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/enemycast/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targethp/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/customtimer/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/combatparser/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targetlines/addon.toml
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-settings
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )
 add_test(NAME bahamut-command-boundary COMMAND bahamut-command-boundary-tests)
+add_test(NAME bahamut-custom-timer COMMAND bahamut-custom-timer-tests)
+add_test(NAME bahamut-enemy-cast COMMAND bahamut-enemy-cast-tests)
 add_test(NAME bahamut-player-state COMMAND bahamut-player-state-tests)
 add_test(NAME bahamut-target-distance COMMAND bahamut-target-distance-tests)
 add_test(NAME bahamut-world-projection COMMAND bahamut-world-projection-tests)

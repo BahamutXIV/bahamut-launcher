@@ -150,13 +150,19 @@ pub struct LaunchOptions {
     pub borderless_monitor: Option<String>,
     /// `None` launches the game without extensions.
     pub extension_artifacts: Option<ExtensionArtifacts>,
+    /// Linux only: write a matching retail `config.pad` controller selection before launch.
+    pub gamepad_setup: bool,
 }
 
+#[cfg(any(target_os = "linux", test))]
+mod controller_setup;
 mod monitors;
 pub use monitors::{
     BorderlessMonitor, BorderlessMonitorSnapshot, enumerate_borderless_monitors,
     selected_monitor_resolution,
 };
+
+pub mod wine_input_cache;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

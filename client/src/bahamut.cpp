@@ -2,7 +2,9 @@
 #include "addon_host.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
+#include "custom_timer.h"
 #include "dat_overlay.h"
+#include "enemy_cast.h"
 #include "input.h"
 #include "native_plugin_host.h"
 #include "object_distance.h"
@@ -54,6 +56,7 @@ constexpr wchar_t kDiscordEnabledEnvironment[]        = L"BAHAMUT_RUNTIME_DISCOR
 constexpr wchar_t kObjectDistanceEnabledEnvironment[] = L"BAHAMUT_RUNTIME_OBJECT_DISTANCE_ENABLED";
 constexpr wchar_t kCameraZoomEnabledEnvironment[]     = L"BAHAMUT_RUNTIME_CAMERA_ZOOM_ENABLED";
 constexpr wchar_t kStartupScriptEnvironment[]         = L"BAHAMUT_RUNTIME_STARTUP_SCRIPT";
+constexpr wchar_t kLauncherVersionEnvironment[]       = L"BAHAMUT_RUNTIME_LAUNCHER_VERSION";
 constexpr wchar_t kDatPackageRootsEnvironment[] =
     L"BAHAMUT_RUNTIME_DAT_PACKAGE_ROOTS";
 constexpr wchar_t     kBorderlessEnvironment[]    = L"BAHAMUT_RUNTIME_BORDERLESS";
@@ -150,6 +153,22 @@ HANDLE OpenNamedEvent(const wchar_t* environmentName)
         return nullptr;
     }
     return OpenEventW(EVENT_MODIFY_STATE, FALSE, eventName);
+}
+
+std::string NarrowUtf8(const std::wstring& value)
+{
+    if (value.empty())
+    {
+        return {};
+    }
+    const int needed = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (needed <= 0)
+    {
+        return {};
+    }
+    std::string text(static_cast<std::size_t>(needed), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), text.data(), needed, nullptr, nullptr);
+    return text;
 }
 
 std::wstring EnvironmentValue(const wchar_t* name)
@@ -266,10 +285,13 @@ public:
         }
         addonHost_.SetPlayerStateService(&playerState_);
         addonHost_.SetTargetDistanceService(&targetDistance_);
+        addonHost_.SetCustomTimerService(&customTimer_);
+        addonHost_.SetEnemyCastService(&enemyCast_);
         addonHost_.SetActorNameService(&actorNames_);
         addonHost_.SetClipboardSink({ nullptr, &SetAddonClipboardText });
         addonHost_.SetChatSink({ nullptr, &PrintAddonChatText });
         addonHost_.SetUrlSink({ nullptr, &OpenAddonUrl });
+        addonHost_.SetRuntimeIdentity(NarrowUtf8(EnvironmentValue(kLauncherVersionEnvironment)), kBahamutRuntimeApiVersion);
         if (!settings.empty() && !chatLogs.empty())
         {
             ConfigureOverlayLayout(
@@ -290,12 +312,13 @@ public:
                                     actorNames_.Observe(message);
                                     targetDistance_.Observe(message);
                                     targetlines_.Observe(message);
+                                    customTimer_.Observe(message);
+                                    enemyCast_.Observe(message);
                                     addonHost_.QueueCombatResult(message);
                                 });
-        packetObserver_.SetFrameSink([this](packet_observer::Direction    direction,
-                                            std::span<const std::uint8_t> frame)
+        packetObserver_.SetFrameSink([this](const packet_observer::FrameInfo& frame)
                                      {
-                                         addonHost_.QueuePacketFrame(direction, frame);
+                                         addonHost_.QueuePacketFrame(frame);
                                      });
         if (!InstallRenderBoundary(telemetry_, &sharedState_->bootstrap, frameEvent_, &addonHost_, &nativePluginHost_, &discordPluginHost_, &playerState_, &packetObserver_, &objectDistance_, EnvironmentValue(kObjectDistanceEnabledEnvironment) == L"true", &cameraZoom_, EnvironmentValue(kCameraZoomEnabledEnvironment) == L"true", EnvironmentValue(kBorderlessEnvironment) == L"true"))
         {
@@ -519,6 +542,8 @@ private:
     bahamut_client::ActorNameService      actorNames_{ &playerState_ };
     bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
     bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
+    bahamut_client::CustomTimerService    customTimer_;
+    bahamut_client::EnemyCastService      enemyCast_{ &playerState_, &actorNames_ };
     packet_observer::PacketObserver       packetObserver_;
     bahamut_client::ObjectDistanceService objectDistance_;
     bahamut_client::CameraZoomService     cameraZoom_;

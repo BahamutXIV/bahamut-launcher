@@ -96,8 +96,7 @@ pub fn derive_key(tick: u32) -> String {
 
 fn format_plaintext(session_id: &str, tick: u32) -> Vec<u8> {
     let s = format!(
-        " T ={tick} /LANG =en-us /REGION =2 /SERVER_UTC ={server_utc} /SESSION_ID ={session_id}",
-        server_utc = SERVER_UTC_PLAINTEXT,
+        " T ={tick} /LANG =en-us /REGION =2 /SERVER_UTC ={SERVER_UTC_PLAINTEXT} /SESSION_ID ={session_id}",
     );
     let mut bytes = s.into_bytes();
     bytes.push(0u8);
@@ -210,9 +209,7 @@ mod tests {
         let without_nul = &args.plaintext[..args.plaintext.len() - 1];
         let s = std::str::from_utf8(without_nul).expect("plaintext is ASCII");
         let expected = format!(
-            " T ={tick} /LANG =en-us /REGION =2 /SERVER_UTC =1356916742 /SESSION_ID ={sid}",
-            tick = FIXED_TICK,
-            sid = VALID_SESSION_ID,
+            " T ={FIXED_TICK} /LANG =en-us /REGION =2 /SERVER_UTC =1356916742 /SESSION_ID ={VALID_SESSION_ID}",
         );
         assert_eq!(s, expected);
     }

@@ -126,7 +126,7 @@ pub fn parse_wait_mode_line(line: &str) -> Option<Result<u32, HelperFailure>> {
             detail: "helper SUCCESS line carried no client pid".to_owned(),
         }));
     };
-    match field("process_handle=").map(|value| value.parse::<u64>()) {
+    match field("process_handle=").map(str::parse::<u64>) {
         None | Some(Ok(0)) => Some(Ok(client_pid)),
         Some(_) => Some(Err(HelperFailure {
             code: HelperErrorCode::Unknown,
@@ -174,7 +174,6 @@ fn parse_error_line(line: &str) -> Option<HelperFailure> {
         "ProcessHandleTransferFailed" => HelperErrorCode::ProcessHandleTransferFailed,
         "TargetTerminationFailed" => HelperErrorCode::TargetTerminationFailed,
         code if code.contains("Patch") => HelperErrorCode::PatchApplyFailed,
-        code if code.ends_with("Failed") => HelperErrorCode::Unknown,
         _ => HelperErrorCode::Unknown,
     };
     Some(HelperFailure {

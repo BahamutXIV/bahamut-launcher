@@ -58,8 +58,8 @@ client's managed files and replaces damaged files from the same ZIP.
 ### Progress, pause, and cancellation
 
 A single operation controls download, verification, and extraction. Its
-reservation blocks conflicting launch, backup, restore, and HUD reset
-operations. Configuration changes cannot retarget an active worker. Closing
+reservation blocks conflicting launch, backup, and restore operations.
+Configuration changes cannot retarget an active worker. Closing
 the launcher requests cancellation and waits for the worker to finish.
 
 Pause is acknowledged only at a durable download checkpoint or safe disk

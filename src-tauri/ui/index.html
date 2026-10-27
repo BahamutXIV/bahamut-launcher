@@ -298,7 +298,7 @@
 
               </div>
             </article>
-            <article class="gamepad-card gamepad-card--stub glass-panel" aria-labelledby="steam-deck-title">
+            <article class="gamepad-card gamepad-card--stub glass-panel" aria-labelledby="steam-deck-title" data-gamepad-region data-gamepad-region-order="2" tabindex="-1">
               <h1 id="steam-deck-title">Steam Deck</h1>
               <div class="gamepad-card-body">
                 <p class="gamepad-status">Steam Deck not detected.</p>
@@ -306,9 +306,9 @@
                   <div class="gamepad-setting-label">Use Steam Deck Recommended Graphics</div>
                   <div class="choice-row"><button class="choice-option" type="button" aria-pressed="false" disabled>On</button><button class="choice-option" type="button" aria-pressed="true" disabled>Off</button></div>
                 </div>
-                <div class="gamepad-setting">
+                <div class="gamepad-setting" role="group" tabindex="-1" data-gamepad-settings-row data-pad-setup-row>
                   <div class="gamepad-setting-label">Force Auto-Detect Gamepad</div>
-                  <div class="choice-row"><button class="choice-option" type="button" aria-pressed="false" disabled>On</button><button class="choice-option" type="button" aria-pressed="true" disabled>Off</button></div>
+                  <div class="choice-row"><button class="choice-option" type="button" data-pad-setup-choice="true" aria-pressed="false" disabled>On</button><button class="choice-option" type="button" data-pad-setup-choice="false" aria-pressed="true" disabled>Off</button></div>
                 </div>
                 <div class="gamepad-config-row">
                   <button class="settings-action gamepad-config-action accent-action" type="button" disabled>Apply Steam Deck Defaults</button>

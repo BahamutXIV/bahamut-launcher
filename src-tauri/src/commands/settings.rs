@@ -1,12 +1,16 @@
+use bahamut_launcher::config::controller_config::ControllerConfig;
 use bahamut_launcher::config::preferences::valid_borderless_monitor_id;
 use bahamut_launcher::platform;
 use bahamut_launcher::profiles::ServerProfile;
 
 use crate::presentation::{
     BorderlessMonitorView, GameSettingsPayload, GameSettingsView, LauncherBehaviorView,
-    ServerSettingsView, borderless_monitor_view, game_settings_view, replace_game_settings,
+    PadSetupView, ServerSettingsView, borderless_monitor_view, game_settings_view,
+    replace_game_settings,
 };
 use crate::shell_config::{load_launcher_config, resolve_game_dir, update_launcher_config};
+
+const PAD_SETUP_SUPPORTED: bool = cfg!(target_os = "linux");
 
 #[tauri::command]
 pub(crate) fn launch_config_tool() -> Result<(), String> {
@@ -67,6 +71,28 @@ pub(crate) fn set_native_resolution_override(
     Ok(LauncherBehaviorView {
         close_on_game_start: config.preferences.launcher.close_on_game_start,
         native_resolution_override: config.preferences.launcher.native_resolution_override,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_pad_setup() -> Result<PadSetupView, String> {
+    let config = ControllerConfig::load().map_err(|error| error.to_string())?;
+    Ok(PadSetupView {
+        supported: PAD_SETUP_SUPPORTED,
+        enabled: config.pad_setup,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn set_pad_setup(enabled: bool) -> Result<PadSetupView, String> {
+    if !PAD_SETUP_SUPPORTED {
+        return Err("Gamepad setup is available only on Linux.".into());
+    }
+    let config = ControllerConfig { pad_setup: enabled };
+    config.save().map_err(|error| error.to_string())?;
+    Ok(PadSetupView {
+        supported: PAD_SETUP_SUPPORTED,
+        enabled: config.pad_setup,
     })
 }
 

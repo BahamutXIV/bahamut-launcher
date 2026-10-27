@@ -1,10 +1,12 @@
 #pragma once
 
+#include "packet_capture.h"
 #include "packet_observer.h"
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -18,6 +20,8 @@ namespace bahamut_client
 
 class PlayerStateService;
 class TargetDistanceService;
+class CustomTimerService;
+class EnemyCastService;
 class ActorNameService;
 
 } // namespace bahamut_client
@@ -75,6 +79,8 @@ public:
 
     void SetPlayerStateService(bahamut_client::PlayerStateService* playerState);
     void SetTargetDistanceService(bahamut_client::TargetDistanceService* targetDistance);
+    void SetCustomTimerService(bahamut_client::CustomTimerService* customTimer);
+    void SetEnemyCastService(bahamut_client::EnemyCastService* enemyCast);
     void SetActorNameService(bahamut_client::ActorNameService* actorNames);
     void SetClipboardSink(const AddonClipboardSink& sink);
     void SetChatSink(const AddonChatSink& sink);
@@ -93,9 +99,13 @@ public:
     void QueueChat(std::string_view source, std::string_view message);
     void QueueAreaTransition(const packet_observer::GameMessage& message);
     void QueueCombatResult(const packet_observer::GameMessage& message);
-    bool QueuePacketFrame(packet_observer::Direction    direction,
-                          std::span<const std::uint8_t> frame);
+    bool QueuePacketFrame(const packet_observer::FrameInfo& frame);
+    // Launcher version (empty means unknown) and runtime API version for capture metadata.
+    void SetRuntimeIdentity(std::string launcherVersion, std::uint32_t runtimeApiVersion);
     void Update(double frameDeltaSeconds);
+    void FailNextPacketWritesForTest(int count);
+    // Blocks until queued packet frames are written; for tests.
+    bool WaitForPacketCaptureIdle(std::chrono::milliseconds timeout);
     void Draw(const AddonWindowSink& sink);
 
     std::size_t LoadedCount() const;
@@ -109,14 +119,16 @@ private:
     static int LuaPlayerState(lua_State* state);
     static int LuaTargetDistance(lua_State* state);
     static int LuaTargetHp(lua_State* state);
+    static int LuaCustomTimer(lua_State* state);
+    static int LuaEnemyCasts(lua_State* state);
     static int LuaWindow(lua_State* state);
     static int LuaRawText(lua_State* state);
     static int LuaClipboardSet(lua_State* state);
     static int LuaChatPrint(lua_State* state);
     static int LuaChatLogWrite(lua_State* state);
-    static int LuaPacketLogWrite(lua_State* state);
     static int LuaPacketLogStart(lua_State* state);
     static int LuaPacketLogStop(lua_State* state);
+    static int LuaPacketLogSplit(lua_State* state);
     static int LuaPacketLogStatus(lua_State* state);
     static int LuaCombatEvents(lua_State* state);
     static int LuaCombatMeter(lua_State* state);
@@ -130,6 +142,8 @@ private:
         AddonHost*                             owner,
         bahamut_client::PlayerStateService*    playerState,
         bahamut_client::TargetDistanceService* targetDistance,
+        bahamut_client::CustomTimerService*    customTimer,
+        bahamut_client::EnemyCastService*      enemyCast,
         const AddonClipboardSink*              clipboardSink,
         const AddonChatSink*                   chatSink,
         const AddonUrlSink*                    urlSink);
@@ -139,22 +153,6 @@ private:
     static bool InvokeChat(Instance& addon, std::string_view message);
     static bool InvokeAreaChanged(Instance& addon, std::uint32_t zoneId, std::string_view areaName, std::string_view regionName);
 
-    struct PacketCaptureSession
-    {
-        std::filesystem::path baseFile;
-        std::filesystem::path currentFile;
-        std::uint64_t         currentBytes = 0;
-        unsigned int          part         = 1;
-    };
-
-    struct PacketFrame
-    {
-        packet_observer::Direction            direction;
-        std::chrono::system_clock::time_point capturedAt;
-        std::shared_ptr<PacketCaptureSession> session;
-        std::vector<std::uint8_t>             bytes;
-    };
-
     struct CombatEvent
     {
         std::uint32_t sourceId = 0;
@@ -162,42 +160,49 @@ private:
         std::uint8_t  kind     = 0;
     };
 
-    static bool InvokePacket(Instance& addon, const PacketFrame& frame);
-    void        DispatchAreaTransition();
-    void        ResetAreaTransition();
-    void        StopFaultedPacketLogger();
-    void        StopFaultedCombatParser();
-    bool        StartPacketCapture(Instance& addon);
-    bool        StopPacketCapture();
+    void                                                 DispatchAreaTransition();
+    void                                                 ResetAreaTransition();
+    void                                                 StopFaultedCombatParser();
+    bool                                                 StartPacketCapture(Instance& addon);
+    bool                                                 StopPacketCapture();
+    bool                                                 SplitPacketCapture();
+    bool                                                 ReloadAddon(std::string_view addonId, packet_capture::EndReason reason);
+    void                                                 HandlePacketLoggerFault();
+    void                                                 PushPacketNotice(std::string notice);
+    void                                                 StopPacketCaptureAsync(packet_capture::EndReason reason);
+    void                                                 ReplacePacketWriter(const Instance& addon);
+    void                                                 DrainPacketNotices(packet_capture::PacketCaptureWriter& writer);
+    std::shared_ptr<packet_capture::PacketCaptureWriter> PacketWriter() const;
 
-    std::vector<std::unique_ptr<Instance>> addons_;
-    std::filesystem::path                  settingsRoot_;
-    std::filesystem::path                  chatLogsRoot_;
-    bahamut_client::PlayerStateService*    playerState_    = nullptr;
-    bahamut_client::TargetDistanceService* targetDistance_ = nullptr;
-    AddonClipboardSink                     clipboardSink_;
-    AddonChatSink                          chatSink_;
-    AddonUrlSink                           urlSink_;
-    std::mutex                             chatQueueMutex_;
-    std::vector<std::string>               chatQueue_;
-    std::mutex                             areaQueueMutex_;
-    std::optional<std::uint32_t>           queuedAreaZoneId_;
-    std::uint32_t                          lastAreaZoneId_ = 0;
-    std::string                            lastAreaName_;
-    std::string                            lastRegionName_;
-    std::atomic<bool>                      packetLoggerEnabled_ = false;
-    std::mutex                             packetQueueMutex_;
-    std::vector<PacketFrame>               packetQueue_;
-    std::size_t                            packetQueueBytes_    = 0;
-    bool                                   packetCaptureActive_ = false;
-    std::shared_ptr<PacketCaptureSession>  packetCaptureSession_;
-    std::uint64_t                          packetCaptureSeen_    = 0;
-    std::uint64_t                          packetCaptureWritten_ = 0;
-    std::uint64_t                          packetCaptureDropped_ = 0;
-    std::size_t                            packetQueueHighWater_ = 0;
-    std::atomic<bool>                      combatParserEnabled_  = false;
-    std::mutex                             combatQueueMutex_;
-    std::vector<CombatEvent>               combatQueue_;
-    std::uint64_t                          combatDropped_ = 0;
-    bahamut_client::ActorNameService*      actorNames_    = nullptr;
+    std::vector<std::unique_ptr<Instance>>                            addons_;
+    std::filesystem::path                                             settingsRoot_;
+    std::filesystem::path                                             chatLogsRoot_;
+    bahamut_client::PlayerStateService*                               playerState_    = nullptr;
+    bahamut_client::TargetDistanceService*                            targetDistance_ = nullptr;
+    bahamut_client::CustomTimerService*                               customTimer_    = nullptr;
+    bahamut_client::EnemyCastService*                                 enemyCast_      = nullptr;
+    AddonClipboardSink                                                clipboardSink_;
+    AddonChatSink                                                     chatSink_;
+    AddonUrlSink                                                      urlSink_;
+    std::mutex                                                        chatQueueMutex_;
+    std::vector<std::string>                                          chatQueue_;
+    std::mutex                                                        areaQueueMutex_;
+    std::optional<std::uint32_t>                                      queuedAreaZoneId_;
+    std::uint32_t                                                     lastAreaZoneId_ = 0;
+    std::string                                                       lastAreaName_;
+    std::string                                                       lastRegionName_;
+    std::string                                                       launcherVersion_;
+    std::uint32_t                                                     runtimeApiVersion_   = 0;
+    int                                                               packetLoggerFaults_  = 0;
+    std::atomic<bool>                                                 packetLoggerEnabled_ = false;
+    std::atomic<std::uint8_t>                                         packetScope_{ static_cast<std::uint8_t>(packet_capture::Scope::Standard) };
+    mutable std::mutex                                                packetWriterMutex_;
+    std::shared_ptr<packet_capture::PacketCaptureWriter>              packetWriter_;
+    std::deque<std::string>                                           packetNotices_;
+    std::vector<std::shared_ptr<packet_capture::PacketCaptureWriter>> retiredPacketWriters_;
+    std::atomic<bool>                                                 combatParserEnabled_ = false;
+    std::mutex                                                        combatQueueMutex_;
+    std::vector<CombatEvent>                                          combatQueue_;
+    std::uint64_t                                                     combatDropped_ = 0;
+    bahamut_client::ActorNameService*                                 actorNames_    = nullptr;
 };

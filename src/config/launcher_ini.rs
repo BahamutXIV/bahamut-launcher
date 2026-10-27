@@ -3,6 +3,7 @@
 //! Extension selection and extension-owned settings have separate files.
 
 use std::collections::{BTreeMap, HashSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -96,13 +97,15 @@ impl LauncherConfig {
         retail_config: Option<&Path>,
     ) -> Result<Self, LauncherConfigError> {
         let creating = !path.exists();
-        let mut config = if !creating {
-            Self::from_ini_str(&fs::read_to_string(path)?)?
-        } else {
+        let mut config = if creating {
             Self::defaults()
+        } else {
+            Self::from_ini_str(&fs::read_to_string(path)?)?
         };
 
-        let imported = if !config.preferences.game.initialized {
+        let imported = if config.preferences.game.initialized {
+            false
+        } else {
             retail_config.is_some_and(|retail_path| {
                 if !retail_path.is_file() {
                     return false;
@@ -122,8 +125,6 @@ impl LauncherConfig {
                     }
                 }
             })
-        } else {
-            false
         };
 
         if creating || imported {
@@ -187,7 +188,7 @@ impl LauncherConfig {
             return Err(LauncherConfigError::DuplicateServer(profile.display_name));
         }
         if self.selected_server == original_display_name {
-            self.selected_server = profile.display_name.clone();
+            self.selected_server.clone_from(&profile.display_name);
         }
         self.servers[index] = profile;
         self.validate()
@@ -233,54 +234,7 @@ impl LauncherConfig {
             parse_bool(developer, "developer", "enable_verbose_wine_debug")?;
         preferences.game = parse_game_settings(&sections)?;
         let selected_server = required(servers_section, SERVERS_SECTION, SELECTED_KEY)?.to_string();
-        let mut numbered = BTreeMap::new();
-        for (name, values) in &sections {
-            let Some(number) = name.strip_prefix("server.") else {
-                continue;
-            };
-            let index = number
-                .parse::<usize>()
-                .map_err(|_| LauncherConfigError::Invalid {
-                    section: name.clone(),
-                    key: "section",
-                    message: "server sections must be numbered from 1".into(),
-                })?;
-            if index == 0 || numbered.insert(index, (name, values)).is_some() {
-                return Err(LauncherConfigError::Invalid {
-                    section: name.clone(),
-                    key: "section",
-                    message: "server sections must use unique positive numbers".into(),
-                });
-            }
-        }
-        let mut servers = Vec::with_capacity(numbered.len());
-        for (expected, (index, (name, values))) in numbered.into_iter().enumerate() {
-            if index != expected + 1 {
-                return Err(LauncherConfigError::Invalid {
-                    section: name.clone(),
-                    key: "section",
-                    message: "server sections must be contiguous from server.1".into(),
-                });
-            }
-            reject_unknown_keys(
-                name,
-                values,
-                &[
-                    "display_name",
-                    "host",
-                    "auth_port",
-                    "lobby_port",
-                    "use_https",
-                ],
-            )?;
-            servers.push(ServerProfile {
-                display_name: required(values, name, "display_name")?.to_string(),
-                host: required(values, name, "host")?.to_string(),
-                auth_port: parse_u16(values, name, "auth_port")?,
-                lobby_port: parse_u16(values, name, "lobby_port")?,
-                use_https: parse_bool(values, name, "use_https")?,
-            });
-        }
+        let servers = parse_servers(&sections)?;
         let config = Self {
             preferences,
             selected_server,
@@ -297,14 +251,16 @@ impl LauncherConfig {
              ; Extension selection and extension-owned settings use separate files.\n\n\
              [launcher]\n",
         );
-        out.push_str(&format!(
-            "close_on_game_start = {}\n",
+        let _ = writeln!(
+            out,
+            "close_on_game_start = {}",
             p.launcher.close_on_game_start
-        ));
-        out.push_str(&format!(
-            "native_resolution_override = {}\n",
+        );
+        let _ = writeln!(
+            out,
+            "native_resolution_override = {}",
             p.launcher.native_resolution_override
-        ));
+        );
         push_optional(
             &mut out,
             "game_location",
@@ -322,11 +278,13 @@ impl LauncherConfig {
             p.launcher.borderless_monitor.as_deref(),
         );
         out.push('\n');
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "[game]\ninitialized = {}\ndisplay_mode = {}\nwidth = {}\nheight = {}\n\n",
             p.game.initialized, p.game.display_mode, p.game.width, p.game.height
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "[game.graphics]\nmultisampling = {}\ngeneral_quality = {}\nbackground_quality = {}\nshadow_detail = {}\nambient_occlusion = {}\ndepth_of_field = {}\ncutscene_effects = {}\nhardware_mouse = {}\ntexture_quality = {}\ntexture_filtering = {}\n\n",
             p.game.graphics.multisampling,
             p.game.graphics.general_quality,
@@ -338,21 +296,21 @@ impl LauncherConfig {
             p.game.graphics.hardware_mouse,
             p.game.graphics.texture_quality,
             p.game.graphics.texture_filtering,
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "[game.audio]\nenabled = {}\nplay_in_background = {}\n\n",
             p.game.audio.enabled, p.game.audio.play_in_background
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "[developer]\nenable_verbose_wine_debug = {}\n\n",
             p.developer.enable_verbose_wine_debug
-        ));
-        out.push_str(&format!(
-            "[servers]\nselected = {}\n\n",
-            self.selected_server
-        ));
+        );
+        let _ = write!(out, "[servers]\nselected = {}\n\n", self.selected_server);
         for (index, server) in self.servers.iter().enumerate() {
-            out.push_str(&format!(
+            let _ = write!(
+                out,
                 "[server.{}]\ndisplay_name = {}\nhost = {}\nauth_port = {}\nlobby_port = {}\nuse_https = {}\n\n",
                 index + 1,
                 server.display_name,
@@ -360,7 +318,7 @@ impl LauncherConfig {
                 server.auth_port,
                 server.lobby_port,
                 server.use_https,
-            ));
+            );
         }
         out
     }
@@ -425,6 +383,58 @@ impl LauncherConfig {
         }
         Ok(())
     }
+}
+
+fn parse_servers(sections: &IniSections) -> Result<Vec<ServerProfile>, LauncherConfigError> {
+    let mut numbered = BTreeMap::new();
+    for (name, values) in sections {
+        let Some(number) = name.strip_prefix("server.") else {
+            continue;
+        };
+        let index = number
+            .parse::<usize>()
+            .map_err(|_| LauncherConfigError::Invalid {
+                section: name.clone(),
+                key: "section",
+                message: "server sections must be numbered from 1".into(),
+            })?;
+        if index == 0 || numbered.insert(index, (name, values)).is_some() {
+            return Err(LauncherConfigError::Invalid {
+                section: name.clone(),
+                key: "section",
+                message: "server sections must use unique positive numbers".into(),
+            });
+        }
+    }
+    let mut servers = Vec::with_capacity(numbered.len());
+    for (expected, (index, (name, values))) in numbered.into_iter().enumerate() {
+        if index != expected + 1 {
+            return Err(LauncherConfigError::Invalid {
+                section: name.clone(),
+                key: "section",
+                message: "server sections must be contiguous from server.1".into(),
+            });
+        }
+        reject_unknown_keys(
+            name,
+            values,
+            &[
+                "display_name",
+                "host",
+                "auth_port",
+                "lobby_port",
+                "use_https",
+            ],
+        )?;
+        servers.push(ServerProfile {
+            display_name: required(values, name, "display_name")?.to_string(),
+            host: required(values, name, "host")?.to_string(),
+            auth_port: parse_u16(values, name, "auth_port")?,
+            lobby_port: parse_u16(values, name, "lobby_port")?,
+            use_https: parse_bool(values, name, "use_https")?,
+        });
+    }
+    Ok(servers)
 }
 
 fn validate_ini_value(key: &'static str, value: &str) -> Result<(), LauncherConfigError> {
@@ -704,7 +714,7 @@ where
 {
     required(values, section, key)?
         .parse::<T>()
-        .map_err(|_| LauncherConfigError::Invalid {
+        .map_err(|()| LauncherConfigError::Invalid {
             section: section.into(),
             key,
             message: message.into(),

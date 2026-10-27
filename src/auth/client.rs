@@ -131,9 +131,8 @@ impl AuthClient {
     /// GET `/sessions/current`; inconclusive results return [`SessionValidation::Unknown`] so transient failures do not force logout.
     pub async fn validate_session(&self, token: &str) -> SessionValidation {
         let path = format!("{SESSIONS_PATH}/current");
-        let url = match self.api_base.join(&path) {
-            Ok(url) => url,
-            Err(_) => return SessionValidation::Unknown,
+        let Ok(url) = self.api_base.join(&path) else {
+            return SessionValidation::Unknown;
         };
         match self.http.get(url).bearer_auth(token).send().await {
             Ok(response) => match response.status() {
@@ -688,19 +687,6 @@ mod tests {
         retained.logout(SAMPLE_SESSION_ID).await.unwrap();
         validation.assert_hits(1);
         revocation.assert_hits(1);
-    }
-
-    #[tokio::test]
-    async fn logout_success_with_empty_204_body_returns_ok() {
-        let server = MockServer::start();
-        let mock = server.mock(|when, then| {
-            when.method(DELETE)
-                .path(format!("/api/v1/sessions/{SAMPLE_SESSION_ID}"));
-            then.status(204);
-        });
-        let client = AuthClient::new(&server_api_base(&server)).unwrap();
-        client.logout(SAMPLE_SESSION_ID).await.unwrap();
-        mock.assert();
     }
 
     #[tokio::test]

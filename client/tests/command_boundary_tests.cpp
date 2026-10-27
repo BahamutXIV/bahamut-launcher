@@ -91,7 +91,7 @@ int wmain()
         return 1;
     }
 
-    const std::array<std::pair<std::string_view, bool>, 30> recognition = { {
+    const std::array<std::pair<std::string_view, bool>, 31> recognition = { {
         { "/pos", true },
         { "/pos ", true },
         { "/pos\targ", true },
@@ -111,10 +111,14 @@ int wmain()
         { "/distance", true },
         { "/distance lock", true },
         { "/distances", false },
+        { "/enemycast", true },
+        { "/enemycaster", false },
         { "/targethp", true },
         { "/targethps", false },
+        { "/customtimer", true },
         { "/packetlogger", true },
         { "/packetlogger start", true },
+        { "/packetlogger split", true },
         { "/packetloggers", false },
         { "/combatparser reset", true },
         { "/combatparser", true },
@@ -246,6 +250,8 @@ int wmain()
                  "distance color command was not dispatched") ||
         !Require(handleLookup({ "/distance", "size", "24" }) == -2 && dispatch.lastCommand == "/distance size 24",
                  "distance size command was not dispatched") ||
+        !Require(handleLookup({ "/enemycast", "lock" }) == -2 && dispatch.lastCommand == "/enemycast lock",
+                 "enemycast lock command was not dispatched") ||
         !Require(handleLookup({ "/targethp", "lock" }) == -2 && dispatch.lastCommand == "/targethp lock",
                  "targethp lock command was not dispatched") ||
         !Require(handleLookup({ "/targethp", "help" }) == -2 && dispatch.lastCommand == "/targethp help",
@@ -254,12 +260,18 @@ int wmain()
                  "targethp color command was not dispatched") ||
         !Require(handleLookup({ "/targethp", "size", "24" }) == -2 && dispatch.lastCommand == "/targethp size 24",
                  "targethp size command was not dispatched") ||
+        !Require(handleLookup({ "/customtimer", "lock" }) == -2 && dispatch.lastCommand == "/customtimer lock",
+                 "customtimer lock command was not dispatched") ||
         !Require(handleLookup({ "/packetlogger" }) == -2 && dispatch.lastCommand == "/packetlogger",
                  "packetlogger status command was not dispatched") ||
         !Require(handleLookup({ "/packetlogger", "start" }) == -2 && dispatch.lastCommand == "/packetlogger start",
                  "packetlogger start command was not dispatched") ||
         !Require(handleLookup({ "/packetlogger", "stop" }) == -2 && dispatch.lastCommand == "/packetlogger stop",
                  "packetlogger stop command was not dispatched") ||
+        !Require(handleLookup({ "/packetlogger", "split" }) == -2 && dispatch.lastCommand == "/packetlogger split",
+                 "packetlogger split command was not dispatched") ||
+        !Require(handleLookup({ "/packetlogger", "split", "extra" }) == 42,
+                 "packetlogger split extra argument did not forward") ||
         !Require(handleLookup({ "/packetlogger", "status" }) == -2 && dispatch.lastCommand == "/packetlogger status",
                  "packetlogger status command was not dispatched") ||
         !Require(handleLookup({ "/combatparser" }) == -2 && dispatch.lastCommand == "/combatparser",
@@ -283,7 +295,7 @@ int wmain()
     }
     if (!Require(handleLookup({ "/wiki", "help", "extra" }) == -2 && dispatch.lastCommand == "/wiki help extra",
                  "wiki multi-word query was not accepted") ||
-        !Require(dispatch.calls == 29,
+        !Require(dispatch.calls == 32,
                  "accepted command dispatch count was incorrect"))
     {
         return 1;
@@ -352,10 +364,14 @@ int wmain()
                  "distance without lock did not forward") ||
         !Require(handleLookup({ "/distance", "help", "extra" }) == 42,
                  "distance help arguments did not forward") ||
+        !Require(handleLookup({ "/enemycast", "extra" }) == 42,
+                 "enemycast unknown argument did not forward") ||
         !Require(handleLookup({ "/targethp", "lock", "extra" }) == 42,
                  "targethp extra argument did not forward") ||
         !Require(handleLookup({ "/targethp", "help", "extra" }) == 42,
                  "targethp help arguments did not forward") ||
+        !Require(handleLookup({ "/customtimer", "help" }) == 42,
+                 "customtimer unsupported help did not forward") ||
         !Require(handleLookup({ "/packetlogger", "help" }) == 42,
                  "packetlogger unsupported help did not forward") ||
         !Require(handleLookup({ "/packetlogger", "start", "extra" }) == 42,
@@ -402,7 +418,7 @@ int wmain()
     {
         return 1;
     }
-    if (!Require(dispatch.calls == 0 && originalState.lookupCalls == 31,
+    if (!Require(dispatch.calls == 0 && originalState.lookupCalls == 33,
                  "invalid commands were dispatched or not all forwarded"))
     {
         return 1;

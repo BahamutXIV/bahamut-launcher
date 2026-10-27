@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::atomic_fs::rename_replace;
+
 static SAVE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn write_atomic(path: &Path, body: &[u8]) -> io::Result<()> {
@@ -25,14 +27,14 @@ fn write_staged(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) ->
         output.sync_all()
     })();
     drop(output);
-    let result = written.and_then(|()| replace_file(&temporary, path));
+    let result = written.and_then(|()| rename_replace(&temporary, path));
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result
 }
 
-fn temporary_path(path: &Path) -> PathBuf {
+pub(super) fn temporary_path(path: &Path) -> PathBuf {
     let counter = SAVE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -44,38 +46,6 @@ fn temporary_path(path: &Path) -> PathBuf {
         timestamp ^ counter
     ));
     PathBuf::from(temporary)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file(temporary: &Path, path: &Path) -> io::Result<()> {
-    fs::rename(temporary, path)
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file(temporary: &Path, path: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let temporary_wide = temporary
-        .as_os_str()
-        .encode_wide()
-        .chain([0])
-        .collect::<Vec<_>>();
-    let path_wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain([0])
-        .collect::<Vec<_>>();
-    unsafe {
-        MoveFileExW(
-            windows::core::PCWSTR(temporary_wide.as_ptr()),
-            windows::core::PCWSTR(path_wide.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(io::Error::other)
-    }
 }
 
 #[cfg(test)]

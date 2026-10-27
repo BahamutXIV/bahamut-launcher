@@ -128,6 +128,9 @@ class PackageGameContentTests(unittest.TestCase):
         )
         with zipfile.ZipFile(archive_path) as archive:
             self.assertEqual(sorted(archive.namelist()), ["ffxivboot.exe", "ffxivgame.exe", "sqpack/data.bin"])
+        for index, archive in enumerate(manifest["base"]["archives"], 1):
+            item = archive["object"]
+            self.assertEqual(item["object_key"], f"game/{item['sha256']}/base-{index:04}.zip")
 
     def test_explicit_inputs_and_package_choices_are_required(self) -> None:
         result = subprocess.run(
@@ -164,15 +167,6 @@ class PackageGameContentTests(unittest.TestCase):
         result = self._run(self.root / "package", max_archive_bytes=4)
         self.assertEqual(result.returncode, 2)
         self.assertIn("exceeds the selected archive size limit", result.stderr)
-
-    def test_object_key_layout_is_hash_then_archive_name(self) -> None:
-        output = self.root / "package"
-        result = self._run(output)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        manifest = json.loads((output / "game-delivery.json").read_text(encoding="ascii"))
-        for index, archive in enumerate(manifest["base"]["archives"], 1):
-            item = archive["object"]
-            self.assertEqual(item["object_key"], f"game/{item['sha256']}/base-{index:04}.zip")
 
     def test_existing_output_is_preserved(self) -> None:
         output = self.root / "existing-output"

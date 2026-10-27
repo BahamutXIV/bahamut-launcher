@@ -92,15 +92,7 @@ pub fn plan_contract_patches(lobby_host: &str) -> Result<[PePatch; 2], PePatchEr
     Ok([encryption, host])
 }
 
-// ---------------------------------------------------------------------------
 // Wine-path stability patches.
-//
-// These three are NOT part of the cross-platform handshake contract - they are
-// behaviour changes against the client image that keep FFXIV 1.0 stable under
-// Wine/WineD3D, so they are applied only on the Wine backends (never on the
-// native Windows path, which runs against real Direct3D 9). The RVAs and byte
-// payloads are properties of the 1.23b client image.
-// ---------------------------------------------------------------------------
 
 /// RVA of the indirect `call *[..] ; movl $0, [0]` block in the client's fatal-assert handler.
 pub const ASSERT_LOG_PATCH_RVA: u32 = 0x0064_8BBF;

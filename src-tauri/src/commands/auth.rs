@@ -3,6 +3,7 @@ use bahamut_launcher::auth::expiry::parse_rfc3339_utc_ms;
 use bahamut_launcher::auth::types::{
     ErrorCode, LoginRequest, RegisterRequest, is_contract_session_id,
 };
+use bahamut_launcher::config::controller_config::{ControllerConfig, ControllerConfigError};
 use bahamut_launcher::config::dirs;
 use bahamut_launcher::config::launcher_ini::LauncherConfig;
 use bahamut_launcher::config::preferences::DisplayMode;
@@ -145,12 +146,30 @@ pub(crate) fn launch_game_inner(
         display_mode: config.preferences.game.display_mode,
         borderless_monitor: config.preferences.launcher.borderless_monitor.clone(),
         extension_artifacts,
+        gamepad_setup: launch_gamepad_setup(cfg!(target_os = "linux"), ControllerConfig::load()),
     };
 
     let game = platform::launch_game(&game_dir, profile.lobby_address(), &token, &options)
         .map_err(map_launch_error)?;
 
     Ok((config.preferences.launcher.close_on_game_start, game))
+}
+
+/// Gamepad setup applies on Linux only; an unreadable setting keeps it off.
+fn launch_gamepad_setup(
+    linux: bool,
+    loaded: Result<ControllerConfig, ControllerConfigError>,
+) -> bool {
+    if !linux {
+        return false;
+    }
+    match loaded {
+        Ok(config) => config.pad_setup,
+        Err(error) => {
+            tracing::warn!(error = %error, "controller settings are unreadable; gamepad setup stays off");
+            false
+        }
+    }
 }
 
 fn selected_borderless_monitor_resolution(
@@ -429,6 +448,23 @@ pub(crate) async fn logout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pad_setup(enabled: bool) -> Result<ControllerConfig, ControllerConfigError> {
+        Ok(ControllerConfig { pad_setup: enabled })
+    }
+
+    #[test]
+    fn gamepad_setup_is_linux_only_and_follows_the_saved_toggle() {
+        assert!(!launch_gamepad_setup(false, pad_setup(true)));
+        assert!(launch_gamepad_setup(true, pad_setup(true)));
+        assert!(!launch_gamepad_setup(true, pad_setup(false)));
+    }
+
+    #[test]
+    fn unreadable_controller_settings_keep_gamepad_setup_off() {
+        let unreadable = Err(ControllerConfigError::Io(std::io::Error::other("x")));
+        assert!(!launch_gamepad_setup(true, unreadable));
+    }
 
     #[test]
     fn login_completion_requires_the_original_selected_profile_and_endpoint() {

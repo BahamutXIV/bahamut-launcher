@@ -2,6 +2,8 @@
 
 #include "actor_name.h"
 #include "area_names.h"
+#include "custom_timer.h"
+#include "enemy_cast.h"
 #include "player_state.h"
 #include "target_distance.h"
 
@@ -36,16 +38,10 @@ constexpr std::size_t      kMaximumSettingLength         = 1024;
 constexpr std::size_t      kMaximumAddonUrlBytes         = 2048;
 constexpr std::size_t      kMaximumChatLogBytes          = 8192;
 constexpr std::size_t      kMaximumQueuedChatLines       = 256;
-constexpr std::size_t      kMaximumQueuedPackets         = 256;
-constexpr std::size_t      kMaximumQueuedPacketBytes     = 4u * 1024u * 1024u;
-constexpr std::size_t      kMaximumPacketsPerUpdate      = 32;
 constexpr std::size_t      kMaximumQueuedCombatEvents    = 256;
 constexpr std::size_t      kMaximumCombatMeterRows       = 64;
 constexpr std::size_t      kMaximumCombatMeterNameBytes  = 128;
 constexpr std::size_t      kMaximumCombatMeterLabelBytes = 16;
-constexpr std::size_t      kMaximumPacketLogLineBytes    = 131200;
-constexpr std::uint64_t    kMaximumPacketLogFileBytes    = 16u * 1024u * 1024u;
-constexpr std::string_view kPacketLogHeader              = "capture_unix_ms_utc,direction,size,frame_hex\n";
 constexpr std::uint16_t    kCombatSingleOpcode           = 0x0139u;
 constexpr std::uint16_t    kCombatMultiOpcode            = 0x013Au;
 constexpr std::uint16_t    kCombatLargeOpcode            = 0x013Bu;
@@ -192,19 +188,19 @@ struct AddonHost::Instance
     std::filesystem::path                  settingsPath;
     std::filesystem::path                  chatLogDirectory;
     std::filesystem::path                  packetLogDirectory;
-    std::shared_ptr<PacketCaptureSession>  packetWriteSession;
     std::string                            id;
     AddonHost*                             owner = nullptr;
     std::map<std::string, std::string>     settings;
-    lua_State*                             state                = nullptr;
-    const AddonWindowSink*                 drawSink             = nullptr;
-    bahamut_client::PlayerStateService*    playerState          = nullptr;
-    bahamut_client::TargetDistanceService* targetDistance       = nullptr;
-    const AddonClipboardSink*              clipboardSink        = nullptr;
-    const AddonChatSink*                   chatSink             = nullptr;
-    const AddonUrlSink*                    urlSink              = nullptr;
-    bool                                   faulted              = false;
-    bool                                   packetWriteCompleted = false;
+    lua_State*                             state          = nullptr;
+    const AddonWindowSink*                 drawSink       = nullptr;
+    bahamut_client::PlayerStateService*    playerState    = nullptr;
+    bahamut_client::TargetDistanceService* targetDistance = nullptr;
+    bahamut_client::CustomTimerService*    customTimer    = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast      = nullptr;
+    const AddonClipboardSink*              clipboardSink  = nullptr;
+    const AddonChatSink*                   chatSink       = nullptr;
+    const AddonUrlSink*                    urlSink        = nullptr;
+    bool                                   faulted        = false;
 };
 
 std::optional<std::string> ReadAddonManifestId(
@@ -259,6 +255,26 @@ void AddonHost::SetTargetDistanceService(
     for (const auto& addon : addons_)
     {
         addon->targetDistance = targetDistance;
+    }
+}
+
+void AddonHost::SetCustomTimerService(
+    bahamut_client::CustomTimerService* customTimer)
+{
+    customTimer_ = customTimer;
+    for (const auto& addon : addons_)
+    {
+        addon->customTimer = customTimer;
+    }
+}
+
+void AddonHost::SetEnemyCastService(
+    bahamut_client::EnemyCastService* enemyCast)
+{
+    enemyCast_ = enemyCast;
+    for (const auto& addon : addons_)
+    {
+        addon->enemyCast = enemyCast;
     }
 }
 
@@ -398,7 +414,7 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
     {
         return true;
     }
-    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
     if (addon == nullptr)
     {
         return false;
@@ -410,14 +426,8 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
     }
     if (*id == "packetlogger")
     {
-        {
-            std::lock_guard lock(packetQueueMutex_);
-            packetCaptureSession_.reset();
-            packetCaptureSeen_    = 0;
-            packetCaptureWritten_ = 0;
-            packetCaptureDropped_ = 0;
-            packetQueueHighWater_ = 0;
-        }
+        packetLoggerFaults_ = 0;
+        ReplacePacketWriter(*addons_.back());
         packetLoggerEnabled_.store(!addons_.back()->faulted,
                                    std::memory_order_release);
         if (addons_.back()->faulted || !StartPacketCapture(*addons_.back()))
@@ -440,6 +450,15 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
 
 bool AddonHost::Reload(std::string_view addonId)
 {
+    if (addonId == "packetlogger")
+    {
+        packetLoggerFaults_ = 0;
+    }
+    return ReloadAddon(addonId, packet_capture::EndReason::Disable);
+}
+
+bool AddonHost::ReloadAddon(std::string_view addonId, packet_capture::EndReason reason)
+{
     const auto found = std::find_if(addons_.begin(), addons_.end(), [&](const auto& addon)
                                     {
                                         return addon->id == addonId;
@@ -456,12 +475,7 @@ bool AddonHost::Reload(std::string_view addonId)
     if (addonId == "packetlogger")
     {
         packetLoggerEnabled_.store(false, std::memory_order_release);
-        std::lock_guard lock(packetQueueMutex_);
-        packetCaptureDropped_ += packetQueue_.size();
-        packetQueue_.clear();
-        packetQueueBytes_    = 0;
-        packetCaptureActive_ = false;
-        packetCaptureSession_.reset();
+        StopPacketCaptureAsync(reason);
     }
     if (addonId == "combatparser")
     {
@@ -471,7 +485,7 @@ bool AddonHost::Reload(std::string_view addonId)
         combatDropped_ = 0;
     }
     Close(**found);
-    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
     if (replacement == nullptr)
     {
         addons_.erase(found);
@@ -480,14 +494,7 @@ bool AddonHost::Reload(std::string_view addonId)
     *found = std::move(replacement);
     if (addonId == "packetlogger")
     {
-        {
-            std::lock_guard lock(packetQueueMutex_);
-            packetCaptureSession_.reset();
-            packetCaptureSeen_    = 0;
-            packetCaptureWritten_ = 0;
-            packetCaptureDropped_ = 0;
-            packetQueueHighWater_ = 0;
-        }
+        ReplacePacketWriter(**found);
         packetLoggerEnabled_.store(!(*found)->faulted,
                                    std::memory_order_release);
         if ((*found)->faulted || !StartPacketCapture(**found))
@@ -521,13 +528,9 @@ bool AddonHost::Disable(std::string_view addonId)
     }
     if (addonId == "packetlogger")
     {
+        packetLoggerFaults_ = 0;
         packetLoggerEnabled_.store(false, std::memory_order_release);
-        std::lock_guard lock(packetQueueMutex_);
-        packetCaptureDropped_ += packetQueue_.size();
-        packetQueue_.clear();
-        packetQueueBytes_    = 0;
-        packetCaptureActive_ = false;
-        packetCaptureSession_.reset();
+        StopPacketCaptureAsync(packet_capture::EndReason::Disable);
     }
     if (addonId == "combatparser")
     {
@@ -560,8 +563,8 @@ bool AddonHost::TargetlinesEnabled() const
 bool AddonHost::HasCommandAddons() const
 {
     return IsLoaded("pos") || IsLoaded("fps") || IsLoaded("wiki") ||
-           IsLoaded("distance") || IsLoaded("targethp") ||
-           IsLoaded("combatparser") || IsLoaded("packetlogger");
+           IsLoaded("distance") || IsLoaded("enemycast") || IsLoaded("targethp") ||
+           IsLoaded("customtimer") || IsLoaded("combatparser") || IsLoaded("packetlogger");
 }
 
 bool AddonHost::DispatchCommand(std::string_view command)
@@ -574,7 +577,6 @@ bool AddonHost::DispatchCommand(std::string_view command)
         }
         bool       handled = false;
         const bool invoked = InvokeCommand(*addon, command, handled);
-        StopFaultedPacketLogger();
         StopFaultedCombatParser();
         if (!invoked)
         {
@@ -625,35 +627,48 @@ void AddonHost::QueueAreaTransition(const packet_observer::GameMessage& message)
     {
         return;
     }
+    if (packetLoggerEnabled_.load(std::memory_order_acquire))
+    {
+        if (const auto writer = PacketWriter(); writer != nullptr)
+        {
+            writer->EnqueueZone(std::chrono::system_clock::now(), zoneId, bahamut_client::AreaNameForZone(zoneId));
+        }
+    }
     std::lock_guard lock(areaQueueMutex_);
     queuedAreaZoneId_ = zoneId;
 }
 
-bool AddonHost::QueuePacketFrame(packet_observer::Direction    direction,
-                                 std::span<const std::uint8_t> frame)
+void AddonHost::SetRuntimeIdentity(std::string launcherVersion, std::uint32_t runtimeApiVersion)
+{
+    launcherVersion_   = std::move(launcherVersion);
+    runtimeApiVersion_ = runtimeApiVersion;
+}
+
+bool AddonHost::QueuePacketFrame(const packet_observer::FrameInfo& frame)
 {
     if (!packetLoggerEnabled_.load(std::memory_order_acquire) ||
-        frame.empty())
+        frame.bytes.empty())
     {
         return false;
     }
-    std::lock_guard lock(packetQueueMutex_);
-    if (!packetLoggerEnabled_.load(std::memory_order_relaxed) ||
-        !packetCaptureActive_)
+    const auto writer = PacketWriter();
+    if (writer == nullptr)
     {
         return false;
     }
-    ++packetCaptureSeen_;
-    if (packetQueue_.size() >= kMaximumQueuedPackets ||
-        frame.size() > kMaximumQueuedPacketBytes - packetQueueBytes_)
+    const auto decision = packet_capture::Classify(
+        static_cast<packet_capture::Scope>(packetScope_.load(std::memory_order_acquire)), frame);
+    if (!decision.write)
     {
-        ++packetCaptureDropped_;
+        writer->CountSkipped();
         return false;
     }
-    packetQueue_.push_back(PacketFrame{ direction, std::chrono::system_clock::now(), packetCaptureSession_, { frame.begin(), frame.end() } });
-    packetQueueBytes_ += frame.size();
-    packetQueueHighWater_ = std::max(packetQueueHighWater_, packetQueue_.size());
-    return true;
+    const auto now = std::chrono::system_clock::now();
+    if (!decision.stub.empty())
+    {
+        return writer->EnqueueStub(frame.direction, now, frame.bytes.size(), decision.stub);
+    }
+    return writer->Enqueue(frame.direction, now, frame.bytes);
 }
 
 void AddonHost::QueueCombatResult(const packet_observer::GameMessage& message)
@@ -777,42 +792,21 @@ void AddonHost::QueueCombatResult(const packet_observer::GameMessage& message)
 
 void AddonHost::Update(double frameDeltaSeconds)
 {
-    if (packetLoggerEnabled_.load(std::memory_order_acquire))
+    if (const auto writer = PacketWriter(); writer != nullptr)
     {
-        std::vector<PacketFrame> packets;
-        {
-            std::lock_guard   lock(packetQueueMutex_);
-            const std::size_t count = std::min(packetQueue_.size(), kMaximumPacketsPerUpdate);
-            packets.reserve(count);
-            for (std::size_t index = 0; index < count; ++index)
-            {
-                packetQueueBytes_ -= packetQueue_[index].bytes.size();
-                packets.push_back(std::move(packetQueue_[index]));
-            }
-            packetQueue_.erase(packetQueue_.begin(), packetQueue_.begin() + count);
-        }
-        for (const auto& message : packets)
-        {
-            bool written = false;
-            for (const auto& addon : addons_)
-            {
-                if (addon->id == "packetlogger" && !addon->faulted && addon->state != nullptr)
-                {
-                    addon->packetWriteSession   = message.session;
-                    addon->packetWriteCompleted = false;
-                    InvokePacket(*addon, message);
-                    written = addon->packetWriteCompleted;
-                    addon->packetWriteSession.reset();
-                    StopFaultedPacketLogger();
-                    break;
-                }
-            }
-            if (!written)
-            {
-                std::lock_guard lock(packetQueueMutex_);
-                ++packetCaptureDropped_;
-            }
-        }
+        DrainPacketNotices(*writer);
+    }
+    // A replaced writer may still publish a notice while it finishes its queue.
+    for (auto retired = retiredPacketWriters_.begin(); retired != retiredPacketWriters_.end();)
+    {
+        const bool idle = !(*retired)->Status().recording && (*retired)->WaitIdle(std::chrono::milliseconds(0));
+        DrainPacketNotices(**retired);
+        retired = idle ? retiredPacketWriters_.erase(retired) : retired + 1;
+    }
+    while (!packetNotices_.empty() && chatSink_.print != nullptr &&
+           chatSink_.print(chatSink_.context, packetNotices_.front()))
+    {
+        packetNotices_.pop_front();
     }
     std::vector<std::string> queued;
     {
@@ -838,9 +832,10 @@ void AddonHost::Update(double frameDeltaSeconds)
         lua_pushnumber(addon->state, frameDeltaSeconds);
         Invoke(*addon, "update", 1);
     }
-    StopFaultedPacketLogger();
     StopFaultedCombatParser();
     DispatchAreaTransition();
+    // Last, so a restart never runs inside the addon loop above.
+    HandlePacketLoggerFault();
 }
 
 void AddonHost::DispatchAreaTransition()
@@ -901,11 +896,12 @@ void AddonHost::Draw(const AddonWindowSink& sink)
         Invoke(*addon, "draw");
         addon->drawSink = nullptr;
     }
-    StopFaultedPacketLogger();
     StopFaultedCombatParser();
 }
 
-void AddonHost::StopFaultedPacketLogger()
+// First fault: restart the addon once in a new session. Second fault: stop.
+// Runs on the update thread only; the hook thread never calls into Lua.
+void AddonHost::HandlePacketLoggerFault()
 {
     if (!packetLoggerEnabled_.load(std::memory_order_acquire))
     {
@@ -916,22 +912,28 @@ void AddonHost::StopFaultedPacketLogger()
                                          return addon->id == "packetlogger" &&
                                                 addon->faulted;
                                      });
-    if (faulted)
+    if (!faulted)
     {
-        packetLoggerEnabled_.store(false, std::memory_order_release);
-        {
-            std::lock_guard lock(packetQueueMutex_);
-            packetCaptureDropped_ += packetQueue_.size();
-            packetQueue_.clear();
-            packetQueueBytes_    = 0;
-            packetCaptureActive_ = false;
-            packetCaptureSession_.reset();
-        }
-        if (chatSink_.print != nullptr)
-        {
-            chatSink_.print(chatSink_.context, "Packet capture stopped: logger callback failed");
-        }
+        return;
     }
+    if (++packetLoggerFaults_ == 1 && ReloadAddon("packetlogger", packet_capture::EndReason::Fault))
+    {
+        PushPacketNotice("Packet capture: recording again after an addon error");
+        return;
+    }
+    packetLoggerEnabled_.store(false, std::memory_order_release);
+    StopPacketCaptureAsync(packet_capture::EndReason::Fault);
+    PushPacketNotice("Packet capture: stopped after an addon error");
+}
+
+void AddonHost::PushPacketNotice(std::string notice)
+{
+    constexpr std::size_t kMaximumPendingNotices = 8;
+    if (packetNotices_.size() >= kMaximumPendingNotices)
+    {
+        packetNotices_.pop_front();
+    }
+    packetNotices_.push_back(std::move(notice));
 }
 
 bool AddonHost::StartPacketCapture(Instance& addon)
@@ -940,81 +942,80 @@ bool AddonHost::StartPacketCapture(Instance& addon)
     {
         return false;
     }
+    auto writer = PacketWriter();
+    if (writer == nullptr)
     {
-        std::lock_guard lock(packetQueueMutex_);
-        if (packetCaptureActive_)
-        {
-            return true;
-        }
+        ReplacePacketWriter(addon);
+        writer = PacketWriter();
     }
-    const auto now          = std::chrono::system_clock::now();
-    const auto seconds      = std::chrono::system_clock::to_time_t(now);
-    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  now.time_since_epoch())
-                                  .count() %
-                              1000;
-    std::tm    utc{};
-    char       stamp[32]{};
-    if (gmtime_s(&utc, &seconds) != 0 ||
-        std::strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H-%M-%S", &utc) == 0)
-    {
-        return false;
-    }
-    std::filesystem::path file;
-    std::error_code       error;
-    for (unsigned int suffix = 0; suffix < 1000; ++suffix)
-    {
-        char name[64]{};
-        if (suffix == 0)
-        {
-            std::snprintf(name, sizeof(name), "capture-%s.%03lldZ.csv", stamp, milliseconds);
-        }
-        else
-        {
-            std::snprintf(name, sizeof(name), "capture-%s.%03lldZ-%u.csv", stamp, milliseconds, suffix);
-        }
-        file = addon.packetLogDirectory / name;
-        if (!std::filesystem::exists(file, error) && !error)
-        {
-            break;
-        }
-        if (error)
-        {
-            return false;
-        }
-        file.clear();
-    }
-    if (file.empty())
-    {
-        return false;
-    }
-    std::ofstream output(file, std::ios::binary);
-    if (!output)
-    {
-        return false;
-    }
-    output << kPacketLogHeader;
-    output.close();
-    if (!output.good())
-    {
-        return false;
-    }
-    std::lock_guard lock(packetQueueMutex_);
-    packetCaptureSession_ = std::make_shared<PacketCaptureSession>(
-        PacketCaptureSession{ file, file, kPacketLogHeader.size(), 1 });
-    packetCaptureActive_ = true;
-    return true;
+    return writer != nullptr && writer->Start();
 }
 
 bool AddonHost::StopPacketCapture()
 {
-    std::lock_guard lock(packetQueueMutex_);
-    if (!packetCaptureActive_)
+    const auto writer = PacketWriter();
+    return writer != nullptr && writer->Stop();
+}
+
+bool AddonHost::SplitPacketCapture()
+{
+    const auto writer = PacketWriter();
+    return writer != nullptr && writer->Split();
+}
+
+void AddonHost::StopPacketCaptureAsync(packet_capture::EndReason reason)
+{
+    if (const auto writer = PacketWriter(); writer != nullptr)
     {
-        return false;
+        writer->Stop(reason, std::chrono::milliseconds(0));
     }
-    packetCaptureActive_ = false;
-    return true;
+}
+
+void AddonHost::ReplacePacketWriter(const Instance& addon)
+{
+    const auto setting = addon.settings.find("capture_scope");
+    const auto scope   = packet_capture::ParseScope(setting == addon.settings.end() ? std::string_view{} : std::string_view(setting->second));
+    packetScope_.store(static_cast<std::uint8_t>(scope), std::memory_order_release);
+    if (auto old = PacketWriter(); old != nullptr)
+    {
+        // A Start that timed out may still open a session; close it before retiring.
+        old->Stop(packet_capture::EndReason::Disable, std::chrono::milliseconds(0));
+        DrainPacketNotices(*old);
+        retiredPacketWriters_.push_back(std::move(old));
+    }
+    auto writer = std::make_shared<packet_capture::PacketCaptureWriter>(
+        addon.packetLogDirectory, packet_capture::PacketCaptureLimits{}, packet_capture::PacketCaptureIdentity{ launcherVersion_, runtimeApiVersion_ });
+    writer->SetScope(scope);
+    std::lock_guard lock(packetWriterMutex_);
+    packetWriter_ = std::move(writer);
+}
+
+void AddonHost::DrainPacketNotices(packet_capture::PacketCaptureWriter& writer)
+{
+    while (auto notice = writer.TakeNotice())
+    {
+        PushPacketNotice(std::move(*notice));
+    }
+}
+
+void AddonHost::FailNextPacketWritesForTest(int count)
+{
+    if (const auto writer = PacketWriter(); writer != nullptr)
+    {
+        writer->FailNextWritesForTest(count);
+    }
+}
+
+std::shared_ptr<packet_capture::PacketCaptureWriter> AddonHost::PacketWriter() const
+{
+    std::lock_guard lock(packetWriterMutex_);
+    return packetWriter_;
+}
+
+bool AddonHost::WaitForPacketCaptureIdle(std::chrono::milliseconds timeout)
+{
+    const auto writer = PacketWriter();
+    return writer == nullptr || writer->WaitIdle(timeout);
 }
 
 std::size_t AddonHost::LoadedCount() const
@@ -1040,6 +1041,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     AddonHost*                             owner,
     bahamut_client::PlayerStateService*    playerState,
     bahamut_client::TargetDistanceService* targetDistance,
+    bahamut_client::CustomTimerService*    customTimer,
+    bahamut_client::EnemyCastService*      enemyCast,
     const AddonClipboardSink*              clipboardSink,
     const AddonChatSink*                   chatSink,
     const AddonUrlSink*                    urlSink)
@@ -1061,6 +1064,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     addon->owner          = owner;
     addon->playerState    = playerState;
     addon->targetDistance = targetDistance;
+    addon->customTimer    = customTimer;
+    addon->enemyCast      = enemyCast;
     addon->clipboardSink  = clipboardSink;
     addon->chatSink       = chatSink;
     addon->urlSink        = urlSink;
@@ -1146,6 +1151,14 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     {
         registerFunction("target_hp", &LuaTargetHp);
     }
+    if (addon->id == "customtimer")
+    {
+        registerFunction("custom_timer", &LuaCustomTimer);
+    }
+    if (addon->id == "enemycast")
+    {
+        registerFunction("enemy_casts", &LuaEnemyCasts);
+    }
     registerFunction("window", &LuaWindow);
     registerFunction("raw_text", &LuaRawText);
     registerFunction("clipboard_set", &LuaClipboardSet);
@@ -1156,9 +1169,9 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     }
     if (addon->id == "packetlogger")
     {
-        registerFunction("packetlog_write", &LuaPacketLogWrite);
         registerFunction("packetlog_start", &LuaPacketLogStart);
         registerFunction("packetlog_stop", &LuaPacketLogStop);
+        registerFunction("packetlog_split", &LuaPacketLogSplit);
         registerFunction("packetlog_status", &LuaPacketLogStatus);
     }
     if (addon->id == "combatparser")
@@ -1313,106 +1326,6 @@ bool AddonHost::InvokeAreaChanged(Instance& addon, std::uint32_t zoneId, std::st
     return Invoke(addon, "area_changed", 3);
 }
 
-bool AddonHost::InvokePacket(Instance& addon, const PacketFrame& frame)
-{
-    static constexpr char digits[] = "0123456789ABCDEF";
-    std::string           payloadHex;
-    payloadHex.reserve(frame.bytes.size() * 2u);
-    for (const std::uint8_t byte : frame.bytes)
-    {
-        payloadHex.push_back(digits[byte >> 4u]);
-        payloadHex.push_back(digits[byte & 0x0fu]);
-    }
-    lua_State* state = addon.state;
-    lua_pushstring(state, frame.direction == packet_observer::Direction::Incoming ? "incoming" : "outgoing");
-    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  frame.capturedAt.time_since_epoch())
-                                  .count();
-    lua_pushnumber(state, static_cast<lua_Number>(milliseconds));
-    lua_pushnumber(state, static_cast<lua_Number>(frame.bytes.size()));
-    lua_pushlstring(state, payloadHex.data(), payloadHex.size());
-    return Invoke(addon, "packet", 4);
-}
-
-int AddonHost::LuaPacketLogWrite(lua_State* state)
-{
-    auto* addon = static_cast<Instance*>(
-        lua_touserdata(state, lua_upvalueindex(1)));
-    std::size_t length = 0;
-    const char* line   = lua_tolstring(state, 1, &length);
-    if (addon == nullptr || addon->id != "packetlogger" || addon->owner == nullptr ||
-        addon->packetWriteSession == nullptr || addon->packetWriteCompleted || line == nullptr ||
-        length == 0 || length > kMaximumPacketLogLineBytes ||
-        !std::all_of(line, line + length, [](unsigned char value)
-                     {
-                         return value >= 0x20u && value <= 0x7eu;
-                     }))
-    {
-        lua_pushboolean(state, 0);
-        return 1;
-    }
-    const auto            session = addon->packetWriteSession;
-    std::filesystem::path currentFile;
-    std::uint64_t         currentBytes = 0;
-    unsigned int          currentPart  = 0;
-    {
-        std::lock_guard lock(addon->owner->packetQueueMutex_);
-        currentFile  = session->currentFile;
-        currentBytes = session->currentBytes;
-        currentPart  = session->part;
-    }
-    std::error_code error;
-    if (!std::filesystem::exists(currentFile, error) || error)
-    {
-        lua_pushboolean(state, 0);
-        return 1;
-    }
-    const std::uint64_t   rowBytes   = length + 1u;
-    const bool            rotate     = currentBytes + rowBytes > kMaximumPacketLogFileBytes;
-    std::filesystem::path outputFile = currentFile;
-    if (rotate)
-    {
-        if (currentPart >= 9999u)
-        {
-            lua_pushboolean(state, 0);
-            return 1;
-        }
-        char suffix[32]{};
-        std::snprintf(suffix, sizeof(suffix), "-part%04u.csv", currentPart + 1u);
-        outputFile = session->baseFile.parent_path() /
-                     (session->baseFile.stem().string() + suffix);
-        if (std::filesystem::exists(outputFile, error) || error)
-        {
-            lua_pushboolean(state, 0);
-            return 1;
-        }
-    }
-    std::ofstream output(outputFile, std::ios::binary | (rotate ? std::ios::trunc : std::ios::app));
-    if (output)
-    {
-        if (rotate)
-        {
-            output << kPacketLogHeader;
-        }
-        output.write(line, static_cast<std::streamsize>(length));
-        output.put('\n');
-    }
-    output.close();
-    const bool written = output.good();
-    if (written)
-    {
-        addon->packetWriteCompleted = true;
-        std::lock_guard lock(addon->owner->packetQueueMutex_);
-        session->currentFile  = std::move(outputFile);
-        session->currentBytes = rotate ? kPacketLogHeader.size() + rowBytes
-                                       : currentBytes + rowBytes;
-        session->part         = currentPart + (rotate ? 1u : 0u);
-        ++addon->owner->packetCaptureWritten_;
-    }
-    lua_pushboolean(state, written);
-    return 1;
-}
-
 int AddonHost::LuaPacketLogStart(lua_State* state)
 {
     auto*      addon   = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
@@ -1433,6 +1346,15 @@ int AddonHost::LuaPacketLogStop(lua_State* state)
     return 1;
 }
 
+int AddonHost::LuaPacketLogSplit(lua_State* state)
+{
+    auto*      addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const bool split = addon != nullptr && addon->id == "packetlogger" &&
+                       addon->owner != nullptr && addon->owner->SplitPacketCapture();
+    lua_pushboolean(state, split);
+    return 1;
+}
+
 int AddonHost::LuaPacketLogStatus(lua_State* state)
 {
     auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
@@ -1441,25 +1363,31 @@ int AddonHost::LuaPacketLogStatus(lua_State* state)
         lua_pushnil(state);
         return 1;
     }
-    std::lock_guard lock(addon->owner->packetQueueMutex_);
-    lua_createtable(state, 0, 7);
-    lua_pushboolean(state, addon->owner->packetCaptureActive_);
+    packet_capture::PacketCaptureStatus status;
+    if (const auto writer = addon->owner->PacketWriter(); writer != nullptr)
+    {
+        status = writer->Status();
+    }
+    const auto setNumber = [&](const char* name, double value)
+    {
+        lua_pushnumber(state, static_cast<lua_Number>(value));
+        lua_setfield(state, -2, name);
+    };
+    lua_createtable(state, 0, 11);
+    lua_pushboolean(state, status.recording);
     lua_setfield(state, -2, "recording");
-    const std::string file = addon->owner->packetCaptureSession_ != nullptr
-                                 ? addon->owner->packetCaptureSession_->currentFile.filename().string()
-                                 : std::string();
-    lua_pushlstring(state, file.data(), file.size());
+    lua_pushlstring(state, status.file.data(), status.file.size());
     lua_setfield(state, -2, "file");
-    lua_pushnumber(state, static_cast<lua_Number>(addon->owner->packetCaptureSeen_));
-    lua_setfield(state, -2, "captured");
-    lua_pushnumber(state, static_cast<lua_Number>(addon->owner->packetCaptureWritten_));
-    lua_setfield(state, -2, "written");
-    lua_pushnumber(state, static_cast<lua_Number>(addon->owner->packetCaptureDropped_));
-    lua_setfield(state, -2, "dropped");
-    lua_pushnumber(state, static_cast<lua_Number>(addon->owner->packetQueue_.size()));
-    lua_setfield(state, -2, "queued");
-    lua_pushnumber(state, static_cast<lua_Number>(addon->owner->packetQueueHighWater_));
-    lua_setfield(state, -2, "queue_high_water");
+    setNumber("part", static_cast<double>(status.part));
+    setNumber("captured", static_cast<double>(status.captured));
+    setNumber("written", static_cast<double>(status.written));
+    setNumber("dropped", static_cast<double>(status.dropped));
+    setNumber("skipped", static_cast<double>(status.skipped));
+    setNumber("queued", static_cast<double>(status.queued));
+    setNumber("queue_high_water", static_cast<double>(status.queue_high_water));
+    setNumber("bytes_on_disk", static_cast<double>(status.bytes_on_disk));
+    lua_pushlstring(state, status.error.data(), status.error.size());
+    lua_setfield(state, -2, "error");
     return 1;
 }
 
@@ -1762,6 +1690,63 @@ int AddonHost::LuaTargetHp(lua_State* state)
         lua_pushnil(state);
     }
     return 4;
+}
+
+int AddonHost::LuaCustomTimer(lua_State* state)
+{
+    auto*      addon    = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto snapshot = addon != nullptr && addon->customTimer != nullptr
+                              ? addon->customTimer->Snapshot()
+                              : std::nullopt;
+    if (!snapshot)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    lua_newtable(state);
+    lua_pushlstring(state, snapshot->title.data(), snapshot->title.size());
+    lua_setfield(state, -2, "instance_name");
+    lua_pushlstring(state, snapshot->objective.data(), snapshot->objective.size());
+    lua_setfield(state, -2, "objective");
+    lua_pushinteger(state, static_cast<lua_Integer>(snapshot->remainingSeconds));
+    lua_setfield(state, -2, "remaining_seconds");
+    return 1;
+}
+
+int AddonHost::LuaEnemyCasts(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    lua_newtable(state);
+    if (addon == nullptr || addon->enemyCast == nullptr)
+    {
+        return 1;
+    }
+    const auto casts = addon->enemyCast->Snapshot();
+    for (std::size_t index = 0; index < std::min<std::size_t>(casts.size(), 4u); ++index)
+    {
+        const auto& cast = casts[index];
+        lua_newtable(state);
+        lua_pushinteger(state, static_cast<lua_Integer>(cast.actorId));
+        lua_setfield(state, -2, "actor_id");
+        lua_pushinteger(state, static_cast<lua_Integer>(cast.commandId));
+        lua_setfield(state, -2, "command_id");
+        lua_pushlstring(state, cast.name.data(), cast.name.size());
+        lua_setfield(state, -2, "name");
+        lua_pushlstring(state, cast.actorName.data(), cast.actorName.size());
+        lua_setfield(state, -2, "actor_name");
+        lua_pushnumber(state, cast.remainingSeconds);
+        lua_setfield(state, -2, "remaining_seconds");
+        lua_pushnumber(state, cast.durationSeconds);
+        lua_setfield(state, -2, "duration_seconds");
+        lua_pushnumber(state, cast.progress);
+        lua_setfield(state, -2, "progress");
+        lua_pushboolean(state, cast.casting);
+        lua_setfield(state, -2, "casting");
+        lua_pushboolean(state, cast.completed);
+        lua_setfield(state, -2, "completed");
+        lua_rawseti(state, -2, static_cast<int>(index + 1));
+    }
+    return 1;
 }
 
 int AddonHost::LuaWindow(lua_State* state)

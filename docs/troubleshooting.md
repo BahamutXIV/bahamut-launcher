@@ -396,11 +396,23 @@ steps collect information and rule out known traps rather than fix it.
   They are written to `wine.log`, which Copy Logs does not include; share the
   relevant part of that file separately. See
   [Wine runtime and exit logs](#wine-runtime-and-exit-logs).
-- The retail game also stores a `config.pad` file beside `config.sys`. The
-  **User Settings and Macros** backup includes it when present; see
-  [User Settings and Macros](configuration.md#user-settings-and-macros).
-  Whether its presence or contents affect controller availability is
-  unverified.
+- The retail game selects a controller only when `config.pad`, beside
+  `config.sys`, names it exactly. Each Play on Linux logs lines that contain
+  `Controller pad =`: whether `config.pad` exists and is valid, the
+  vendor and product IDs it selects, whether that selection matches a
+  controller Wine has recorded in the launcher's prefix, how many buttons
+  are assigned, its flags, and the controllers Wine has recorded. The startup
+  block's `Controller input =` lines include the same `config.pad` details
+  without the Wine comparison, plus the game's stored `input_mode` value as
+  read when the launcher started. None of these lines contain device
+  identities or paths.
+- To let Play write a matching selection, turn on **Force Auto-Detect
+  Gamepad** on the Gamepad Settings screen's Steam Deck card, then choose
+  **Play**. If Wine has not seen the controller in the launcher's prefix
+  before, it records it during that run and the next Play can select it.
+  The `Controller pad setup =` line reports what Play did. See [Controller settings](configuration.md#controller-settings)
+  for the rules, the `config.pad.bak` backup, and how to undo it. Whether
+  this makes the game's Gamepad option available is unverified.
 
 ## Retail game settings
 

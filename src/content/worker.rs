@@ -6,12 +6,15 @@
 // SPDX-License-Identifier: MIT
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use super::downloader::DownloadProgress;
 use super::http::{CheckpointAction, DownloadCheckpoint};
 use super::manifest::BasePackage;
+use control::ControlState;
+
+pub(crate) mod control;
 
 /// Worker stage stored as a lock-free `u8` for UI observers.
 #[repr(u8)]
@@ -48,21 +51,9 @@ pub struct InstallShared {
     pub previous_completed_bytes: AtomicU64,
     pub file_idx: AtomicUsize,
     phase: AtomicU8,
-    error_message: Mutex<Option<String>>,
-    failure_context: Mutex<Option<FailureContext>>,
-    pause_requested: AtomicBool,
-    paused: AtomicBool,
-    pause_lock: Mutex<()>,
-    pause_changed: Condvar,
+    control: ControlState,
     pub total_download_bytes: u64,
     pub total_files: AtomicUsize,
-}
-
-#[derive(Clone)]
-struct FailureContext {
-    destination: String,
-    cache: String,
-    content_root: String,
 }
 
 impl InstallShared {
@@ -77,12 +68,7 @@ impl InstallShared {
             previous_completed_bytes: AtomicU64::new(0),
             file_idx: AtomicUsize::new(0),
             phase: AtomicU8::new(Phase::Starting as u8),
-            error_message: Mutex::new(None),
-            failure_context: Mutex::new(None),
-            pause_requested: AtomicBool::new(false),
-            paused: AtomicBool::new(false),
-            pause_lock: Mutex::new(()),
-            pause_changed: Condvar::new(),
+            control: ControlState::new(),
             total_download_bytes: download_bytes,
             total_files: AtomicUsize::new(file_count),
         })
@@ -93,7 +79,7 @@ impl InstallShared {
     }
 
     pub fn error(&self) -> Option<String> {
-        self.lock_error().clone()
+        self.control.error()
     }
 
     /// Request cancellation at the next chunk boundary.
@@ -108,38 +94,24 @@ impl InstallShared {
 
     /// Pause at the next safe worker boundary.
     pub fn request_pause(&self) {
-        let _guard = self.pause_lock.lock().expect("pause mutex poisoned");
-        if !self.is_terminal() {
-            self.pause_requested.store(true, Ordering::Release);
-        }
+        self.control.request_pause(|| self.is_terminal());
     }
 
     pub fn request_resume(&self) {
-        let _guard = self.pause_lock.lock().expect("pause mutex poisoned");
-        self.pause_requested.store(false, Ordering::Release);
-        self.pause_changed.notify_all();
+        self.control.request_resume();
     }
 
     pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::Acquire)
+        self.control.is_paused()
     }
 
     pub fn is_pause_requested(&self) -> bool {
-        self.pause_requested.load(Ordering::Acquire)
+        self.control.is_pause_requested()
     }
 
     /// Wait for Resume and report whether cancellation won while paused.
     pub(crate) fn wait_if_paused(&self) -> bool {
-        let mut guard = self.pause_lock.lock().expect("pause mutex poisoned");
-        while self.is_pause_requested() && !self.is_cancel_requested() {
-            self.paused.store(true, Ordering::Release);
-            guard = self
-                .pause_changed
-                .wait(guard)
-                .expect("pause mutex poisoned while waiting");
-        }
-        self.paused.store(false, Ordering::Release);
-        self.is_cancel_requested()
+        self.control.wait_if_paused(|| self.is_cancel_requested())
     }
 
     /// Return whether the worker reached a terminal phase.
@@ -148,14 +120,8 @@ impl InstallShared {
     }
 
     fn set_failure_context(&self, destination: &Path, cache: &Path, content_root: &str) {
-        *self
-            .failure_context
-            .lock()
-            .expect("install failure context mutex poisoned") = Some(FailureContext {
-            destination: destination.display().to_string(),
-            cache: cache.display().to_string(),
-            content_root: content_root.to_owned(),
-        });
+        self.control
+            .set_failure_context(destination, cache, content_root);
     }
 
     pub(crate) fn set_phase(&self, phase: Phase) {
@@ -167,16 +133,7 @@ impl InstallShared {
 
     pub fn fail(&self, message: impl Into<String>) {
         let message = message.into();
-        let context = self
-            .failure_context
-            .lock()
-            .expect("install failure context mutex poisoned")
-            .clone()
-            .unwrap_or_else(|| FailureContext {
-                destination: "<unknown>".into(),
-                cache: "<unknown>".into(),
-                content_root: "<unknown>".into(),
-            });
+        let context = self.control.failure_context();
         tracing::error!(
             action = "install",
             destination = %context.destination,
@@ -185,12 +142,8 @@ impl InstallShared {
             diagnostic = %message,
             "client install failed"
         );
-        *self.lock_error() = Some(message);
+        self.control.set_error(message);
         self.set_phase(Phase::Error);
-    }
-
-    fn lock_error(&self) -> std::sync::MutexGuard<'_, Option<String>> {
-        self.error_message.lock().expect("error mutex poisoned")
     }
 }
 
@@ -225,23 +178,16 @@ pub(crate) fn download_checkpoint(
     shared: &InstallShared,
     checkpoint: DownloadCheckpoint,
 ) -> CheckpointAction {
-    if shared.is_cancel_requested() {
-        return CheckpointAction::Cancel;
-    }
-    if shared.is_pause_requested() {
-        if !checkpoint.durable {
-            return CheckpointAction::Pause;
-        }
-        if shared.wait_if_paused() {
-            return CheckpointAction::Cancel;
-        }
-    }
-    CheckpointAction::Continue
+    shared
+        .control
+        .download_checkpoint(shared.is_cancel_requested(), checkpoint.durable, || {
+            shared.wait_if_paused()
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{Mutex, mpsc};
     use std::thread;
     use std::time::Duration;
 
@@ -354,5 +300,73 @@ mod tests {
         ] {
             assert_eq!(Phase::from_u8(phase as u8), phase);
         }
+    }
+
+    fn poison<T: Send>(mutex: &Mutex<T>) {
+        thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _guard = mutex.lock().unwrap();
+                    panic!("poison the mutex");
+                })
+                .join();
+        });
+        assert!(mutex.is_poisoned());
+    }
+
+    #[test]
+    fn poisoned_pause_lock_does_not_break_pause_controls() {
+        let s = InstallShared::new();
+        poison(s.control.pause_mutex());
+        s.request_pause();
+        assert!(s.is_pause_requested());
+        s.request_resume();
+        assert!(!s.is_pause_requested());
+        assert!(!s.wait_if_paused());
+        s.request_pause();
+        s.request_cancel();
+        assert!(s.is_cancel_requested());
+        assert!(!s.is_pause_requested());
+        assert!(s.wait_if_paused());
+        s.set_phase(Phase::Cancelled);
+    }
+
+    #[test]
+    fn poisoning_while_a_waiter_is_paused_still_wakes_it() {
+        let s = InstallShared::new();
+        s.request_pause();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker_state = Arc::clone(&s);
+        let waiter = thread::spawn(move || {
+            done_tx.send(worker_state.wait_if_paused()).unwrap();
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !s.is_paused() {
+            assert!(std::time::Instant::now() < deadline, "waiter never paused");
+            thread::sleep(Duration::from_millis(1));
+        }
+        poison(s.control.pause_mutex());
+        s.request_cancel();
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn poisoned_error_mutex_does_not_break_fail_or_error() {
+        let s = InstallShared::new();
+        poison(s.control.error_mutex());
+        s.fail("after poison");
+        assert_eq!(s.error().as_deref(), Some("after poison"));
+        assert_eq!(s.phase(), Phase::Error);
+    }
+
+    #[test]
+    fn poisoned_failure_context_does_not_break_fail() {
+        let s = InstallShared::new();
+        poison(s.control.failure_context_mutex());
+        s.set_failure_context(Path::new("dest"), Path::new("cache"), "root");
+        s.fail("after poison");
+        assert_eq!(s.error().as_deref(), Some("after poison"));
+        assert_eq!(s.phase(), Phase::Error);
     }
 }

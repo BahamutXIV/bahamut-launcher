@@ -44,6 +44,9 @@ python -m pip install clang-format==22.1.8
 
 ## Workspace checks
 
+Follow [Test authoring](ai_agents/test-authoring.md) when adding or
+consolidating tests.
+
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

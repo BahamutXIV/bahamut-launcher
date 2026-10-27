@@ -42,4 +42,5 @@ pages do not define server behavior.
 
 - [AI-assisted contributions](ai_agents/README.md)
 - [Comments and prose](ai_agents/comments-and-prose.md)
+- [Test authoring](ai_agents/test-authoring.md)
 - [Evidence and claims](ai_agents/evidence-and-claims.md)

@@ -1,0 +1,136 @@
+{
+    "repository": "BahamutXIV/bahamut-private-assets",
+    "commit": "f2fd4bdbc28972ce135f5666fce15331210420d7",
+    "files": [
+        {
+            "path": "bahamut-dats-overlay/data/03/C0/00/00.DAT",
+            "size": 52672,
+            "sha256": "d27666317e7a6156c1a780d0984e556caaedb1737b35b64abbda5ef3e9bb97b1"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/03/E7/00/0F.DAT",
+            "size": 10896,
+            "sha256": "30d399689432f48f1f34f7a7f59daf2c1d49c09bcbbc1a55594afba06a0cc73f"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/28/D9/00/13.DAT",
+            "size": 18608,
+            "sha256": "02089101cfb09fcd9f53457308a5f15dc3c38062bb6d38d5c44012329c8152ca"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/B0/00/01.DAT",
+            "size": 1315000,
+            "sha256": "2b1db441e912c27924794508fb20a54f526c34fe6debe631577fce712d093da2"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/B0/00/02.DAT",
+            "size": 468640,
+            "sha256": "4ea55de2fc0428638f93d347ae6b69563ddfb081f4c6b860432b5d34e336e081"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/B0/00/18.DAT",
+            "size": 41504,
+            "sha256": "c06dd284cf8fbb770305a5175bcf8c6028be13b37e092b760431602f30801f35"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/B0/00/20.DAT",
+            "size": 132496,
+            "sha256": "c0d075faed8baa650756e1d27b8550d242d200c9a980855f453fc88e15ae7887"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/B0/00/22.DAT",
+            "size": 118688,
+            "sha256": "83fa4a7d3dd1ced27e6a1225a76e45d59463acf5e4a29f84395bd3ae21062cf8"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/D9/00/01.DAT",
+            "size": 1212464,
+            "sha256": "9d0a5367a034ef159b86df53d9a83d5a0031c245a7b38c9ceae763517ba8020b"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/D9/00/02.DAT",
+            "size": 741008,
+            "sha256": "290c3373d2b54727a1b143d81feba63bb33dac0c7195cbe2c3df2b2e01288ea1"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/D9/00/18.DAT",
+            "size": 43792,
+            "sha256": "78d15570795605d1d9a2b0a3ce6ab3cae4be696da20b4522a571198304745795"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/29/D9/00/22.DAT",
+            "size": 113360,
+            "sha256": "361a64c0815adfd04afeeedb3be64e479efef6c43ceff426a33e862c832f8e41"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/5D/1E/F0/01.DAT",
+            "size": 25420,
+            "sha256": "610f11d4d82a543b9f91fa99875d91715fa7c2cfd22054c4c4d70135fc4d8137"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/5D/20/F0/01.DAT",
+            "size": 1632,
+            "sha256": "ce0eb6a85258af5af7e5e3515930afa2248fcd43ba3992b5f0c002aff643a145"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/61/5A/00/01.DAT",
+            "size": 1047072,
+            "sha256": "6a847a5f567fb39dd287cc346457bfcb40de87646a9405e2ad789fa241a956cf"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/61/5A/00/03.DAT",
+            "size": 536384,
+            "sha256": "c5d679bf4116e6e30cfee0078bca32338a42a19ceee53660f18b76b93180bee4"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/61/5A/00/1A.DAT",
+            "size": 44064,
+            "sha256": "40020fcd13aad4d73e7f9e9ebe9087bad6d9959104b91362b67eb6bbd70faf81"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/61/5A/00/26.DAT",
+            "size": 118704,
+            "sha256": "5d65b5253a41f14d753503729b031f5806af3a029b6d13028e9eba83792263b4"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/61/A9/F0/01.DAT",
+            "size": 16564,
+            "sha256": "3ab5e62a187a4cb6b0cf16aedffb77840035f0673c6becbcf43c567c59ab9e09"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/85/F0/01.DAT",
+            "size": 1632,
+            "sha256": "ef5163bed6a2a11c302f3c93aa5c11327ab3d51ced76030a7898fb53ac1a214c"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/89/F0/01.DAT",
+            "size": 262352,
+            "sha256": "9d2be137c4133fd5bb9422ebd1e09d7f695dcbbd3a3c1e6a27ed78b63b616e7a"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/89/F0/02.DAT",
+            "size": 262352,
+            "sha256": "f1ba699644d2d497e7743db438861336a37d1044e4c62fbef8b54bb5bcbc803c"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/89/F0/03.DAT",
+            "size": 131280,
+            "sha256": "68d477315d3f79877e9e3acb0edf6511783ea9f94ddba7d5e3c187b39a04a3eb"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/89/F0/04.DAT",
+            "size": 131280,
+            "sha256": "35fb5a709a99570c5c1a096257328663eb534253985142a2bda99ecd974bd7cd"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/89/F0/05.DAT",
+            "size": 131280,
+            "sha256": "ed4ad1c2c05a9a0d54b72aecaa38b96894dd1bb5bd7594b06b9359c33a354e49"
+        },
+        {
+            "path": "bahamut-dats-overlay/data/89/8C/F0/01.DAT",
+            "size": 1632,
+            "sha256": "2f536cf54bcedb48471364127f55da7bccbe765fd57134ca7897c08c544aba00"
+        }
+    ]
+}

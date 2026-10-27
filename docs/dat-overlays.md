@@ -12,9 +12,9 @@ selection, and priority, or return to the [documentation index](README.md).
 
 Every release includes `bahamut-dats-overlay`. This official package is always
 enabled and takes priority over custom packages for any paths it contains.
-Its current manifest contains no retail DAT changes. See
-[Platform support](extensions.md#platform-support) for which launches apply
-packages.
+Release builds add pinned files to the official package.
+See [Platform support](extensions.md#platform-support) for which launches
+apply packages.
 
 Official files are updated with the launcher:
 
