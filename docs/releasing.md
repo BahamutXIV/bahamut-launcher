@@ -2,26 +2,23 @@
 
 [Back to the documentation index](README.md)
 
-To release the launcher, merge a pull request from `develop` into `main`.
-The [Release workflow](../.github/workflows/release.yml) runs on every push
-to `main` and:
+To release the launcher, push an annotated `vMAJOR.MINOR.PATCH` tag on a
+`develop` commit whose Checks passed:
 
-1. Reads the highest existing `vMAJOR.MINOR.PATCH` tag and bumps the patch
-   version unless a label requests another level. With no tags, it starts
-   from `v0.0.0`, so the first unlabeled merge releases `v0.0.1`.
-2. Updates `[workspace.package].version` in `Cargo.toml` and `version` in
-   `src-tauri/tauri.conf.json`, then syncs `Cargo.lock`.
-3. Creates `chore: release vX.Y.Z` on `main`, authored by
-   `github-actions[bot]`, and atomically pushes the commit and annotated tag
-   using `RELEASE_PAT`.
-4. Creates a GitHub Release titled `Bahamut Launcher vX.Y.Z` with generated
-   notes.
+```text
+git tag -a v1.2.0 -m v1.2.0
+git push origin v1.2.0
+```
 
 The tag push starts [Release Binaries](../.github/workflows/release-binaries.yml),
 which builds and publishes the platform downloads and the Linux
-[Flatpak](flatpak.md) bundle. Windows uses MSVC for the x86 client module.
-Linux and macOS use the workflow's pinned llvm-mingw release. The Flatpak
-build compiles inside the GNOME 50 SDK.
+[Flatpak](flatpak.md) bundle, and creates a GitHub Release titled
+`Bahamut Launcher vX.Y.Z` with generated notes. Windows uses MSVC for the x86
+client module. Linux and macOS use the workflow's pinned llvm-mingw release.
+The Flatpak build compiles inside the GNOME 50 SDK.
+
+Choose the version by hand: raise the patch for fixes, the minor for features,
+and the major for breaking changes. Nothing is committed for a release.
 
 Use the default Windows helper/runtime path for player releases. Never include
 the build-only `diagnostic-no-injection` feature: it selects a separate direct
@@ -30,55 +27,8 @@ not establish retail no-injection compatibility.
 
 ## Branching
 
-Target `develop` for pull requests, then open a `develop` to `main` pull request
-when ready to release. Pushes and pull requests against either branch run
-[Checks](../.github/workflows/ci.yml). Merging into `develop` creates no tag or
-release.
-
-Only the release bump commit edits version fields in `Cargo.toml`,
-`Cargo.lock`, and `src-tauri/tauri.conf.json`. This lets `develop` retain an
-older version between releases without a merge conflict. Merge `main` back
-into `develop` after each release.
-
-## Bump levels
-
-| Level | Selection |
-|---|---|
-| Patch | Default when the merged pull request has neither label below. |
-| Minor | Add `release:minor` before merging. |
-| Major | Add `release:major` before merging. Takes priority if both labels are present. |
-
-If more merges reach `main` while a release is running, the next run releases
-them together and reads only its own pull request's label. A displaced run
-fails if its label requested more than a patch bump, making the missed bump
-visible.
-
-You can also choose a level through Actions -> Release -> Run workflow on
-`main`. This releases the current tip at that level, even if it already has a
-tag, and rewrites the package versions for the new version. No new commit on
-`develop` is needed.
-
-A direct tag push is another option:
-
-```text
-git tag -a v1.0.0 -m v1.0.0
-git push origin v1.0.0
-```
-
-[Release Binaries](../.github/workflows/release-binaries.yml) builds and
-publishes the tagged version, creating the GitHub Release if needed. The next
-merge to `main` continues from the highest tag: a manual `v1.0.0` is followed
-by `v1.0.1`, whose bump commit resyncs the package versions.
-
-A manual tag leaves its commit's package versions unchanged. The Windows
-executable therefore reports the earlier package version in file properties
-until the next bump commit. To release a new major or minor version with
-matching package versions, label the `develop` -> `main` pull request. For
-example, `release:major` produces `v1.0.0` when the highest stable tag is
-below `v1.0.0` or no tag exists.
-
-The highest tag determines the next version. The release workflow overwrites
-a hand-edited package version even if doing so lowers it.
+Target `develop` for pull requests. Pushes and pull requests run
+[Checks](../.github/workflows/ci.yml). Merging creates no tag or release.
 
 ## Version identity
 
@@ -87,9 +37,14 @@ version. Branch builds report the latest reachable tag and short commit hash,
 such as `v1.0.0-222f317`, with `-dirty` when tracked files have uncommitted
 changes. See [`build.rs`](../build.rs).
 
-The bump commit keeps Cargo and Tauri package versions synchronized. Those
-versions are package metadata; the runtime identity follows the rules above.
-The [signed release metadata](release-metadata.md) version is separate and
+The committed `[workspace.package].version` in `Cargo.toml` and `version` in
+`src-tauri/tauri.conf.json` are not kept current. For a tag build, the
+Windows, Linux and macOS legs rewrite both, without the prerelease suffix,
+and sync `Cargo.lock` before building. These package versions supply the
+Windows file properties and the macOS `CFBundleShortVersionString` and
+`CFBundleVersion`. Branch builds and the Flatpak bundle keep the committed
+values. The runtime identity follows the rules above in every build. The
+[signed release metadata](release-metadata.md) version is separate and
 ordered independently per product and target.
 
 The Flatpak package has no Git metadata, so its runtime version comes from
@@ -103,43 +58,16 @@ state is created. The Windows release build uses the windows subsystem, so
 it prints only to redirected stdout, for example:
 `bahamut-launcher.exe --version > version.txt`.
 
-The macOS app takes `CFBundleShortVersionString` and `CFBundleVersion` from
-`src-tauri/tauri.conf.json`, which the bump commit rewrites only on a push to
-`main`. Finder therefore shows the last bump commit's version for a manually
-pushed tag or branch dispatch build. The launcher's own version display still
-uses its runtime identity.
-
 ## One-time setup
 
-1. Add the repository secret `RELEASE_PAT`. Use a fine-grained personal access
-   token owned by a repository admin, limited to this repository, with
-   Contents: Read and write. If the organization disallows fine-grained tokens,
-   a classic token with `repo` scope works. A missing secret fails the run
-   before any changes; add it and rerun the failed run.
-2. Create the `release:minor` and `release:major` repository labels.
-3. Protect `main` with a pull request requirement and these required checks:
-   `Repository checks`, `Checks (Linux)`, `Checks (Windows)`, and
-   `Checks (macOS)`. Leave "Do not allow bypassing the above settings" off
-   so the admin-owned token can push the bump commit. Enabling it rejects
-   that push and fails the run before tagging.
-4. Optionally add `DISCORD_RELEASE_WEBHOOK_URL`. A tag push then announces
+1. Optionally add `DISCORD_RELEASE_WEBHOOK_URL`. A tag push then announces
    the release on Discord. Without it, the announcement step warns but the
    release still succeeds.
-5. Add the repository secret `BAHAMUT_ASSETS_TOKEN`. Use a fine-grained
+2. Add the repository secret `BAHAMUT_ASSETS_TOKEN`. Use a fine-grained
    personal access token limited to the repository named in
    [`manifests/official-overlay-dats.json`](../manifests/official-overlay-dats.json),
    with Contents: Read-only. Published releases require it. To change the
    pinned files, update the commit and file entries in the manifest.
-
-`RELEASE_PAT` can bypass required checks to push to `main`. Use a short expiry
-and rotate the token.
-
-## Loop prevention
-
-Pushing the bump commit with `RELEASE_PAT` triggers Release again. The job
-skips commits authored by `github-actions[bot]` to stop the loop. Do not add
-`[skip ci]` to the bump commit: it would also suppress the tag run that builds
-the platform binaries.
 
 ## Tag releases
 
