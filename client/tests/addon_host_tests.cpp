@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <ctime>
@@ -1966,6 +1967,78 @@ end
         !packetOnlyHost.Disable("packetlogger") || packetOnlyHost.HasCommandAddons())
     {
         std::cerr << "Packetlogger-only selection did not activate its commands\n";
+        return 1;
+    }
+
+    // Command and update callbacks on two threads must never overlap in one addon.
+    const std::filesystem::path lockRoot = settings / "lua-lock-fixture";
+    std::filesystem::create_directories(lockRoot);
+    {
+        std::ofstream manifest(lockRoot / "addon.toml", std::ios::trunc);
+        manifest << "id = \"locktest\"\nentry = \"locktest.lua\"\n";
+        std::ofstream script(lockRoot / "locktest.lua", std::ios::trunc);
+        script << R"lua(
+local inside   = false
+local overlaps = 0
+local function work()
+    if inside then
+        overlaps = overlaps + 1
+    end
+    inside = true
+    local total = 0
+    for i = 1, 2000 do
+        total = total + i
+    end
+    inside = false
+    return total
+end
+function update(dt)
+    work()
+end
+function command(name)
+    if name == '/locktest report' then
+        bahamut.chat_print(tostring(overlaps))
+    else
+        work()
+    end
+    return true
+end
+)lua";
+    }
+    DrawCapture lockCapture;
+    AddonHost   lockHost;
+    lockHost.SetChatSink({ &lockCapture, &CaptureChat });
+    lockHost.LoadManifests({ lockRoot / "addon.toml" }, settings / "lua-lock-state", chatLogs);
+    // Both loops start together so their callbacks contend.
+    std::atomic<bool> lockReady{ false };
+    std::atomic<bool> lockGo{ false };
+
+    std::thread commandThread([&lockHost, &lockReady, &lockGo]
+                              {
+                                  lockReady.store(true);
+                                  while (!lockGo.load())
+                                  {
+                                      std::this_thread::yield();
+                                  }
+                                  for (int i = 0; i < 2000; ++i)
+                                  {
+                                      lockHost.DispatchCommand("/locktest work");
+                                  }
+                              });
+    while (!lockReady.load())
+    {
+        std::this_thread::yield();
+    }
+    lockGo.store(true);
+    for (int i = 0; i < 2000; ++i)
+    {
+        lockHost.Update(0.001);
+    }
+    commandThread.join();
+    if (!lockHost.DispatchCommand("/locktest report") || lockHost.FaultedCount() != 0 ||
+        lockCapture.chatLines.size() != 1 || lockCapture.chatLines.front() != "0")
+    {
+        std::cerr << "addon Lua callbacks overlapped across threads\n";
         return 1;
     }
     std::cout << "addon-host-tests: PASS\n";
