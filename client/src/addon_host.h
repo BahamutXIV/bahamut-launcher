@@ -174,16 +174,18 @@ private:
     void                                                 DrainPacketNotices(packet_capture::PacketCaptureWriter& writer);
     std::shared_ptr<packet_capture::PacketCaptureWriter> PacketWriter() const;
 
-    std::vector<std::unique_ptr<Instance>>                            addons_;
-    std::filesystem::path                                             settingsRoot_;
-    std::filesystem::path                                             chatLogsRoot_;
-    bahamut_client::PlayerStateService*                               playerState_    = nullptr;
-    bahamut_client::TargetDistanceService*                            targetDistance_ = nullptr;
-    bahamut_client::CustomTimerService*                               customTimer_    = nullptr;
-    bahamut_client::EnemyCastService*                                 enemyCast_      = nullptr;
-    AddonClipboardSink                                                clipboardSink_;
-    AddonChatSink                                                     chatSink_;
-    AddonUrlSink                                                      urlSink_;
+    std::vector<std::unique_ptr<Instance>> addons_;
+    std::filesystem::path                  settingsRoot_;
+    std::filesystem::path                  chatLogsRoot_;
+    bahamut_client::PlayerStateService*    playerState_    = nullptr;
+    bahamut_client::TargetDistanceService* targetDistance_ = nullptr;
+    bahamut_client::CustomTimerService*    customTimer_    = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast_      = nullptr;
+    AddonClipboardSink                     clipboardSink_;
+    AddonChatSink                          chatSink_;
+    AddonUrlSink                           urlSink_;
+    // Held through LuaLock at every entry that reaches addon Lua.
+    mutable std::recursive_mutex                                      luaMutex_;
     std::mutex                                                        chatQueueMutex_;
     std::vector<std::string>                                          chatQueue_;
     std::mutex                                                        areaQueueMutex_;

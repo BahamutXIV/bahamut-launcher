@@ -215,6 +215,46 @@ AddonHost::AddonHost(bahamut_client::PlayerStateService* playerState)
 {
 }
 
+namespace
+{
+
+// One recursive lock serializes addon Lua across the render and command threads.
+// Waiters pump sent messages so a holder's cross-thread SendMessage (clipboard_set) cannot deadlock.
+class LuaLock
+{
+public:
+    explicit LuaLock(std::recursive_mutex& mutex)
+    : mutex_(mutex)
+    {
+        for (unsigned spins = 0; !mutex_.try_lock(); ++spins)
+        {
+            MSG message;
+            PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+            if (spins < 64)
+            {
+                SwitchToThread();
+            }
+            else
+            {
+                Sleep(1);
+            }
+        }
+    }
+
+    ~LuaLock()
+    {
+        mutex_.unlock();
+    }
+
+    LuaLock(const LuaLock&)            = delete;
+    LuaLock& operator=(const LuaLock&) = delete;
+
+private:
+    std::recursive_mutex& mutex_;
+};
+
+} // namespace
+
 AddonHost::~AddonHost()
 {
     for (const auto& addon : addons_)
@@ -230,6 +270,7 @@ void AddonHost::LoadManifests(
     const std::filesystem::path&              settingsRoot,
     const std::filesystem::path&              chatLogsRoot)
 {
+    const LuaLock luaLock(luaMutex_);
     settingsRoot_ = settingsRoot;
     chatLogsRoot_ = chatLogsRoot;
     for (const auto& manifest : manifests)
@@ -241,6 +282,7 @@ void AddonHost::LoadManifests(
 void AddonHost::SetPlayerStateService(
     bahamut_client::PlayerStateService* playerState)
 {
+    const LuaLock luaLock(luaMutex_);
     playerState_ = playerState;
     for (const auto& addon : addons_)
     {
@@ -251,6 +293,7 @@ void AddonHost::SetPlayerStateService(
 void AddonHost::SetTargetDistanceService(
     bahamut_client::TargetDistanceService* targetDistance)
 {
+    const LuaLock luaLock(luaMutex_);
     targetDistance_ = targetDistance;
     for (const auto& addon : addons_)
     {
@@ -261,6 +304,7 @@ void AddonHost::SetTargetDistanceService(
 void AddonHost::SetCustomTimerService(
     bahamut_client::CustomTimerService* customTimer)
 {
+    const LuaLock luaLock(luaMutex_);
     customTimer_ = customTimer;
     for (const auto& addon : addons_)
     {
@@ -271,6 +315,7 @@ void AddonHost::SetCustomTimerService(
 void AddonHost::SetEnemyCastService(
     bahamut_client::EnemyCastService* enemyCast)
 {
+    const LuaLock luaLock(luaMutex_);
     enemyCast_ = enemyCast;
     for (const auto& addon : addons_)
     {
@@ -280,6 +325,7 @@ void AddonHost::SetEnemyCastService(
 
 void AddonHost::SetActorNameService(bahamut_client::ActorNameService* actorNames)
 {
+    const LuaLock luaLock(luaMutex_);
     actorNames_ = actorNames;
 }
 
@@ -386,22 +432,26 @@ bool IsAllowedAddonUrl(std::string_view url)
 
 void AddonHost::SetClipboardSink(const AddonClipboardSink& sink)
 {
+    const LuaLock luaLock(luaMutex_);
     clipboardSink_ = sink;
 }
 
 void AddonHost::SetChatSink(const AddonChatSink& sink)
 {
+    const LuaLock luaLock(luaMutex_);
     chatSink_ = sink;
 }
 
 void AddonHost::SetUrlSink(const AddonUrlSink& sink)
 {
+    const LuaLock luaLock(luaMutex_);
     urlSink_ = sink;
 }
 
 bool AddonHost::Enable(const std::filesystem::path& manifestPath)
 {
-    const auto id = ReadAddonManifestId(manifestPath);
+    const LuaLock luaLock(luaMutex_);
+    const auto    id = ReadAddonManifestId(manifestPath);
     if (!id)
     {
         return false;
@@ -450,6 +500,7 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
 
 bool AddonHost::Reload(std::string_view addonId)
 {
+    const LuaLock luaLock(luaMutex_);
     if (addonId == "packetlogger")
     {
         packetLoggerFaults_ = 0;
@@ -514,10 +565,11 @@ bool AddonHost::ReloadAddon(std::string_view addonId, packet_capture::EndReason 
 
 bool AddonHost::Disable(std::string_view addonId)
 {
-    const auto found = std::find_if(addons_.begin(), addons_.end(), [&](const auto& addon)
-                                    {
+    const LuaLock luaLock(luaMutex_);
+    const auto    found = std::find_if(addons_.begin(), addons_.end(), [&](const auto& addon)
+                                       {
                                         return addon->id == addonId;
-                                    });
+                                       });
     if (found == addons_.end())
     {
         return false;
@@ -546,6 +598,7 @@ bool AddonHost::Disable(std::string_view addonId)
 
 bool AddonHost::IsLoaded(std::string_view addonId) const
 {
+    const LuaLock luaLock(luaMutex_);
     return std::any_of(addons_.begin(), addons_.end(), [&](const auto& addon)
                        {
                            return addon->id == addonId;
@@ -554,6 +607,7 @@ bool AddonHost::IsLoaded(std::string_view addonId) const
 
 bool AddonHost::TargetlinesEnabled() const
 {
+    const LuaLock luaLock(luaMutex_);
     return std::any_of(addons_.begin(), addons_.end(), [](const auto& addon)
                        {
                            return addon->id == "targetlines" && !addon->faulted && addon->state != nullptr;
@@ -562,6 +616,7 @@ bool AddonHost::TargetlinesEnabled() const
 
 bool AddonHost::HasCommandAddons() const
 {
+    const LuaLock luaLock(luaMutex_);
     return IsLoaded("pos") || IsLoaded("fps") || IsLoaded("wiki") ||
            IsLoaded("distance") || IsLoaded("enemycast") || IsLoaded("targethp") ||
            IsLoaded("customtimer") || IsLoaded("combatparser") || IsLoaded("packetlogger");
@@ -569,6 +624,7 @@ bool AddonHost::HasCommandAddons() const
 
 bool AddonHost::DispatchCommand(std::string_view command)
 {
+    const LuaLock luaLock(luaMutex_);
     for (const auto& addon : addons_)
     {
         if (addon->faulted || addon->state == nullptr)
@@ -792,6 +848,7 @@ void AddonHost::QueueCombatResult(const packet_observer::GameMessage& message)
 
 void AddonHost::Update(double frameDeltaSeconds)
 {
+    const LuaLock luaLock(luaMutex_);
     if (const auto writer = PacketWriter(); writer != nullptr)
     {
         DrainPacketNotices(*writer);
@@ -886,6 +943,7 @@ void AddonHost::ResetAreaTransition()
 
 void AddonHost::Draw(const AddonWindowSink& sink)
 {
+    const LuaLock luaLock(luaMutex_);
     for (const auto& addon : addons_)
     {
         if (addon->faulted || addon->state == nullptr)
@@ -1020,6 +1078,7 @@ bool AddonHost::WaitForPacketCaptureIdle(std::chrono::milliseconds timeout)
 
 std::size_t AddonHost::LoadedCount() const
 {
+    const LuaLock luaLock(luaMutex_);
     return static_cast<std::size_t>(std::count_if(addons_.begin(), addons_.end(), [](const auto& addon)
                                                   {
                                                       return !addon->faulted && addon->state != nullptr;
@@ -1028,6 +1087,7 @@ std::size_t AddonHost::LoadedCount() const
 
 std::size_t AddonHost::FaultedCount() const
 {
+    const LuaLock luaLock(luaMutex_);
     return static_cast<std::size_t>(std::count_if(addons_.begin(), addons_.end(), [](const auto& addon)
                                                   {
                                                       return addon->faulted;
