@@ -40,6 +40,13 @@ void RecordInputTestResult(const char* text)
     CloseHandle(file);
 }
 
+// RegisterHotKey and UnregisterHotKey fail off the window's thread, so other
+// threads leave registration to the host's activation replay.
+bool OnWindowThread(const ScreenshotPlugin& plugin)
+{
+    return plugin.window == nullptr || GetWindowThreadProcessId(plugin.window, nullptr) == GetCurrentThreadId();
+}
+
 void ReleasePrintScreen(ScreenshotPlugin& plugin)
 {
     if (plugin.window != nullptr && plugin.printScreenRegistered)
@@ -51,6 +58,10 @@ void ReleasePrintScreen(ScreenshotPlugin& plugin)
 
 void RefreshPrintScreen(ScreenshotPlugin& plugin)
 {
+    if (!OnWindowThread(plugin))
+    {
+        return;
+    }
     ReleasePrintScreen(plugin);
     if (!plugin.enabled || !plugin.active || plugin.window == nullptr || plugin.hotkey != VK_SNAPSHOT)
     {

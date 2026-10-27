@@ -54,6 +54,7 @@ NativePluginHost*                                 gNativePluginHost      = nullp
 AddonHost*                                        gAddonHost             = nullptr;
 HWND                                              gInputWindow           = nullptr;
 volatile LONG                                     gInputWindowActive     = 0;
+UINT                                              gActivationMessage     = 0;
 bool                                              gFillModeHotkeyEnabled = false;
 bool                                              gFpsHotkeyEnabled      = false;
 
@@ -375,6 +376,13 @@ void ClearInputReleaseLocks(HWND window)
 
 LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (window == gInputWindow && message == gActivationMessage && message != 0)
+    {
+        bool consumed = false;
+        gNativePluginHost->OnWindowMessage(
+            window, WM_ACTIVATE, InterlockedCompareExchange(&gInputWindowActive, 0, 0) != 0 ? WA_ACTIVE : WA_INACTIVE, 0, consumed);
+        return 0;
+    }
     if (window == gInputWindow && message == WM_ACTIVATE)
     {
         const bool active = LOWORD(wParam) != WA_INACTIVE;
@@ -610,6 +618,7 @@ bool InstallInputBoundary(HWND window, BahamutRuntimeTelemetry* telemetry, Addon
     gTelemetry               = telemetry;
     gAddonHost               = addonHost;
     gNativePluginHost        = nativePluginHost;
+    gActivationMessage       = RegisterWindowMessageW(L"BahamutNativePluginActivation");
     gInputWindow             = window;
     InterlockedExchange(&gInputWindowActive,
                         GetForegroundWindow() == window ? 1 : 0);
@@ -620,6 +629,15 @@ bool InstallInputBoundary(HWND window, BahamutRuntimeTelemetry* telemetry, Addon
             window, WM_ACTIVATE, WA_ACTIVE, 0, consumed);
     }
     return gOriginalWindowProcedure != nullptr;
+}
+
+void RefreshNativePluginActivation()
+{
+    const HWND window = gInputWindow;
+    if (window != nullptr && gActivationMessage != 0)
+    {
+        PostMessageW(window, gActivationMessage, 0, 0);
+    }
 }
 
 void EnableOverlay()

@@ -1,5 +1,6 @@
 #include "native_plugin_host.h"
 #include "fault_guard.h"
+#include "servicing_lock.h"
 
 namespace
 {
@@ -171,6 +172,11 @@ bool NativePluginHost::Load(const std::filesystem::path&     path,
                             const char*                      expectedId,
                             const NativePluginConfiguration& configuration)
 {
+    const ServicingLock lock(mutex_);
+    // A faulted instance stays allocated and its worker may still run, so it
+    // is never replaced or reconfigured.
+    if (faulted_ && instance_ != nullptr)
+        return false;
     if (IsLoaded())
         return Configure(configuration);
     if (path.empty() || !path.is_absolute() || expectedId == nullptr)
@@ -241,6 +247,9 @@ bool NativePluginHost::Load(const std::filesystem::path&     path,
 bool NativePluginHost::Configure(
     const NativePluginConfiguration& configuration)
 {
+    const ServicingLock lock(mutex_);
+    if (faulted_ && instance_ != nullptr)
+        return false;
     configuration_ = configuration;
     if (instance_ == nullptr)
         return true;
@@ -250,6 +259,7 @@ bool NativePluginHost::Configure(
 
 bool NativePluginHost::SetEnabled(bool enabled)
 {
+    const ServicingLock lock(mutex_);
     configuration_.enabled = enabled;
     if (instance_ == nullptr)
         return !enabled;
@@ -258,6 +268,7 @@ bool NativePluginHost::SetEnabled(bool enabled)
 
 bool NativePluginHost::OnWindowMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam, bool& consumed)
 {
+    const ServicingLock lock(mutex_);
     consumed = false;
     if (!IsLoaded())
         return true;
@@ -281,6 +292,7 @@ bool NativePluginHost::OnWindowMessage(HWND window, UINT message, WPARAM wParam,
 bool NativePluginHost::OnPresentBegin(IDirect3DDevice9* device,
                                       bool&             suppressOverlay)
 {
+    const ServicingLock lock(mutex_);
     suppressOverlay = false;
     if (!IsLoaded())
         return true;
@@ -295,6 +307,7 @@ bool NativePluginHost::OnPresentBegin(IDirect3DDevice9* device,
 
 bool NativePluginHost::OnPresentEnd(IDirect3DDevice9* device)
 {
+    const ServicingLock lock(mutex_);
     if (!IsLoaded())
         return true;
     std::uint32_t flags = BahamutNativePluginEventNone;
@@ -304,6 +317,7 @@ bool NativePluginHost::OnPresentEnd(IDirect3DDevice9* device)
 bool NativePluginHost::PublishPlayerState(
     const BahamutNativePluginPlayerStateV1& state)
 {
+    const ServicingLock lock(mutex_);
     if (!IsLoaded() || api_.onPlayerState == nullptr)
     {
         return true;
@@ -314,6 +328,7 @@ bool NativePluginHost::PublishPlayerState(
 
 void NativePluginHost::Shutdown()
 {
+    const ServicingLock lock(mutex_);
     if (inputWindow_ != nullptr)
     {
         UnregisterHotKey(inputWindow_, kBahamutScreenshotHotkeyId);
@@ -349,11 +364,13 @@ void NativePluginHost::Shutdown()
 
 bool NativePluginHost::IsLoaded() const
 {
+    const ServicingLock lock(mutex_);
     return module_ != nullptr && instance_ != nullptr && !faulted_;
 }
 
-const std::string& NativePluginHost::LastError() const
+std::string NativePluginHost::LastError() const
 {
+    const ServicingLock lock(mutex_);
     return error_;
 }
 

@@ -4,6 +4,7 @@
 
 class AddonHost;
 class NativePluginHost;
+class RuntimeCommands;
 
 namespace packet_observer
 {
@@ -28,6 +29,7 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
                            BahamutRuntimeBootstrapDiagnostics*    diagnostics,
                            HANDLE                                 frameEvent,
                            AddonHost*                             addonHost,
+                           RuntimeCommands*                       runtimeCommands,
                            NativePluginHost*                      nativePluginHost,
                            NativePluginHost*                      discordPluginHost,
                            bahamut_client::PlayerStateService*    playerState,

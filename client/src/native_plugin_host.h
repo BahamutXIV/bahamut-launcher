@@ -5,6 +5,7 @@
 #include <d3d9.h>
 
 #include <filesystem>
+#include <mutex>
 #include <string>
 
 struct NativePluginConfiguration
@@ -16,6 +17,9 @@ struct NativePluginConfiguration
     bool                  hideOverlays = true;
 };
 
+// Calls arrive from the render thread (present, player state), the window
+// thread (input) and the command thread (/load, /unload); one recursive lock
+// serializes them.
 class NativePluginHost
 {
 public:
@@ -28,18 +32,19 @@ public:
     bool PublishPlayerState(const BahamutNativePluginPlayerStateV1& state);
     void Shutdown();
 
-    bool               IsLoaded() const;
-    const std::string& LastError() const;
+    bool        IsLoaded() const;
+    std::string LastError() const;
 
 private:
     bool                        Fault(const char* message);
     BahamutNativePluginConfigV1 BorrowedConfiguration() const;
 
-    HMODULE                   module_ = nullptr;
-    BahamutNativePluginApiV3  api_{};
-    void*                     instance_ = nullptr;
-    NativePluginConfiguration configuration_;
-    std::string               error_;
-    HWND                      inputWindow_ = nullptr;
-    bool                      faulted_     = false;
+    mutable std::recursive_mutex mutex_;
+    HMODULE                      module_ = nullptr;
+    BahamutNativePluginApiV3     api_{};
+    void*                        instance_ = nullptr;
+    NativePluginConfiguration    configuration_;
+    std::string                  error_;
+    HWND                         inputWindow_ = nullptr;
+    bool                         faulted_     = false;
 };

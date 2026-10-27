@@ -764,8 +764,8 @@ that session and never rewrite persistent configuration.
 Blank lines and lines whose first non-whitespace character is `#` are ignored.
 Supported forms are:
 
-- `/load screenshot`
-- `/unload screenshot`
+- `/load <plugin>` and `/unload <plugin>`, where `<plugin>` is `screenshot`
+  or `discord-rpc`
 - `/bind <key> /screenshot [hide]`
 - The fixed `/bind f11 /fillmode` and `/bind f12 /fps` overrides
 - `/addon load <id>`
@@ -778,11 +778,11 @@ including one not selected for automatic loading. A missing script is treated
 as empty. Unknown packages or malformed commands stop launch before the
 game's primary thread resumes and report the physical line number.
 
-Other plugin command forms are reserved and rejected because there is no
-native plugin package loader. `/screenshot` and `/fillmode` work only as
-startup binding targets, not as retail chat commands. `/fps` uses the same
-addon command from F12 and retail chat. The startup interface is separate from
-addon commands typed in game chat.
+Other plugin names are rejected because there is no native plugin package
+loader. `/screenshot` and `/fillmode` work only as startup binding targets,
+not as retail chat commands. `/fps` uses the same addon command from F12 and
+retail chat. The same `/addon` and `/load` commands also work in game chat;
+see [Loading in game](extensions.md#loading-in-game).
 
 ### Addon discovery and settings
 

@@ -5,6 +5,7 @@
 #include "custom_timer.h"
 #include "enemy_cast.h"
 #include "player_state.h"
+#include "servicing_lock.h"
 #include "target_distance.h"
 
 extern "C"
@@ -56,10 +57,13 @@ constexpr std::string_view kBahamutWikiOrigin            = "https://bahamut.mira
 // SetMap opcode and payload zone offset match PlayerStateService::Observe.
 constexpr std::uint16_t kSetMapOpcode = 0x0005u;
 
+constexpr std::size_t kMaximumCommandWordLength = 32;
+
 struct ParsedManifest
 {
-    std::string id;
-    std::string entry;
+    std::string              id;
+    std::string              entry;
+    std::vector<std::string> commandWords;
 };
 
 std::string Trim(std::string value)
@@ -112,6 +116,91 @@ bool IsSettingKey(std::string_view value)
                        });
 }
 
+bool IsCommandWord(std::string_view value)
+{
+    if (value.size() < 2 || value.size() > kMaximumCommandWordLength || value.front() != '/')
+    {
+        return false;
+    }
+    return std::all_of(value.begin() + 1, value.end(), [](unsigned char character)
+                       {
+                           return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' || character == '_';
+                       });
+}
+
+// Returns the position of a '#' that starts a comment, skipping quoted text
+// such as usage = "/fps color #RRGGBB".
+std::size_t FindComment(std::string_view line)
+{
+    char quote = '\0';
+    for (std::size_t index = 0; index != line.size(); ++index)
+    {
+        const char character = line[index];
+        if (quote != '\0')
+        {
+            quote = character == quote ? '\0' : quote;
+        }
+        else if (character == '"' || character == '\'')
+        {
+            quote = character;
+        }
+        else if (character == '#')
+        {
+            return index;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// Command records are inline tables such as { name = "/fps lock", ... } or
+// [[commands]] tables. The first word of each name is claimed; malformed
+// words are ignored so they cannot invalidate an otherwise loadable package.
+void CollectCommandWords(std::string_view line, bool inCommandsTable, std::vector<std::string>& words)
+{
+    const auto skipBlanks = [&](std::size_t cursor)
+    {
+        while (cursor < line.size() && (line[cursor] == ' ' || line[cursor] == '\t'))
+        {
+            ++cursor;
+        }
+        return cursor;
+    };
+    for (std::size_t at = line.find("name"); at != std::string_view::npos; at = line.find("name", at + 4))
+    {
+        // Only keys inside a command table; the top-level display name is not a command.
+        const std::string_view before    = line.substr(0, at);
+        const bool             tableKey  = inCommandsTable && before.find_first_not_of(" \t") == std::string_view::npos;
+        const bool             inlineKey = before.find('{') != std::string_view::npos &&
+                                           (before.back() == '{' || before.back() == ',' || before.back() == ' ' || before.back() == '\t');
+        if (!tableKey && !inlineKey)
+        {
+            continue;
+        }
+        std::size_t cursor = skipBlanks(at + 4);
+        if (cursor >= line.size() || line[cursor] != '=')
+        {
+            continue;
+        }
+        cursor = skipBlanks(cursor + 1);
+        if (cursor + 1 >= line.size() || (line[cursor] != '"' && line[cursor] != '\'') || line[cursor + 1] != '/')
+        {
+            continue;
+        }
+        const char        quote = line[cursor];
+        const std::size_t begin = cursor + 1;
+        std::size_t       end   = begin;
+        while (end < line.size() && line[end] != quote && line[end] != ' ')
+        {
+            ++end;
+        }
+        const std::string_view word = line.substr(begin, end - begin);
+        if (IsCommandWord(word) && std::find(words.begin(), words.end(), word) == words.end())
+        {
+            words.emplace_back(word);
+        }
+    }
+}
+
 std::optional<ParsedManifest> ParseManifest(const std::filesystem::path& path)
 {
     std::ifstream file(path);
@@ -121,13 +210,21 @@ std::optional<ParsedManifest> ParseManifest(const std::filesystem::path& path)
     }
     ParsedManifest manifest;
     std::string    line;
+    bool           inCommandsTable = false;
     while (std::getline(file, line))
     {
-        const std::size_t comment = line.find('#');
+        const std::size_t comment = FindComment(line);
         if (comment != std::string::npos)
         {
             line.resize(comment);
         }
+        const std::string header = Trim(line);
+        if (!header.empty() && header.front() == '[')
+        {
+            inCommandsTable = header == "[[commands]]";
+            continue;
+        }
+        CollectCommandWords(line, inCommandsTable, manifest.commandWords);
         const std::size_t equals = line.find('=');
         if (equals == std::string::npos)
         {
@@ -210,6 +307,13 @@ std::optional<std::string> ReadAddonManifestId(
     return manifest ? std::optional<std::string>(manifest->id) : std::nullopt;
 }
 
+std::vector<std::string> ReadAddonManifestCommandWords(
+    const std::filesystem::path& manifestPath)
+{
+    auto manifest = ParseManifest(manifestPath);
+    return manifest ? std::move(manifest->commandWords) : std::vector<std::string>{};
+}
+
 AddonHost::AddonHost(bahamut_client::PlayerStateService* playerState)
 : playerState_(playerState)
 {
@@ -219,39 +323,7 @@ namespace
 {
 
 // One recursive lock serializes addon Lua across the render and command threads.
-// Waiters pump sent messages so a holder's cross-thread SendMessage (clipboard_set) cannot deadlock.
-class LuaLock
-{
-public:
-    explicit LuaLock(std::recursive_mutex& mutex)
-    : mutex_(mutex)
-    {
-        for (unsigned spins = 0; !mutex_.try_lock(); ++spins)
-        {
-            MSG message;
-            PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
-            if (spins < 64)
-            {
-                SwitchToThread();
-            }
-            else
-            {
-                Sleep(1);
-            }
-        }
-    }
-
-    ~LuaLock()
-    {
-        mutex_.unlock();
-    }
-
-    LuaLock(const LuaLock&)            = delete;
-    LuaLock& operator=(const LuaLock&) = delete;
-
-private:
-    std::recursive_mutex& mutex_;
-};
+using LuaLock = ServicingLock;
 
 } // namespace
 
@@ -614,12 +686,25 @@ bool AddonHost::TargetlinesEnabled() const
                        });
 }
 
-bool AddonHost::HasCommandAddons() const
+bool AddonHost::IsFaulted(std::string_view addonId) const
 {
     const LuaLock luaLock(luaMutex_);
-    return IsLoaded("pos") || IsLoaded("fps") || IsLoaded("wiki") ||
-           IsLoaded("distance") || IsLoaded("enemycast") || IsLoaded("targethp") ||
-           IsLoaded("customtimer") || IsLoaded("combatparser") || IsLoaded("packetlogger");
+    return std::any_of(addons_.begin(), addons_.end(), [&](const auto& addon)
+                       {
+                           return addon->id == addonId && addon->faulted;
+                       });
+}
+
+std::vector<std::string> AddonHost::LoadedIds() const
+{
+    const LuaLock            luaLock(luaMutex_);
+    std::vector<std::string> ids;
+    ids.reserve(addons_.size());
+    for (const auto& addon : addons_)
+    {
+        ids.push_back(addon->id);
+    }
+    return ids;
 }
 
 bool AddonHost::DispatchCommand(std::string_view command)
