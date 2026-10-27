@@ -507,8 +507,8 @@ Each numbered row records an installed or previously installed package.
 load order within each package kind; toggling a package leaves its row in
 place. IDs must be unique lowercase ASCII identifiers within that kind.
 
-The shipped defaults enable every packaged plugin and addon except
-Combatparser and Packetlogger. New addons without a row start disabled.
+The shipped defaults enable every packaged plugin and addon except Custom
+Timer, Enemy Cast, and Targetlines. New addons without a row start disabled.
 Existing selections are preserved, and rows for missing packages are ignored
 at launch.
 
@@ -727,7 +727,8 @@ config/dats.ini
 config/extensions.ini
 config/plugins/screenshot/settings.ini
 logs/chat/YYYY-MM-DD.log
-logs/packets/YYYY-MM-DD.csv
+logs/packets/capture-<UTC time>.csv
+logs/packets/capture-<UTC time>-part<NNNN>.csv
 logs/launcher/bahamut-launcher.log
 logs/launcher/bahamut-launcher.previous.log
 plugins/dats/

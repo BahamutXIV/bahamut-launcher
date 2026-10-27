@@ -6,14 +6,17 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace
@@ -45,6 +48,7 @@ struct DrawCapture
     std::string                      targetlinesAddonId;
     std::string                      posText;
     std::vector<std::string>         chatLines;
+    bool                             chatAccept = true;
     std::string                      clipboardText;
     int                              clipboardWrites = 0;
     std::vector<std::string>         openedUrls;
@@ -111,6 +115,10 @@ bool CaptureClipboard(void* context, std::string_view text)
 bool CaptureChat(void* context, std::string_view text)
 {
     auto& capture = *static_cast<DrawCapture*>(context);
+    if (!capture.chatAccept)
+    {
+        return false;
+    }
     capture.chatLines.emplace_back(text);
     return true;
 }
@@ -120,6 +128,16 @@ bool CaptureUrl(void* context, std::string_view url)
     auto& capture = *static_cast<DrawCapture*>(context);
     capture.openedUrls.emplace_back(url);
     return true;
+}
+
+packet_observer::FrameInfo GameFrame(packet_observer::Direction direction, std::span<const std::uint8_t> bytes)
+{
+    packet_observer::FrameInfo frame;
+    frame.direction = direction;
+    frame.stream    = packet_observer::StreamKind::Game;
+    frame.parsed    = true;
+    frame.bytes     = bytes;
+    return frame;
 }
 
 void ResetDrawCapture(DrawCapture& capture)
@@ -230,6 +248,14 @@ int wmain(int argc, wchar_t** argv)
     localtime_s(&local, &now);
     const std::filesystem::path packetLogs = chatLogs.parent_path() / "packets";
     std::filesystem::create_directories(packetLogs);
+    // Retention removes old sessions, so start from a known-empty directory.
+    for (const auto& entry : std::filesystem::directory_iterator(packetLogs))
+    {
+        if (entry.is_regular_file() && entry.path().filename().string().starts_with("capture-"))
+        {
+            std::filesystem::remove(entry.path());
+        }
+    }
     const auto sessionFiles = [&]()
     {
         std::set<std::filesystem::path> files;
@@ -265,6 +291,7 @@ int wmain(int argc, wchar_t** argv)
              settings / L"targethp" / L"settings.ini",
              settings / L"customtimer" / L"settings.ini",
              settings / L"combatparser" / L"settings.ini",
+             settings / L"packetlogger" / L"settings.ini",
              dailyChatLog,
              namedChatLog,
              changedChatLog })
@@ -279,6 +306,7 @@ int wmain(int argc, wchar_t** argv)
     host.SetClipboardSink({ &capture, &CaptureClipboard });
     host.SetChatSink({ &capture, &CaptureChat });
     host.SetUrlSink({ &capture, &CaptureUrl });
+    host.SetRuntimeIdentity("v9.9.9-test, x", 9);
     host.LoadManifests({ fpsManifest, errorIsolationManifest, posManifest, wikiManifest, chatlogsManifest, targetlinesManifest }, settings, chatLogs);
     if (host.LoadedCount() != 6 || host.FaultedCount() != 0 || !host.TargetlinesEnabled())
     {
@@ -479,7 +507,7 @@ end
         return 1;
     }
     const std::array<std::uint8_t, 3> packet{ 0x00, 0xA5, 0xFF };
-    if (host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
+    if (host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)))
     {
         std::cerr << "disabled packet logger accepted a frame\n";
         return 1;
@@ -487,9 +515,13 @@ end
     host.Update(0.02);
     if (sessionFiles() != initialSessions || !host.Enable(packetloggerManifest))
     {
-        std::cerr << "packet logger did not remain opt-in\n";
+        std::cerr << "packet logger captured before it was enabled\n";
         return 1;
     }
+    const auto settle = [&]()
+    {
+        return host.WaitForPacketCaptureIdle(std::chrono::seconds(10));
+    };
     const auto activeSessions = sessionFiles();
     if (activeSessions.size() != initialSessions.size() + 1u ||
         !host.DispatchCommand("/packetlogger status") ||
@@ -507,18 +539,32 @@ end
             break;
         }
     }
-    if (!host.QueuePacketFrame(packet_observer::Direction::Incoming, packet) ||
-        !host.QueuePacketFrame(packet_observer::Direction::Outgoing, packet))
+    if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
+        !host.QueuePacketFrame(GameFrame(packet_observer::Direction::Outgoing, packet)))
     {
         std::cerr << "enabled packet logger rejected a frame\n";
         return 1;
     }
-    host.Update(0.02);
     const auto readPacketLog = [&](const std::filesystem::path& filePath)
     {
         std::ifstream file(filePath, std::ios::binary);
         return std::string((std::istreambuf_iterator<char>(file)), {});
     };
+    const auto countRows = [](const std::string& text)
+    {
+        std::size_t count = 0;
+        for (std::size_t at = text.find(",incoming,3,00A5FF\n"); at != std::string::npos;
+             at             = text.find(",incoming,3,00A5FF\n", at + 1u))
+        {
+            ++count;
+        }
+        return count;
+    };
+    if (!settle())
+    {
+        std::cerr << "packet writer did not drain\n";
+        return 1;
+    }
     const std::string packetLog  = readPacketLog(firstSession);
     const std::size_t firstRow   = packetLog.find('\n') + 1u;
     const std::size_t firstComma = packetLog.find(',', firstRow);
@@ -527,22 +573,26 @@ end
         packetLog.find(",incoming,3,00A5FF\n") == std::string::npos ||
         packetLog.find(",outgoing,3,00A5FF\n") == std::string::npos ||
         !host.DispatchCommand("/packetlogger status") ||
-        capture.chatLines.back().find("captured 2, written 2, dropped 0") == std::string::npos)
+        capture.chatLines.back().find("captured: 2, written: 2, dropped: 0") == std::string::npos)
     {
-        std::cerr << "packet callback did not append both directions\n";
+        std::cerr << "packet writer did not append both directions\n";
         return 1;
     }
-    if (!host.QueuePacketFrame(packet_observer::Direction::Incoming, packet) ||
+    if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
         !host.DispatchCommand("/packetlogger stop") ||
-        host.QueuePacketFrame(packet_observer::Direction::Incoming, packet) ||
+        host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
         !host.DispatchCommand("/packetlogger start") ||
         sessionFiles().size() != activeSessions.size() + 1u ||
-        !host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
+        !host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)))
     {
         std::cerr << "packet capture start/stop did not separate sessions\n";
         return 1;
     }
-    host.Update(0.02);
+    if (!settle())
+    {
+        std::cerr << "packet writer did not drain after restart\n";
+        return 1;
+    }
     const std::string firstSessionAfterStop = readPacketLog(firstSession);
     if (firstSessionAfterStop == packetLog ||
         firstSessionAfterStop.find(",incoming,3,00A5FF\n", packetLog.size()) == std::string::npos)
@@ -550,39 +600,41 @@ end
         std::cerr << "queued frames were lost at capture stop\n";
         return 1;
     }
-    for (int index = 0; index < 256; ++index)
-    {
-        if (!host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
-        {
-            std::cerr << "packet queue rejected a frame before its bound\n";
-            return 1;
-        }
-    }
-    if (host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
-    {
-        std::cerr << "packet queue exceeded its bound\n";
-        return 1;
-    }
-    for (int index = 0; index < 8; ++index)
-    {
-        host.Update(0.02);
-    }
     if (!host.DispatchCommand("/packetlogger status") ||
-        capture.chatLines.back().find("captured 261, written 260, dropped 1, queued 0, peak 256") == std::string::npos ||
-        !host.Disable("packetlogger"))
+        capture.chatLines.back().find("captured: 4, written: 4, dropped: 0, queued: 0") == std::string::npos)
     {
         std::cerr << "packet capture status lost frame counts\n";
         return 1;
     }
-    if (host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
+    std::filesystem::path secondSession;
+    for (const auto& file : sessionFiles())
+    {
+        if (!activeSessions.contains(file))
+        {
+            secondSession = file;
+            break;
+        }
+    }
+    if (secondSession.empty() || countRows(readPacketLog(secondSession)) != 1u)
+    {
+        std::cerr << "restarted capture did not use a new session file\n";
+        return 1;
+    }
+    if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
+        !host.Disable("packetlogger"))
+    {
+        std::cerr << "packet logger did not disable with a queued frame\n";
+        return 1;
+    }
+    if (host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)))
     {
         std::cerr << "disabled packet logger accepted another frame\n";
         return 1;
     }
-    host.Update(0.02);
-    if (readPacketLog(firstSession) != firstSessionAfterStop)
+    if (!settle() || countRows(readPacketLog(secondSession)) != 2u ||
+        readPacketLog(firstSession) != firstSessionAfterStop)
     {
-        std::cerr << "disabled packet logger continued writing\n";
+        std::cerr << "disable discarded a queued frame or wrote to the wrong session\n";
         return 1;
     }
     const auto beforeRotation = sessionFiles();
@@ -603,15 +655,16 @@ end
     const std::array<std::uint8_t, 65536> largePacket{};
     for (int index = 0; index < 130; ++index)
     {
-        if (!host.QueuePacketFrame(packet_observer::Direction::Incoming, largePacket))
+        if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, largePacket)) || !settle())
         {
             std::cerr << "rotation capture rejected a frame\n";
             return 1;
         }
-        host.Update(0.02);
     }
     const std::filesystem::path secondPart = rotationBase.parent_path() /
                                              (rotationBase.stem().string() + "-part0002.csv");
+    const std::filesystem::path thirdPart  = rotationBase.parent_path() /
+                                             (rotationBase.stem().string() + "-part0003.csv");
     const auto                  dataRows   = [](const std::filesystem::path& filePath)
     {
         std::ifstream file(filePath, std::ios::binary);
@@ -624,35 +677,361 @@ end
         int rows = 0;
         while (std::getline(file, line))
         {
-            ++rows;
+            // Meta, zone and end rows are not frames.
+            rows += line.find(",incoming,") != std::string::npos || line.find(",outgoing,") != std::string::npos ? 1 : 0;
         }
         return rows;
     };
-    if (rotationBase.empty() || !std::filesystem::exists(secondPart) ||
-        std::filesystem::file_size(rotationBase) > 16u * 1024u * 1024u ||
-        std::filesystem::file_size(secondPart) > 16u * 1024u * 1024u ||
-        dataRows(rotationBase) + dataRows(secondPart) != 130 ||
+    if (rotationBase.empty() || !std::filesystem::exists(secondPart) || !std::filesystem::exists(thirdPart) ||
+        std::filesystem::file_size(rotationBase) > 8u * 1024u * 1024u ||
+        std::filesystem::file_size(secondPart) > 8u * 1024u * 1024u ||
+        dataRows(rotationBase) + dataRows(secondPart) + dataRows(thirdPart) != 130 ||
         !host.DispatchCommand("/packetlogger status") ||
-        capture.chatLines.back().find("captured 130, written 130, dropped 0") == std::string::npos ||
-        capture.chatLines.back().find(secondPart.filename().string()) == std::string::npos ||
+        capture.chatLines.back().find("captured: 130, written: 130, dropped: 0") == std::string::npos ||
+        capture.chatLines.back().find(thirdPart.filename().string()) == std::string::npos ||
+        capture.chatLines.back().find("(part 3)") == std::string::npos ||
         !host.Disable("packetlogger"))
     {
         std::cerr << "packet capture rotation lost rows or exceeded its file bound\n";
         return 1;
     }
+    {
+        const std::string restarted  = "Packet capture: recording again after a save error";
+        const auto        noticeRows = [&]()
+        {
+            return std::count(capture.chatLines.begin(), capture.chatLines.end(), restarted);
+        };
+        const auto before = noticeRows();
+        if (!host.Enable(packetloggerManifest))
+        {
+            std::cerr << "notice capture did not start\n";
+            return 1;
+        }
+        capture.chatAccept = false;
+        host.FailNextPacketWritesForTest(1);
+        if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) || !settle())
+        {
+            std::cerr << "notice capture did not drain\n";
+            return 1;
+        }
+        host.Update(0.02);
+        if (noticeRows() != before || !host.Reload("packetlogger"))
+        {
+            std::cerr << "a refused notice was delivered or reload failed\n";
+            return 1;
+        }
+        capture.chatAccept = true;
+        host.Update(0.02);
+        if (noticeRows() != before + 1)
+        {
+            std::cerr << "an undelivered notice was lost at reload\n";
+            return 1;
+        }
+        host.FailNextPacketWritesForTest(1);
+        if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) || !settle() ||
+            !host.Reload("packetlogger"))
+        {
+            std::cerr << "second notice capture failed\n";
+            return 1;
+        }
+        host.Update(0.02);
+        if (noticeRows() != before + 2 || !host.Disable("packetlogger"))
+        {
+            std::cerr << "a notice still queued in the writer was lost at reload\n";
+            return 1;
+        }
+    }
+    {
+        // A launch notice refused by chat stays pending while capture is stopped.
+        const auto notices = [&]()
+        {
+            return std::count_if(capture.chatLines.begin(), capture.chatLines.end(), [](const std::string& line)
+                                 {
+                                     return line.starts_with("Packet capture: on, logs/packets, ");
+                                 });
+        };
+        const auto before  = notices();
+        capture.chatAccept = false;
+        if (!host.Enable(packetloggerManifest))
+        {
+            std::cerr << "pending notice capture did not start\n";
+            return 1;
+        }
+        host.Update(0.02);
+        host.DispatchCommand("/packetlogger stop");
+        capture.chatAccept = true;
+        host.Update(0.02);
+        host.Update(0.02);
+        const bool heldWhileStopped = notices() == before;
+        host.DispatchCommand("/packetlogger start");
+        host.Update(0.02);
+        host.Update(0.02);
+        if (!heldWhileStopped || notices() != before + 1 || !host.Disable("packetlogger"))
+        {
+            std::cerr << "the launch notice was not held while stopped or not printed once after start\n";
+            return 1;
+        }
+    }
+    {
+        // Launch notice and split.
+        const auto splitSessionsBefore = sessionFiles();
+        const auto noticeCount         = [&]()
+        {
+            return std::count_if(capture.chatLines.begin(), capture.chatLines.end(), [](const std::string& line)
+                                 {
+                                     return line.starts_with("Packet capture: on, logs/packets, ") &&
+                                            line.ends_with(" MiB used. Pause with /packetlogger stop. Turn off on the launcher Extensions page");
+                                 });
+        };
+        const auto before  = noticeCount();
+        capture.chatAccept = false;
+        if (!host.Enable(packetloggerManifest))
+        {
+            std::cerr << "notice capture did not start\n";
+            return 1;
+        }
+        host.Update(0.02);
+        host.Update(0.02);
+        const bool heldBack = noticeCount() == before;
+        capture.chatAccept  = true;
+        host.Update(0.02);
+        host.Update(0.02);
+        host.Update(0.02);
+        if (!heldBack || noticeCount() != before + 1)
+        {
+            std::cerr << "the launch notice was printed while chat refused it, or not exactly once afterwards\n";
+            return 1;
+        }
+        if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) || !settle() ||
+            !host.DispatchCommand("/packetlogger split") ||
+            capture.chatLines.back().find("Packet capture: recording part 2 in ") != 0 ||
+            !host.QueuePacketFrame(GameFrame(packet_observer::Direction::Outgoing, packet)) || !settle())
+        {
+            std::cerr << "split did not continue in a second part\n";
+            return 1;
+        }
+        std::filesystem::path splitFirst;
+        std::filesystem::path splitSecond;
+        for (const auto& file : sessionFiles())
+        {
+            if (!splitSessionsBefore.contains(file))
+            {
+                (file.filename().string().find("-part0002") != std::string::npos ? splitSecond : splitFirst) = file;
+            }
+        }
+        const auto poll = [&](const std::filesystem::path& file, const std::string& needle)
+        {
+            for (int attempt = 0; attempt < 250; ++attempt)
+            {
+                if (readPacketLog(file).find(needle) != std::string::npos)
+                {
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            return false;
+        };
+        const auto sessionOf = [&](const std::filesystem::path& file)
+        {
+            const std::string text = readPacketLog(file);
+            const std::size_t at   = text.find(",meta,0,session=");
+            return at == std::string::npos ? std::string() : text.substr(at + 16, 16);
+        };
+        if (splitFirst.empty() || splitSecond.empty() || !poll(splitFirst, ",end,0,reason=split;") ||
+            readPacketLog(splitSecond).find(",meta,0,part=2\n") == std::string::npos ||
+            sessionOf(splitFirst).size() != 16 || sessionOf(splitFirst) != sessionOf(splitSecond) ||
+            countRows(readPacketLog(splitFirst)) != 1u ||
+            readPacketLog(splitSecond).find(",outgoing,3,00A5FF\n") == std::string::npos)
+        {
+            std::cerr << "split parts lack the end row, meta rows, shared session or frames\n";
+            return 1;
+        }
+        host.FailNextPacketWritesForTest(1);
+        if (!host.DispatchCommand("/packetlogger split") || capture.chatLines.back() != "Packet capture: cannot start a new part")
+        {
+            std::cerr << "a failed split was not reported as a failure\n";
+            return 1;
+        }
+        if (!host.DispatchCommand("/packetlogger stop") || !host.DispatchCommand("/packetlogger split") ||
+            capture.chatLines.back() != "Packet capture: not recording" || !host.Disable("packetlogger"))
+        {
+            std::cerr << "split while stopped was not refused\n";
+            return 1;
+        }
+    }
+    {
+        // Stream scope: standard writes game-world frames only.
+        const auto scopeSettings  = settings / L"packetlogger" / L"settings.ini";
+        const auto sessionsBefore = sessionFiles();
+        const auto newSession     = [&]()
+        {
+            for (const auto& file : sessionFiles())
+            {
+                if (!sessionsBefore.contains(file))
+                {
+                    return file;
+                }
+            }
+            return std::filesystem::path{};
+        };
+        const auto status = [&]()
+        {
+            return host.DispatchCommand("/packetlogger status") ? capture.chatLines.back() : std::string{};
+        };
+        // Capture files are read while the writer thread may still be closing them.
+        const auto waitFor = [&](const std::filesystem::path& file, const std::string& needle)
+        {
+            for (int attempt = 0; attempt < 250; ++attempt)
+            {
+                if (readPacketLog(file).find(needle) != std::string::npos)
+                {
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            return false;
+        };
+        const auto queueZone = [&](std::uint32_t zoneId)
+        {
+            packet_observer::GameMessage message;
+            message.direction = packet_observer::Direction::Incoming;
+            message.opcode    = 0x0005u;
+            message.sourceId  = 11u;
+            message.payload.resize(16u);
+            for (std::size_t index = 0; index < 4u; ++index)
+            {
+                message.payload[4u + index] = static_cast<std::uint8_t>(zoneId >> (index * 8u));
+            }
+            host.QueueAreaTransition(message);
+        };
+        const std::array<std::uint8_t, 4>               chatBytes{ 0x01, 0x02, 0x03, 0x04 };
+        const std::array<packet_observer::Subpacket, 1> chatSubpackets{ packet_observer::Subpacket{ 0x0003, 0x0003 } };
+        auto                                            chatFrame = GameFrame(packet_observer::Direction::Outgoing, chatBytes);
+        chatFrame.subpackets                                      = chatSubpackets;
+        auto otherFrame                                           = GameFrame(packet_observer::Direction::Incoming, packet);
+        otherFrame.stream                                         = packet_observer::StreamKind::Other;
+        auto unclassifiedFrame                                    = GameFrame(packet_observer::Direction::Incoming, packet);
+        unclassifiedFrame.stream                                  = packet_observer::StreamKind::Unclassified;
+        if (!host.Enable(packetloggerManifest) ||
+            !host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
+            !host.QueuePacketFrame(chatFrame) ||
+            host.QueuePacketFrame(otherFrame) ||
+            host.QueuePacketFrame(unclassifiedFrame) ||
+            (queueZone(230u), !settle()))
+        {
+            std::cerr << "standard scope did not classify frames\n";
+            return 1;
+        }
+        const auto standardSession = newSession();
+        const auto standardRows    = readPacketLog(standardSession);
+        if (standardSession.empty() ||
+            standardRows.find(",incoming,3,00A5FF\n") == std::string::npos ||
+            standardRows.find(",outgoing,4,stub:op=0003\n") == std::string::npos ||
+            standardRows.find("01020304") != std::string::npos ||
+            std::count(standardRows.begin(), standardRows.end(), '\n') != 13 ||
+            standardRows.find(",meta,0,format=2\n") == std::string::npos ||
+            standardRows.find(",meta,0,launcher=v9.9.9-test  x\n") == std::string::npos ||
+            standardRows.find(",meta,0,runtime_api=9\n") == std::string::npos ||
+            standardRows.find(",meta,0,scope=standard\n") == std::string::npos ||
+            standardRows.find(",zone,0,id=230;name=Limsa Lominsa\n") == std::string::npos ||
+            status().find("captured: 2, written: 2, dropped: 0") == std::string::npos ||
+            status().find("skipped: 2") == std::string::npos)
+        {
+            std::cerr << "standard scope rows or counters were wrong\n";
+            return 1;
+        }
+        {
+            std::ofstream scopeFile(scopeSettings, std::ios::trunc);
+            scopeFile << "capture_scope=full\n";
+        }
+        if (!host.Reload("packetlogger") ||
+            !host.QueuePacketFrame(otherFrame) ||
+            !settle())
+        {
+            std::cerr << "full scope did not accept an other-stream frame\n";
+            return 1;
+        }
+        std::filesystem::path fullSession;
+        for (const auto& file : sessionFiles())
+        {
+            if (!sessionsBefore.contains(file) && file != standardSession)
+            {
+                fullSession = file;
+            }
+        }
+        const std::string fullRows = readPacketLog(fullSession);
+        if (countRows(fullRows) != 1u || fullRows.find(",meta,0,scope=full\n") == std::string::npos)
+        {
+            std::cerr << "full scope did not write the other-stream frame as hex\n";
+            return 1;
+        }
+        // A reload retires the standard session's writer with a disable end row.
+        if (!waitFor(standardSession, ",end,0,reason=disable;captured=2;written=2;skipped=2;"))
+        {
+            std::cerr << "reload did not close the old session with a disable end row\n";
+            return 1;
+        }
+        if (!host.Disable("packetlogger") || !waitFor(fullSession, ",end,0,reason=disable;"))
+        {
+            std::cerr << "scope capture did not disable with an end row\n";
+            return 1;
+        }
+        std::filesystem::remove(scopeSettings, cleanupError);
+        cleanupError.clear();
+    }
+    const auto sessionsBeforeFault = sessionFiles();
     if (!host.Enable(faultPacketloggerManifest) ||
-        !host.QueuePacketFrame(packet_observer::Direction::Incoming, packet))
+        !host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)))
     {
         std::cerr << "fault fixture did not start capture\n";
         return 1;
     }
+    // First fault: the addon restarts once in a new session.
     host.Update(0.02);
-    if (host.QueuePacketFrame(packet_observer::Direction::Incoming, packet) ||
-        capture.chatLines.back() != "Packet capture stopped: logger callback failed" ||
+    if (!host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)))
+    {
+        std::cerr << "the first addon fault did not restart capture\n";
+        return 1;
+    }
+    // The restarted notice prints on the next update, which faults the addon again.
+    host.Update(0.02);
+    host.Update(0.02);
+    if (host.QueuePacketFrame(GameFrame(packet_observer::Direction::Incoming, packet)) ||
+        std::count(capture.chatLines.begin(), capture.chatLines.end(), std::string("Packet capture: recording again after an addon error")) != 1 ||
+        capture.chatLines.back() != "Packet capture: stopped after an addon error" ||
         !host.Disable("packetlogger"))
     {
-        std::cerr << "faulted packet logger kept capture enabled\n";
+        std::cerr << "a second addon fault did not stop capture\n";
         return 1;
+    }
+    {
+        std::vector<std::filesystem::path> faultSessions;
+        for (const auto& file : sessionFiles())
+        {
+            if (!sessionsBeforeFault.contains(file))
+            {
+                faultSessions.push_back(file);
+            }
+        }
+        // Both sessions hold a frame and both close with a fault end row.
+        bool closed = faultSessions.size() == 2;
+        for (const auto& faultSession : faultSessions)
+        {
+            bool found = false;
+            for (int attempt = 0; attempt < 250 && !found; ++attempt)
+            {
+                std::ifstream     file(faultSession, std::ios::binary);
+                const std::string text((std::istreambuf_iterator<char>(file)), {});
+                found = text.find(",end,0,reason=fault;") != std::string::npos;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            closed = closed && found;
+        }
+        if (!closed)
+        {
+            std::cerr << "a faulted packet logger did not close its session with a fault end row\n";
+            return 1;
+        }
     }
     if (!host.DispatchCommand("/fps"))
     {

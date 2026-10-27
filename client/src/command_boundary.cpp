@@ -291,7 +291,8 @@ bool ReadCanonicalAddonCommand(const void* token, const void* tokenRangeBegin, c
             canonical = "/packetlogger";
             return true;
         }
-        if (count == 2 && (tokens[1] == "start" || tokens[1] == "stop" || tokens[1] == "status"))
+        if (count == 2 && (tokens[1] == "start" || tokens[1] == "stop" || tokens[1] == "split" ||
+                           tokens[1] == "status"))
         {
             canonical = "/packetlogger ";
             canonical += tokens[1];
