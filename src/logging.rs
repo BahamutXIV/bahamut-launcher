@@ -7,8 +7,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::UNIX_EPOCH;
 
+use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::{ChronoLocal, FormatTime};
 use tracing_subscriber::fmt::writer::MakeWriter;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, FormattedFields};
+use tracing_subscriber::registry::LookupSpan;
 
 use crate::config::dirs;
 
@@ -189,14 +194,59 @@ impl<W: Write> Drop for RedactingEventWriter<'_, W> {
     }
 }
 
+/// Prints `[timestamp] message`; only WARN and ERROR events add a level column.
+struct LauncherEventFormat {
+    timer: ChronoLocal,
+}
+
+impl LauncherEventFormat {
+    fn new() -> Self {
+        Self {
+            timer: ChronoLocal::new(LOG_TIMER_FORMAT.to_string()),
+        }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for LauncherEventFormat
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        self.timer.format_time(&mut writer)?;
+        let level = *event.metadata().level();
+        if level <= Level::WARN {
+            write!(writer, " {level}")?;
+        }
+        writer.write_char(' ')?;
+        if let Some(scope) = ctx.event_scope() {
+            for span in scope.from_root() {
+                write!(writer, "{}", span.metadata().name())?;
+                let extensions = span.extensions();
+                if let Some(fields) = extensions.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
+                    write!(writer, "{{{fields}}}")?;
+                }
+                writer.write_char(':')?;
+            }
+            writer.write_char(' ')?;
+        }
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
 /// Install the global tracing subscriber; repeated calls are no-ops and never panic if one is already installed.
 pub fn init() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(log_filter())
-        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-            LOG_TIMER_FORMAT.to_string(),
-        ))
-        .with_target(false)
+        .event_format(LauncherEventFormat::new())
         .with_writer(RedactingStderrWriter::new())
         .try_init();
 }
@@ -215,11 +265,8 @@ pub fn init_persistent() -> io::Result<PathBuf> {
         .open(&log_path)?;
     let _ = tracing_subscriber::fmt()
         .with_env_filter(log_filter())
-        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-            LOG_TIMER_FORMAT.to_string(),
-        ))
-        .with_target(false)
         .with_ansi(false)
+        .event_format(LauncherEventFormat::new())
         .with_writer(RedactingFileWriter::new(file))
         .try_init();
     Ok(log_path)
@@ -744,11 +791,8 @@ mod tests {
             let sink = RedactingFileWriter::new(File::create(&path).unwrap());
             let subscriber = tracing_subscriber::fmt()
                 .with_env_filter(log_filter_with_env(environment))
-                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
-                    LOG_TIMER_FORMAT.to_string(),
-                ))
-                .with_target(false)
                 .with_ansi(false)
+                .event_format(LauncherEventFormat::new())
                 .with_writer(sink)
                 .finish();
             tracing::subscriber::with_default(subscriber, || {
@@ -784,6 +828,50 @@ mod tests {
     }
 
     #[test]
+    fn level_column_is_printed_only_for_warn_and_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("levels.log");
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .event_format(LauncherEventFormat::new())
+            .with_writer(RedactingFileWriter::new(File::create(&path).unwrap()))
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::trace!("trace line");
+            tracing::debug!("debug line");
+            tracing::info!(key = 7, "info line");
+            tracing::warn!("warn line");
+            tracing::error!("error line");
+            tracing::info_span!("op", id = 1).in_scope(|| tracing::info!("inside"));
+        });
+
+        let persisted = std::fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = persisted.lines().collect();
+        let messages = ["trace line", "debug line", "info line key=7", "warn line"];
+        assert_eq!(lines.len(), 6, "{persisted}");
+        assert!(lines[5].ends_with("] op{id=1}: inside"), "{persisted}");
+        for (line, expected) in lines
+            .iter()
+            .take(5)
+            .zip(messages.iter().chain(&["error line"]))
+        {
+            let (timestamp, rest) = line.split_once("] ").unwrap();
+            assert!(timestamp.starts_with('['), "{line}");
+            assert_eq!(
+                timestamp.len(),
+                "[2026-10-26 23:50:52 -04:00".len(),
+                "{line}"
+            );
+            match *expected {
+                "warn line" => assert_eq!(rest, "WARN warn line"),
+                "error line" => assert_eq!(rest, "ERROR error line"),
+                other => assert_eq!(rest, other),
+            }
+        }
+    }
+
+    #[test]
     fn escaped_auth_diagnostics_are_redacted_before_persistence_and_support_copy() {
         let temp = tempfile::tempdir().unwrap();
         let body = r#"{"password":"prefix\"suffix-secret","token":["first-secret","second-secret"],"note":"diagnostic kept"}"#;
@@ -798,6 +886,7 @@ mod tests {
             let path = temp.path().join(format!("{name}.log"));
             let subscriber = tracing_subscriber::fmt()
                 .with_ansi(false)
+                .event_format(LauncherEventFormat::new())
                 .with_writer(RedactingFileWriter::new(File::create(&path).unwrap()))
                 .finish();
             tracing::subscriber::with_default(subscriber, || {

@@ -3,7 +3,6 @@ use std::path::Path;
 use bahamut_launcher::config::dirs;
 use bahamut_launcher::diagnostics::{format_bytes, free_disk_bytes, system_diagnostics};
 use bahamut_launcher::extensions::layout::ExtensionLayout;
-use chrono::{DateTime, SecondsFormat, Utc};
 use tauri::Manager;
 
 use crate::shell_config::{resolve_download_cache_dir, resolve_game_dir};
@@ -133,18 +132,7 @@ fn log_free_disk(label: &str, path: &Path) {
 
 fn log_artifact(label: &str, path: &Path) {
     match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {
-            let modified = metadata
-                .modified()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
-                .unwrap_or_else(|| "unavailable".to_string());
-            tracing::info!(
-                "{label} = present, {}, modified {modified}",
-                format_bytes(metadata.len())
-            );
-        }
+        Ok(metadata) if metadata.is_file() => tracing::info!("{label} = present"),
         Ok(_) => tracing::warn!("{label} = invalid (not a file)"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             tracing::warn!("{label} = missing")

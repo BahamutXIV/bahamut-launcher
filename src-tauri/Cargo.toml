@@ -20,7 +20,6 @@ diagnostic-no-injection = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-chrono = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
