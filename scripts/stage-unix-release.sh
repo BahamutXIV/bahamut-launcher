@@ -192,6 +192,10 @@ while IFS= read -r -d '' entry; do
     fi
 done < <(find "$overlay_source" -print0)
 
+if [ "${#overlay_expected_files[@]}" -gt 1 ]; then
+    python3 -I "$script_dir/official-overlay-dats.py" verify --package "$overlay_dest"
+fi
+
 # Reject a symlink anywhere in the finished staged tree, not just the overlay.
 staged_symlinks="$(find "$destination" -type l)"
 if [ -n "$staged_symlinks" ]; then

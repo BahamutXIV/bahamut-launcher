@@ -125,6 +125,11 @@ uses its runtime identity.
 4. Optionally add `DISCORD_RELEASE_WEBHOOK_URL`. A tag push then announces
    the release on Discord. Without it, the announcement step warns but the
    release still succeeds.
+5. Add the repository secret `BAHAMUT_ASSETS_TOKEN`. Use a fine-grained
+   personal access token limited to the repository named in
+   [`manifests/official-overlay-dats.json`](../manifests/official-overlay-dats.json),
+   with Contents: Read-only. Published releases require it. To change the
+   pinned files, update the commit and file entries in the manifest.
 
 `RELEASE_PAT` can bypass required checks to push to `main`. Use a short expiry
 and rotate the token.
@@ -195,7 +200,7 @@ Flatpak build leg.
 
 | Download | Contents and requirements |
 |---|---|
-| Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the empty official DAT overlay, and update helper. |
+| Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the official DAT overlay, and update helper. |
 | Linux x86_64 tar.gz | One top-level `bahamut-launcher/` folder containing the executable and the Windows payload without the update helper. The Win32 loader, runtime, and plugins use llvm-mingw, with the MinGW-w64 runtime notice added. Also includes `.bahamut-launcher-package`, `install.sh`, `install-dependencies.sh`, a `Makefile`, the desktop entry under `share/applications/`, and hicolor icons under `share/icons/`. Built on `ubuntu-22.04`; requires glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. First game launch downloads the [Linux Wine engine](configuration.md#linux-wine-engine). |
 | macOS universal ZIP | One `Bahamut Launcher.app` for Apple Silicon and Intel. The launcher is at `Contents/MacOS/bahamut-launcher`. `Contents/Resources` holds the Windows payload without the update helper, plus the MinGW-w64 runtime notice and `icon.icns`. `Info.plist` is at `Contents/Info.plist`. First game launch downloads managed Sikarugir Wine; Apple Silicon requires Rosetta 2 to run it. |
 | Linux Flatpak ZIP | One top-level `bahamut-launcher-flatpak/` folder containing `README.md`, the `.flatpak` bundle, its `.flatpak.sha256` sidecar, and its `.flatpak.identity.json` build identity. The bundle installs app ID `io.github.BahamutXIV.Launcher.Tester` on branch `s0` and needs `org.gnome.Platform//50` from Flathub. See [Flatpak](flatpak.md). |

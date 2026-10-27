@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -153,6 +154,26 @@ def prepare(args: argparse.Namespace) -> None:
         )
         append_vendor_config(source, vendor_result.stdout)
 
+    # Git archives omit ignored overlay files; carry them over and verify the pin.
+    overlay_data = repo / "plugins" / "dats" / "bahamut-dats-overlay" / "data"
+    overlay_dat_count = 0
+    if overlay_data.exists() or overlay_data.is_symlink():
+        for path in (overlay_data.parents[2], overlay_data.parents[1], overlay_data.parent, overlay_data):
+            if path.is_symlink():
+                raise SystemExit(f"official overlay data path contains a link: {path}")
+        if not overlay_data.is_dir():
+            raise SystemExit(f"official overlay data is not a plain directory: {overlay_data}")
+        archived_overlay = source / "plugins" / "dats" / "bahamut-dats-overlay"
+        if (archived_overlay / "data").exists():
+            raise SystemExit(f"source archive already contains official overlay data: {archived_overlay}")
+        shutil.copytree(overlay_data, archived_overlay / "data", symlinks=True)
+        verify_script = source / "scripts" / "official-overlay-dats.py"
+        subprocess.run(
+            [sys.executable, "-I", str(verify_script), "verify", "--package", str(archived_overlay)],
+            check=True,
+        )
+        overlay_dat_count = sum(1 for path in (archived_overlay / "data").rglob("*") if path.is_file())
+
     cargo_lock = source / "Cargo.lock"
     rust_toolchain = source / "rust-toolchain.toml"
     stage_script = source / "scripts" / "stage-unix-release.sh"
@@ -196,6 +217,7 @@ def prepare(args: argparse.Namespace) -> None:
         "payload": {
             "stage_script_sha256": sha256_file(stage_script),
             "package_marker_sha256": sha256_file(marker),
+            "official_overlay_dat_files": overlay_dat_count,
         },
     }
     identity_path = archived_packaging / "build-identity.json"

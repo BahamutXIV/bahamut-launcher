@@ -155,6 +155,40 @@ while ($pendingOverlayDirectories.Count -gt 0) {
     }
 }
 
+$overlayPayload = @(Get-ChildItem -LiteralPath $overlayDestination -File -Recurse -Force |
+    ForEach-Object { $_.FullName.Substring($overlayDestination.Length).TrimStart('\', '/') -replace '\\', '/' } |
+    Where-Object { $_ -cne 'overlay.toml' })
+if ($overlayPayload.Count -ne 0) {
+    $pinPath = Join-Path $repositoryRoot 'manifests/official-overlay-dats.json'
+    $pin = Get-Content -LiteralPath $pinPath -Raw | ConvertFrom-Json
+    # Pinned paths are relative to the assets repository's collection folder.
+    $pinPrefix = 'bahamut-dats-overlay/'
+    $pinnedFiles = @($pin.files | ForEach-Object {
+        $sourcePath = [string]$_.path
+        if (-not $sourcePath.StartsWith($pinPrefix + 'data/', [System.StringComparison]::Ordinal)) {
+            throw "invalid official overlay DAT pin path: $sourcePath"
+        }
+        [pscustomobject]@{ Path = $sourcePath.Substring($pinPrefix.Length); Size = [int64]$_.size; Sha256 = [string]$_.sha256 }
+    })
+    $pinnedPaths = @($pinnedFiles | ForEach-Object { $_.Path })
+    $difference = @(Compare-Object -ReferenceObject $pinnedPaths -DifferenceObject $overlayPayload -CaseSensitive)
+    if ($difference.Count -ne 0) {
+        $listed = ($difference | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join ', '
+        throw "official overlay payload differs from ${pinPath}: $listed"
+    }
+    foreach ($entry in $pinnedFiles) {
+        $stagedFile = Get-Item -LiteralPath (Join-Path $overlayDestination $entry.Path)
+        if ($stagedFile.Length -ne $entry.Size) {
+            throw "official overlay DAT size mismatch: $($entry.Path)"
+        }
+        $stagedHash = (Get-FileHash -LiteralPath $stagedFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($stagedHash -cne $entry.Sha256) {
+            throw "official overlay DAT SHA-256 mismatch: $($entry.Path)"
+        }
+    }
+    Write-Output "pinned official overlay files verified"
+}
+
 $stagedFiles = Get-ChildItem -LiteralPath $destinationPath -File -Recurse |
     Sort-Object FullName
 foreach ($file in $stagedFiles) {
