@@ -138,7 +138,7 @@ fn discover_root(
     }
     let root = canonical_directory(root)?;
     let mut entries = read_dir(&root)?;
-    entries.sort_by_key(|left| left.file_name());
+    entries.sort_by_key(fs::DirEntry::file_name);
 
     let mut packages = Vec::new();
     let mut ids = BTreeMap::<String, PathBuf>::new();
@@ -154,19 +154,17 @@ fn discover_root(
             );
             continue;
         }
-        let package = match discover_overlay_package(&root, entry) {
+        let package = match discover_overlay_package(&root, &entry) {
             Ok(Some(package)) => package,
             Ok(None) => continue,
             Err(_) if official => continue,
             Err(error) => return Err(error),
         };
-        let package_root = package.root_path.clone();
-        let id = package.id.clone();
-        if let Some(first) = ids.insert(id.clone(), package_root.clone()) {
+        if let Some(first) = ids.insert(package.id.clone(), package.root_path.clone()) {
             return Err(OverlayDiscoveryError::DuplicateId {
-                id,
+                id: package.id,
                 first,
-                second: package_root,
+                second: package.root_path,
             });
         }
         packages.push(package);
@@ -176,7 +174,7 @@ fn discover_root(
 
 fn discover_overlay_package(
     root: &Path,
-    entry: fs::DirEntry,
+    entry: &fs::DirEntry,
 ) -> Result<Option<OverlayPackage>, OverlayDiscoveryError> {
     let path = entry.path();
     let file_type = entry
@@ -208,7 +206,7 @@ fn discover_overlay_package(
             }
         }
     })?;
-    if metadata.file_type().is_symlink() || is_reparse_metadata(&metadata) || !metadata.is_file() {
+    if crate::atomic_fs::is_link_or_reparse(&metadata) || !metadata.is_file() {
         return Err(OverlayDiscoveryError::UnsafePath(manifest_path));
     }
     let manifest_text =
@@ -326,14 +324,14 @@ fn collect_payload_files_inner(
     files: &mut Vec<PathBuf>,
 ) -> Result<(), OverlayDiscoveryError> {
     let mut entries = read_dir(directory)?;
-    entries.sort_by_key(|left| left.file_name());
+    entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path).map_err(|source| OverlayDiscoveryError::Io {
             path: path.clone(),
             source,
         })?;
-        if metadata.file_type().is_symlink() || is_reparse_metadata(&metadata) {
+        if crate::atomic_fs::is_link_or_reparse(&metadata) {
             return Err(OverlayDiscoveryError::UnsafePath(path));
         }
         if metadata.is_dir() {
@@ -407,7 +405,7 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, OverlayDiscoveryError> {
         path: path.to_path_buf(),
         source,
     })?;
-    if metadata.file_type().is_symlink() || is_reparse_metadata(&metadata) {
+    if crate::atomic_fs::is_link_or_reparse(&metadata) {
         return Err(OverlayDiscoveryError::UnsafePath(path.to_path_buf()));
     }
     if !metadata.is_dir() {
@@ -482,22 +480,11 @@ fn valid_package_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+// Callers test `is_symlink` first; only Windows has other reparse points.
 fn is_reparse_point(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| is_reparse_metadata(&metadata))
-        .unwrap_or(false)
-}
-
-#[cfg(windows)]
-fn is_reparse_metadata(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_metadata(_metadata: &fs::Metadata) -> bool {
-    false
+    cfg!(windows)
+        && fs::symlink_metadata(path)
+            .is_ok_and(|metadata| crate::atomic_fs::is_link_or_reparse(&metadata))
 }
 
 #[cfg(test)]

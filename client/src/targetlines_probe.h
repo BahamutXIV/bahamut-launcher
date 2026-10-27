@@ -18,8 +18,9 @@ class TargetlinesService;
 // observed CameraActor::update at VA 0x006195D0 with ECX this, one int32_t*
 // stack argument and ret 4. Its builder wrote separate 64-byte records at
 // camera +0x210/+0x250/+0x2D0, and update wrote +0x370 through +0x3A0.
-// The guarded +0x210/+0x250 scene pass in targetlines_projection.h was aligned
-// with world-XYZ endpoints in owner captures. Other passes remain hidden.
+// The guarded +0x210/+0x250 scene pass was aligned with world-XYZ endpoints in
+// the capture identified by executable identity, SHA-256, and fixture locator
+// in targetlines_projection.h. Other passes remain hidden.
 // Camera and drawing data stay native; the addon requests only its own arcs.
 bool TargetlinesProbeRequested();
 void StartTargetlinesRenderer(TargetDistanceService* targets, TargetlinesService* arcs, bool addonEnabled);

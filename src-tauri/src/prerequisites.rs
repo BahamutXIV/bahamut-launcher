@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(any(windows, test))]
 use std::time::Duration;
 
+#[cfg(windows)]
+use bahamut_launcher::atomic_fs::is_link_or_reparse;
 #[cfg(any(windows, test))]
 use reqwest::{blocking::Client, redirect::Policy};
 use serde::Deserialize;
@@ -436,7 +438,7 @@ fn stage_verified_installer(
     for component in ["BahamutXIV", "Launcher", "prerequisites"] {
         directory.push(component);
         match fs::symlink_metadata(&directory) {
-            Ok(metadata) if metadata.is_dir() && !is_reparse(&metadata) => {}
+            Ok(metadata) if metadata.is_dir() && !is_link_or_reparse(&metadata) => {}
             Ok(_) => {
                 return Err(PrerequisiteError::InstallerStage {
                     asset_id: asset.id.clone(),
@@ -460,7 +462,7 @@ fn stage_verified_installer(
                         detail: format!("could not inspect {}: {error}", directory.display()),
                     }
                 })?;
-                if !metadata.is_dir() || is_reparse(&metadata) {
+                if !metadata.is_dir() || is_link_or_reparse(&metadata) {
                     return Err(PrerequisiteError::InstallerStage {
                         asset_id: asset.id.clone(),
                         detail: format!("{} is not a plain directory", directory.display()),
@@ -556,17 +558,6 @@ fn stage_verified_installer_in(
         return Err(error);
     }
     Ok(path)
-}
-
-#[cfg(windows)]
-fn is_reparse(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    metadata.file_attributes() & 0x400 != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
 }
 
 #[cfg(windows)]

@@ -90,13 +90,13 @@ fn parse_fixed_component(
 }
 
 fn days_since_epoch(year: i32, month: u32, day: u32) -> Result<u64, ExpiryParseError> {
+    const DAYS_IN_MONTH: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     if year < 1970 {
         return Err(ExpiryParseError::BeforeEpoch);
     }
     if !(1..=12).contains(&month) || day == 0 {
         return Err(ExpiryParseError::OutOfRange);
     }
-    const DAYS_IN_MONTH: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let leap = is_leap_year(year);
     let max_day = if month == 2 && leap {
         29

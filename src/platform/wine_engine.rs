@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn bad_digest_leaves_no_engine_and_no_staging() {
         let server = MockServer::start();
-        let archive = engine_archive(&[]);
+        let archive = b"bad digest payload".to_vec();
         let mock = serve(&server, &archive);
         let temp = tempfile::tempdir().unwrap();
         let cache_root = temp.path().join("runtime");

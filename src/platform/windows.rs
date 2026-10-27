@@ -1,8 +1,7 @@
 //! Native Windows backend for the 64-bit launcher and 32-bit FFXIV 1.23b client:
 //! spawn suspended, read the image base with WOW64 APIs, patch and verify it, then resume.
 //!
-//! Authored from `docs/handshake.md` and the public Win32
-//! documentation set.
+//! Launch contract: `docs/handshake.md` and the public Win32 documentation.
 //! The 64-bit launcher uses `Wow64GetThreadContext`; 32-bit builds are unsupported.
 
 use std::ffi::CString;
@@ -105,7 +104,7 @@ pub fn launch_game(
     if let Some(artifacts) = &options.extension_artifacts {
         let request =
             artifacts.to_request(game_dir, options, &patches, launch_args.encoded_argument);
-        return run_extension_helper(plan_extension_launch(&request)?);
+        return run_extension_helper(&plan_extension_launch(&request)?);
     }
 
     // CreateProcessA is ANSI; the supported 1.23b install path must be ASCII.
@@ -114,9 +113,9 @@ pub fn launch_game(
         exe_path.display(),
         launch_args.encoded_argument
     );
-    let command_line_c = CString::new(command_line).map_err(nul_to_err)?;
+    let command_line_c = CString::new(command_line).map_err(|err| nul_to_err(&err))?;
     let working_dir_c =
-        CString::new(game_dir.to_string_lossy().into_owned()).map_err(nul_to_err)?;
+        CString::new(game_dir.to_string_lossy().into_owned()).map_err(|err| nul_to_err(&err))?;
 
     let mut startup: STARTUPINFOA = unsafe { std::mem::zeroed() };
     startup.cb = std::mem::size_of::<STARTUPINFOA>() as u32;
@@ -143,7 +142,7 @@ pub fn launch_game(
             &mut proc_info,
         )
     }
-    .map_err(|err| windows_api("CreateProcessA", err))?;
+    .map_err(|err| windows_api("CreateProcessA", &err))?;
 
     // After creation, either resume or terminate the process. A successful
     // launch retains the process handle until the client exits.
@@ -177,7 +176,7 @@ pub fn launch_game(
     }
 }
 
-fn run_extension_helper(invocation: HelperInvocation) -> Result<LaunchedGame, LaunchError> {
+fn run_extension_helper(invocation: &HelperInvocation) -> Result<LaunchedGame, LaunchError> {
     tracing::info!(
         helper = %invocation.program.display(),
         "spawning x86 extension bootstrap helper"
@@ -369,7 +368,7 @@ fn read_image_base(process: HANDLE, thread: HANDLE) -> Result<usize, LaunchError
     let mut ctx: WOW64_CONTEXT = unsafe { std::mem::zeroed() };
     ctx.ContextFlags = WOW64_CONTEXT_FULL;
     unsafe { Wow64GetThreadContext(thread, &mut ctx) }
-        .map_err(|err| windows_api("Wow64GetThreadContext", err))?;
+        .map_err(|err| windows_api("Wow64GetThreadContext", &err))?;
 
     let peb_addr = ctx.Ebx as usize;
     let image_base_addr = peb_addr
@@ -386,7 +385,7 @@ fn read_image_base(process: HANDLE, thread: HANDLE) -> Result<usize, LaunchError
             Some(&mut bytes_read),
         )
     }
-    .map_err(|err| windows_api("ReadProcessMemory(PebBase + 0x8)", err))?;
+    .map_err(|err| windows_api("ReadProcessMemory(PebBase + 0x8)", &err))?;
 
     if bytes_read != std::mem::size_of::<u32>() || image_base == 0 {
         return Err(LaunchError::ImageBaseUnknown);
@@ -405,7 +404,7 @@ fn write_patch(process: HANDLE, addr: usize, bytes: &[u8]) -> Result<(), LaunchE
             &mut old_protect,
         )
     }
-    .map_err(|err| windows_api("VirtualProtectEx(RWX)", err))?;
+    .map_err(|err| windows_api("VirtualProtectEx(RWX)", &err))?;
 
     let mut bytes_written: usize = 0;
     let write_result = unsafe {
@@ -429,14 +428,14 @@ fn write_patch(process: HANDLE, addr: usize, bytes: &[u8]) -> Result<(), LaunchE
             &mut ignored,
         )
     }
-    .map_err(|err| windows_api("VirtualProtectEx(restore)", err));
+    .map_err(|err| windows_api("VirtualProtectEx(restore)", &err));
 
     let write_result = write_result
-        .map(|_| bytes_written)
-        .map_err(|err| windows_api("WriteProcessMemory", err));
+        .map(|()| bytes_written)
+        .map_err(|err| windows_api("WriteProcessMemory", &err));
     finish_direct_patch(write_result, bytes.len(), restore_result, || {
         unsafe { FlushInstructionCache(process, Some(addr as *const _), bytes.len()) }
-            .map_err(|err| windows_api("FlushInstructionCache", err))
+            .map_err(|err| windows_api("FlushInstructionCache", &err))
     })
 }
 
@@ -456,10 +455,7 @@ where
             context: "WriteProcessMemory (short write)",
             source: std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
-                format!(
-                    "expected {} bytes written, got {}",
-                    expected_len, bytes_written
-                ),
+                format!("expected {expected_len} bytes written, got {bytes_written}"),
             ),
         });
     }
@@ -534,7 +530,7 @@ fn terminate_process_and_wait(process: HANDLE, thread: HANDLE) -> Result<(), Lau
     terminate_and_wait_with(
         || {
             unsafe { TerminateProcess(process, 1) }
-                .map_err(|err| windows_api("TerminateProcess", err))
+                .map_err(|err| windows_api("TerminateProcess", &err))
         },
         || unsafe { WaitForSingleObject(process, TERMINATION_WAIT_MS) },
         || retain_handles_until_termination(process, thread),
@@ -558,7 +554,7 @@ fn verify_patch(
             Some(&mut bytes_read),
         )
     }
-    .map_err(|err| windows_api("ReadProcessMemory(verify)", err))?;
+    .map_err(|err| windows_api("ReadProcessMemory(verify)", &err))?;
 
     if bytes_read != expected.len() || buf != expected {
         return Err(LaunchError::PatchVerifyMismatch { rva });
@@ -581,7 +577,7 @@ fn cap_game_process_affinity(process: HANDLE) -> Result<(), LaunchError> {
     let mut process_mask = 0usize;
     let mut system_mask = 0usize;
     unsafe { GetProcessAffinityMask(process, &mut process_mask, &mut system_mask) }
-        .map_err(|err| windows_api("GetProcessAffinityMask", err))?;
+        .map_err(|err| windows_api("GetProcessAffinityMask", &err))?;
     if process_mask == 0 {
         return Err(LaunchError::WindowsApi {
             context: "GetProcessAffinityMask",
@@ -591,7 +587,7 @@ fn cap_game_process_affinity(process: HANDLE) -> Result<(), LaunchError> {
     let limited_mask = limit_game_processor_mask(process_mask);
     if limited_mask != process_mask {
         unsafe { SetProcessAffinityMask(process, limited_mask) }
-            .map_err(|err| windows_api("SetProcessAffinityMask", err))?;
+            .map_err(|err| windows_api("SetProcessAffinityMask", &err))?;
     }
     Ok(())
 }
@@ -617,14 +613,14 @@ fn close_handles(process: HANDLE, thread: HANDLE) {
     }
 }
 
-fn windows_api(context: &'static str, err: windows::core::Error) -> LaunchError {
+fn windows_api(context: &'static str, err: &windows::core::Error) -> LaunchError {
     LaunchError::WindowsApi {
         context,
         source: std::io::Error::from_raw_os_error(err.code().0),
     }
 }
 
-fn nul_to_err(err: std::ffi::NulError) -> LaunchError {
+fn nul_to_err(err: &std::ffi::NulError) -> LaunchError {
     LaunchError::ArgsContainNul(err.to_string())
 }
 

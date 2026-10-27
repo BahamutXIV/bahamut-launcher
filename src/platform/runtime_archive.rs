@@ -58,7 +58,7 @@ pub(super) const LINUX_WINE_11_18_WOW64: RuntimeArchivePin = RuntimeArchivePin {
 /// size or SHA-256 mismatch before callers can extract or install it.
 pub(super) fn download_verified(pin: RuntimeArchivePin, destination: &Path) -> Result<(), String> {
     let mut response = reqwest::blocking::get(pin.url)
-        .and_then(|response| response.error_for_status())
+        .and_then(reqwest::blocking::Response::error_for_status)
         .map_err(|error| format!("GET {}: {error}", pin.url))?;
 
     if let Some(content_length) = response.content_length()

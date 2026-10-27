@@ -1396,17 +1396,8 @@ mod tests {
             "artifact-{version}.{}",
             format_extension(launcher_format(target))
         ));
-        let files = match target {
+        match target {
             Target::WindowsX86_64 => {
-                let files = vec![
-                    file("bahamut-launcher.exe", contents, FileOwnership::Managed),
-                    file("scripts/default.txt", b"/fillmode\n", FileOwnership::Seed),
-                    file(
-                        "plugins/dats/bahamut-dats-overlay/overlay.toml",
-                        b"[overlay]\n",
-                        FileOwnership::Managed,
-                    ),
-                ];
                 write_zip(
                     &path,
                     &[
@@ -1419,20 +1410,45 @@ mod tests {
                     ],
                 )
                 .unwrap();
-                files
             }
             Target::LinuxX86_64 => {
                 write_tar_gz(&path, &[("./bahamut-launcher", contents)]).unwrap();
-                vec![file("bahamut-launcher", contents, FileOwnership::Managed)]
             }
             Target::MacosUniversal => {
                 let bundle = macos_bundle_files(contents);
                 write_zip_entries(&path, &ditto_entries(&bundle)).unwrap();
-                managed_inventory(&bundle)
             }
             Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
-        };
+        }
+        let files = launcher_inventory(target, contents);
         (launcher_metadata(target, version, files, &path), path)
+    }
+
+    fn launcher_inventory(target: Target, contents: &[u8]) -> Vec<InventoryFile> {
+        match target {
+            Target::WindowsX86_64 => vec![
+                file("bahamut-launcher.exe", contents, FileOwnership::Managed),
+                file("scripts/default.txt", b"/fillmode\n", FileOwnership::Seed),
+                file(
+                    "plugins/dats/bahamut-dats-overlay/overlay.toml",
+                    b"[overlay]\n",
+                    FileOwnership::Managed,
+                ),
+            ],
+            Target::LinuxX86_64 => {
+                vec![file("bahamut-launcher", contents, FileOwnership::Managed)]
+            }
+            Target::MacosUniversal => managed_inventory(&macos_bundle_files(contents)),
+            Target::PlatformIndependent => unreachable!("launcher targets are platform-specific"),
+        }
+    }
+
+    fn launcher_metadata_for_contents(
+        version: &str,
+        target: Target,
+        contents: &[u8],
+    ) -> ReleaseMetadata {
+        launcher_metadata_with_inventory(&launcher_inventory(target, contents), version, target)
     }
 
     fn launcher_format(target: Target) -> ArtifactFormat {
@@ -1456,8 +1472,18 @@ mod tests {
         files: Vec<InventoryFile>,
         artifact: &Path,
     ) -> ReleaseMetadata {
-        let format = launcher_format(target);
         let (length, digest) = hash_file(artifact).unwrap();
+        launcher_metadata_with_identity(target, version, files, length, digest)
+    }
+
+    fn launcher_metadata_with_identity(
+        target: Target,
+        version: &str,
+        files: Vec<InventoryFile>,
+        length: u64,
+        digest: String,
+    ) -> ReleaseMetadata {
+        let format = launcher_format(target);
         ReleaseMetadata {
             schema_version: 1,
             product: Product::Launcher,
@@ -1799,12 +1825,8 @@ mod tests {
             OfferDecision::ReuseIdentical
         );
 
-        let (changed_same_version, _) = launcher_release(
-            directory.path(),
-            "1.2.0",
-            Target::WindowsX86_64,
-            b"changed same version",
-        );
+        let changed_same_version =
+            launcher_metadata_for_contents("1.2.0", Target::WindowsX86_64, b"changed same version");
         let (_, _, changed_verified) = signed_release(&changed_same_version, None);
         assert!(accept_offer(&state_path, &changed_verified).is_err());
         assert!(accept_offer(&state_path, &baseline_verified).is_err());
@@ -1827,12 +1849,8 @@ mod tests {
         let (_, _, linux_verified) = signed_release(&linux_release, None);
         verify_artifact_file(&linux_release, &linux_artifact).unwrap();
         bootstrap_accepted_state(&state_path, &linux_verified, "0.1.0").unwrap();
-        let (linux_next, _) = launcher_release(
-            directory.path(),
-            "0.2.0",
-            Target::LinuxX86_64,
-            b"linux launcher next",
-        );
+        let linux_next =
+            launcher_metadata_for_contents("0.2.0", Target::LinuxX86_64, b"linux launcher next");
         let (_, _, linux_next_verified) = signed_release(&linux_next, None);
         assert_eq!(
             accept_offer(&state_path, &linux_next_verified).unwrap(),
@@ -1862,12 +1880,18 @@ mod tests {
         wrong_archive.artifact.length += 1;
         assert!(validate_metadata(&wrong_archive, Some(&manifest_bytes)).is_err());
 
-        let ReleaseInventory::GameDelivery { target_version, .. } = &mut wrong_archive.inventory
+        let mut wrong_version = metadata.clone();
+        let ReleaseInventory::GameDelivery { target_version, .. } = &mut wrong_version.inventory
         else {
             unreachable!();
         };
         *target_version = "different-game-version".into();
-        assert!(validate_metadata(&wrong_archive, Some(&manifest_bytes)).is_err());
+        assert_eq!(
+            validate_metadata(&wrong_version, Some(&manifest_bytes))
+                .unwrap_err()
+                .to_string(),
+            "Game release target version does not match its delivery manifest."
+        );
     }
 
     #[test]
@@ -1917,7 +1941,6 @@ mod tests {
 
     #[test]
     fn launcher_inventory_owns_only_the_official_overlay_package() {
-        let directory = tempfile::tempdir().unwrap();
         for (path, ownership) in [
             ("../escape.dll", FileOwnership::Managed),
             ("scripts/default.txt", FileOwnership::Managed),
@@ -1940,12 +1963,8 @@ mod tests {
             ),
         ] {
             let entries = vec![file(path, b"x", ownership)];
-            let (metadata, _) = launcher_release_with_inventory(
-                &entries,
-                "1.0.0",
-                Target::WindowsX86_64,
-                directory.path(),
-            );
+            let metadata =
+                launcher_metadata_with_inventory(&entries, "1.0.0", Target::WindowsX86_64);
             assert!(validate_metadata(&metadata, None).is_err(), "{path}");
         }
 
@@ -1954,12 +1973,8 @@ mod tests {
             b"official payload",
             FileOwnership::Managed,
         );
-        let (metadata, _) = launcher_release_with_inventory(
-            &[official_overlay],
-            "1.0.0",
-            Target::WindowsX86_64,
-            directory.path(),
-        );
+        let metadata =
+            launcher_metadata_with_inventory(&[official_overlay], "1.0.0", Target::WindowsX86_64);
         validate_metadata(&metadata, None).unwrap();
 
         let legacy_seed = file(
@@ -1967,20 +1982,12 @@ mod tests {
             b"legacy signed launcher seed",
             FileOwnership::Seed,
         );
-        let (metadata, _) = launcher_release_with_inventory(
-            &[legacy_seed],
-            "1.0.0",
-            Target::WindowsX86_64,
-            directory.path(),
-        );
+        let metadata =
+            launcher_metadata_with_inventory(&[legacy_seed], "1.0.0", Target::WindowsX86_64);
         validate_metadata(&metadata, None).unwrap();
 
-        let (mut non_windows, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::LinuxX86_64,
-            b"linux launcher",
-        );
+        let mut non_windows =
+            launcher_metadata_for_contents("1.0.0", Target::LinuxX86_64, b"linux launcher");
         let ReleaseInventory::Launcher { files } = &mut non_windows.inventory else {
             unreachable!();
         };
@@ -1995,12 +2002,8 @@ mod tests {
                 FileOwnership::Managed,
             ),
         ];
-        let (metadata, _) = launcher_release_with_inventory(
-            &valid_seed,
-            "1.0.0",
-            Target::WindowsX86_64,
-            directory.path(),
-        );
+        let metadata =
+            launcher_metadata_with_inventory(&valid_seed, "1.0.0", Target::WindowsX86_64);
         validate_metadata(&metadata, None).unwrap();
 
         for target in [Target::LinuxX86_64, Target::MacosUniversal] {
@@ -2009,8 +2012,7 @@ mod tests {
                 b"seed",
                 FileOwnership::Seed,
             )];
-            let (metadata, _) =
-                launcher_release_with_inventory(&seed, "1.0.0", target, directory.path());
+            let metadata = launcher_metadata_with_inventory(&seed, "1.0.0", target);
             assert!(validate_metadata(&metadata, None).is_err());
         }
 
@@ -2033,12 +2035,8 @@ mod tests {
                 FileOwnership::Managed,
             ),
         ];
-        let (metadata, _) = launcher_release_with_inventory(
-            &reviewed_files,
-            "1.0.0",
-            Target::WindowsX86_64,
-            directory.path(),
-        );
+        let metadata =
+            launcher_metadata_with_inventory(&reviewed_files, "1.0.0", Target::WindowsX86_64);
         validate_metadata(&metadata, None).unwrap();
 
         assert!(
@@ -2092,33 +2090,23 @@ mod tests {
         assert!(verify_artifact_file(&metadata, &artifact_path).is_err());
     }
 
-    fn launcher_release_with_inventory(
+    fn launcher_metadata_with_inventory(
         files: &[InventoryFile],
         version: &str,
         target: Target,
-        directory: &Path,
-    ) -> (ReleaseMetadata, PathBuf) {
-        let format = launcher_format(target);
-        let path = directory.join(format!("inventory-only.{}", format_extension(format)));
-        match format {
-            ArtifactFormat::Zip => write_zip(&path, &[]).unwrap(),
-            ArtifactFormat::TarGz => write_tar_gz(&path, &[]).unwrap(),
-        }
-        (
-            launcher_metadata(target, version, files.to_vec(), &path),
-            path,
+    ) -> ReleaseMetadata {
+        launcher_metadata_with_identity(
+            target,
+            version,
+            files.to_vec(),
+            1,
+            sha256_hex(b"metadata-only artifact"),
         )
     }
 
     #[test]
     fn metadata_schema_rejects_prereleases_unknown_fields_duplicates_and_oversize() {
-        let directory = tempfile::tempdir().unwrap();
-        let (metadata, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::WindowsX86_64,
-            b"launcher",
-        );
+        let metadata = launcher_metadata_for_contents("1.0.0", Target::WindowsX86_64, b"launcher");
         let mut raw_metadata = serde_json::to_value(&metadata).unwrap();
         raw_metadata["target"] = serde_json::json!("windows-x86_64");
         let raw_metadata = serde_json::to_vec(&raw_metadata).unwrap();
@@ -2362,12 +2350,8 @@ mod tests {
         ] {
             let mut files = inventory.clone();
             files.push(file(path, &apple_double, FileOwnership::Managed));
-            let (metadata, _) = launcher_release_with_inventory(
-                &files,
-                "1.0.0",
-                Target::MacosUniversal,
-                directory.path(),
-            );
+            let metadata =
+                launcher_metadata_with_inventory(&files, "1.0.0", Target::MacosUniversal);
             assert!(validate_metadata(&metadata, None).is_err(), "{path}");
         }
     }
@@ -2429,12 +2413,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let bundle = macos_bundle_files(b"macos launcher");
         let inventory = managed_inventory(&bundle);
-        let (metadata, _) = launcher_release_with_inventory(
-            &inventory,
-            "1.0.0",
-            Target::MacosUniversal,
-            directory.path(),
-        );
+        let metadata =
+            launcher_metadata_with_inventory(&inventory, "1.0.0", Target::MacosUniversal);
         validate_metadata(&metadata, None).unwrap();
 
         for (path, ownership) in [
@@ -2521,12 +2501,8 @@ mod tests {
         ] {
             let mut files = inventory.clone();
             files.push(file(path, b"x", ownership));
-            let (metadata, _) = launcher_release_with_inventory(
-                &files,
-                "1.0.0",
-                Target::MacosUniversal,
-                directory.path(),
-            );
+            let metadata =
+                launcher_metadata_with_inventory(&files, "1.0.0", Target::MacosUniversal);
             assert!(validate_metadata(&metadata, None).is_err(), "{path}");
         }
 
@@ -2539,12 +2515,7 @@ mod tests {
             })
             .unwrap();
         default_script.ownership = FileOwnership::Seed;
-        let (metadata, _) = launcher_release_with_inventory(
-            &seeded,
-            "1.0.0",
-            Target::MacosUniversal,
-            directory.path(),
-        );
+        let metadata = launcher_metadata_with_inventory(&seeded, "1.0.0", Target::MacosUniversal);
         assert!(validate_metadata(&metadata, None).is_err());
 
         for (index, empty_directory) in [
@@ -2612,22 +2583,14 @@ mod tests {
                 .find(|file| file.path == canonical)
                 .unwrap()
                 .path = alias.into();
-            let (metadata, _) = launcher_release_with_inventory(
-                &renamed,
-                "1.0.0",
-                Target::MacosUniversal,
-                directory.path(),
-            );
+            let metadata =
+                launcher_metadata_with_inventory(&renamed, "1.0.0", Target::MacosUniversal);
             assert!(validate_metadata(&metadata, None).is_err(), "{alias}");
 
             let mut beside = inventory.clone();
             beside.push(file(alias, b"alias", FileOwnership::Managed));
-            let (metadata, _) = launcher_release_with_inventory(
-                &beside,
-                "1.0.0",
-                Target::MacosUniversal,
-                directory.path(),
-            );
+            let metadata =
+                launcher_metadata_with_inventory(&beside, "1.0.0", Target::MacosUniversal);
             assert!(validate_metadata(&metadata, None).is_err(), "{alias}");
         }
 
@@ -2747,12 +2710,7 @@ mod tests {
     fn starting_version_must_be_explicitly_bound_to_verified_metadata() {
         let directory = tempfile::tempdir().unwrap();
         let state_path = directory.path().join("accepted.json");
-        let (metadata, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::WindowsX86_64,
-            b"launcher",
-        );
+        let metadata = launcher_metadata_for_contents("1.0.0", Target::WindowsX86_64, b"launcher");
         let (_, _, verified) = signed_release(&metadata, None);
         assert!(bootstrap_accepted_state(&state_path, &verified, "0.9.0").is_err());
         bootstrap_accepted_state(&state_path, &verified, "1.0.0").unwrap();
@@ -2762,12 +2720,7 @@ mod tests {
     fn state_is_bound_to_the_explicit_public_key() {
         let directory = tempfile::tempdir().unwrap();
         let state_path = directory.path().join("accepted.json");
-        let (metadata, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::WindowsX86_64,
-            b"launcher",
-        );
+        let metadata = launcher_metadata_for_contents("1.0.0", Target::WindowsX86_64, b"launcher");
         let (_, _, verified) = signed_release(&metadata, None);
         bootstrap_accepted_state(&state_path, &verified, "1.0.0").unwrap();
 
@@ -2809,28 +2762,16 @@ mod tests {
     fn stale_lower_offer_cannot_regress_boundary_when_higher_offer_wins() {
         let directory = tempfile::tempdir().unwrap();
         let state_path = directory.path().join("accepted.json");
-        let (baseline, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::WindowsX86_64,
-            b"launcher v1",
-        );
+        let baseline =
+            launcher_metadata_for_contents("1.0.0", Target::WindowsX86_64, b"launcher v1");
         let (_, _, baseline_verified) = signed_release(&baseline, None);
         bootstrap_accepted_state(&state_path, &baseline_verified, "1.0.0").unwrap();
 
-        let (lower_offer, _) = launcher_release(
-            directory.path(),
-            "2.0.0",
-            Target::WindowsX86_64,
-            b"launcher v2",
-        );
+        let lower_offer =
+            launcher_metadata_for_contents("2.0.0", Target::WindowsX86_64, b"launcher v2");
         let (_, _, lower_verified) = signed_release(&lower_offer, None);
-        let (higher_offer, _) = launcher_release(
-            directory.path(),
-            "3.0.0",
-            Target::WindowsX86_64,
-            b"launcher v3",
-        );
+        let higher_offer =
+            launcher_metadata_for_contents("3.0.0", Target::WindowsX86_64, b"launcher v3");
         let (_, _, higher_verified) = signed_release(&higher_offer, None);
 
         let _state_lock = StateFileLock::acquire(&state_path).unwrap();
@@ -2857,28 +2798,16 @@ mod tests {
     fn concurrent_accepts_keep_the_highest_remote_version() {
         let directory = tempfile::tempdir().unwrap();
         let state_path = directory.path().join("accepted.json");
-        let (baseline, _) = launcher_release(
-            directory.path(),
-            "1.0.0",
-            Target::WindowsX86_64,
-            b"launcher v1",
-        );
+        let baseline =
+            launcher_metadata_for_contents("1.0.0", Target::WindowsX86_64, b"launcher v1");
         let (_, _, baseline_verified) = signed_release(&baseline, None);
         bootstrap_accepted_state(&state_path, &baseline_verified, "1.0.0").unwrap();
 
-        let (version_two, _) = launcher_release(
-            directory.path(),
-            "2.0.0",
-            Target::WindowsX86_64,
-            b"launcher v2",
-        );
+        let version_two =
+            launcher_metadata_for_contents("2.0.0", Target::WindowsX86_64, b"launcher v2");
         let (_, _, version_two_verified) = signed_release(&version_two, None);
-        let (version_three, _) = launcher_release(
-            directory.path(),
-            "3.0.0",
-            Target::WindowsX86_64,
-            b"launcher v3",
-        );
+        let version_three =
+            launcher_metadata_for_contents("3.0.0", Target::WindowsX86_64, b"launcher v3");
         let (_, _, version_three_verified) = signed_release(&version_three, None);
 
         let start = Arc::new(Barrier::new(3));
