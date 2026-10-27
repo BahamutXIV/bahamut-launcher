@@ -1,0 +1,17 @@
+manifest_schema_version = 1
+id = "command-table-test"
+kind = "addon"
+name = "Command table"
+entry = "table.lua"
+
+[[commands]]
+name = "/table go"
+usage = "/table go"
+description = "Claims /table."
+
+[[commands]]
+  name = '/second'
+usage = "/second"
+
+[settings]
+name = "/notcommand"

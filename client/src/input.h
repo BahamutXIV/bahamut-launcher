@@ -14,3 +14,6 @@ void EnableOverlay();
 void DisableOverlay();
 bool IsOverlayVisible();
 void UpdateControllerObservation();
+// Replays the window's activation to native plugins on the window thread,
+// which RegisterHotKey requires. Safe from any thread; a no-op before install.
+void RefreshNativePluginActivation();

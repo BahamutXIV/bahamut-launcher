@@ -66,6 +66,10 @@ struct AddonUrlSink
 
 std::optional<std::string> ReadAddonManifestId(
     const std::filesystem::path& manifestPath);
+// First words of the manifest's command names, such as "/fps"; empty when the
+// manifest is invalid or declares no well-formed command.
+std::vector<std::string> ReadAddonManifestCommandWords(
+    const std::filesystem::path& manifestPath);
 bool IsAllowedAddonUrl(std::string_view url);
 
 class AddonHost
@@ -93,13 +97,15 @@ public:
     bool Reload(std::string_view addonId);
     bool Disable(std::string_view addonId);
     bool IsLoaded(std::string_view addonId) const;
-    bool TargetlinesEnabled() const;
-    bool HasCommandAddons() const;
-    bool DispatchCommand(std::string_view command);
-    void QueueChat(std::string_view source, std::string_view message);
-    void QueueAreaTransition(const packet_observer::GameMessage& message);
-    void QueueCombatResult(const packet_observer::GameMessage& message);
-    bool QueuePacketFrame(const packet_observer::FrameInfo& frame);
+    bool IsFaulted(std::string_view addonId) const;
+    // Loaded addon ids in load order, including faulted addons.
+    std::vector<std::string> LoadedIds() const;
+    bool                     TargetlinesEnabled() const;
+    bool                     DispatchCommand(std::string_view command);
+    void                     QueueChat(std::string_view source, std::string_view message);
+    void                     QueueAreaTransition(const packet_observer::GameMessage& message);
+    void                     QueueCombatResult(const packet_observer::GameMessage& message);
+    bool                     QueuePacketFrame(const packet_observer::FrameInfo& frame);
     // Launcher version (empty means unknown) and runtime API version for capture metadata.
     void SetRuntimeIdentity(std::string launcherVersion, std::uint32_t runtimeApiVersion);
     void Update(double frameDeltaSeconds);

@@ -1,13 +1,21 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
+
+// Native plugin names accepted by /load and /unload.
+inline constexpr std::array<std::string_view, 2> kRuntimePluginNames = {
+    "screenshot",
+    "discord-rpc",
+};
 
 enum class StartupActionKind
 {
-    ScreenshotLoad,
-    ScreenshotUnload,
+    PluginLoad,
+    PluginUnload,
     ScreenshotBind,
     FillModeBind,
     FpsBind,
@@ -19,10 +27,11 @@ enum class StartupActionKind
 struct StartupAction
 {
     StartupActionKind kind;
-    std::string       addonId;
-    unsigned int      virtualKey   = 0;
-    bool              hideOverlays = false;
-    unsigned long     line         = 0;
+    // Addon id for addon actions, plugin name for plugin actions.
+    std::string   addonId;
+    unsigned int  virtualKey   = 0;
+    bool          hideOverlays = false;
+    unsigned long line         = 0;
 };
 
 struct StartupScriptPlan

@@ -1,0 +1,15 @@
+manifest_schema_version = 1
+id = "command-words-test"
+kind = "addon"
+name = "Command words"
+entry = "words.lua"
+commands = [
+    { name = "/addon", usage = "/addon", description = "Reserved by the runtime." },
+    { name = "/Upper", usage = "/Upper", description = "Not lowercase." },
+    { name = "/fps", usage = "/fps", description = "Duplicate of another addon." },
+    { name = "/words go", usage = "/words go #1", description = "Claims /words." },
+    { name = "/words", usage = "/words", description = "Same word again." },
+    { usage = "/later #1", name = "/later", description = "Name after a quoted hash." },
+    { name = '/single', usage = '/single', description = "Single-quoted name." },
+    # { name = "/commented", usage = "/commented", description = "Comment." },
+]

@@ -4,7 +4,9 @@
 
 Use Extensions to manage Lua addons, Screenshot, DiscordRPC, and DAT packages.
 Extended Draw Distance and Extended Camera Zoom are in Settings > Graphics.
-Selections apply on the next game launch.
+Selections apply on the next game launch. In game, `/addon` and `/load`
+change loaded addons and plugins for the current session; see
+[Loading in game](#loading-in-game).
 
 The x86 Win32 client module hosts Lua addons. Screenshot and DiscordRPC are
 separate DLLs in `plugins/`, Dats-Overlay is managed by the launcher, and the
@@ -60,6 +62,37 @@ On macOS and Linux:
   is extracted or installed. Put custom addons and DAT packages under
   `~/.bahamut-launcher`, not beside the executable. A custom package with a
   shipped package's ID is skipped.
+
+## Loading in game
+
+These chat commands work in every session where the client module starts:
+
+| Command | Effect |
+|---|---|
+| `/addon load <id>` | Loads an installed addon by its manifest `id`. |
+| `/addon unload <id>` | Unloads a loaded addon. |
+| `/addon reload <id>` | Reloads a loaded addon, or loads it if it is not loaded. |
+| `/addon list` | Lists loaded addons in load order; faulted addons are marked. |
+| `/load <plugin>` | Loads or re-enables `screenshot` or `discord-rpc`. |
+| `/unload <plugin>` | Disables the plugin. |
+| `/plugins` | Lists both plugins and whether each is loaded. |
+
+Any installed addon can be loaded, including one not selected in Extensions.
+Changes last until the game closes; they never rewrite `extensions.ini`, and
+the next launch uses the Extensions selection and the
+[startup script](configuration.md#startup-scripts). DAT packages and the
+Graphics options are applied at launch and have no in-game command.
+
+Commands take effect immediately, even when chat feedback is unavailable.
+When available, chat shows results such as `Loaded addon: fps`,
+`Addon is not installed: foo`, or `fps is an addon; use /addon load fps`.
+Other `/addon` and `/load` forms print usage.
+
+Unloading an addon closes its Lua state and stops its overlay and commands.
+Native services an addon uses stay installed and pass through: the addon's
+behavior ends, but the host does not remove client hooks during play.
+Unloading a plugin disables it without unloading its DLL; DiscordRPC clears
+the activity and Screenshot stops reacting to its key.
 
 ## Packaged addons
 
@@ -455,17 +488,19 @@ commands = []
 - `kind`: must be `addon`
 - `entry`: one `.lua` file beside the manifest; paths and nested entries are
   rejected
-- `api_version`, `minimum_runtime_version`, `supported_client_builds`,
-  `capabilities`, and `commands`: metadata in the current host; they do not
-  grant services or register arbitrary commands
+- `api_version`, `minimum_runtime_version`, `supported_client_builds`, and
+  `capabilities`: metadata in the current host; they do not grant services
 - Each optional command record: nonempty `name`, `usage`, and `description`
-  strings, with `name` beginning with `/`
+  strings, with `name` beginning with `/`. The first word of each `name`
+  registers that chat command; see
+  [Chat command dispatch](#chat-command-dispatch).
 
 The launcher passes enabled manifests to the module in `[addon.N]` row order
 from `config/extensions.ini`. It also passes the installed manifest catalog,
 so startup commands can load a package not selected for automatic loading.
-Startup commands can append packages; unload and reload operations can change
-the active order for that session. Packages cannot enable or reorder themselves.
+Startup and in-game commands can append packages; unload and reload
+operations can change the active order for that session. Packages cannot
+enable or reorder themselves.
 See [Configuration](configuration.md#portable-launcher-tree) for startup
 scripts and paths in each layout.
 
@@ -568,25 +603,32 @@ and clear the popup.
 
 ### Chat command dispatch
 
-The runtime recognizes the ASCII addon commands `/fps`, `/pos`, `/distance`,
-`/targethp`, `/enemycast`, `/customtimer`, `/wiki`, `/packetlogger`, and
-`/combatparser`. Addons handle their own arguments.
+The runtime reserves `/addon`, `/load`, `/unload`, and `/plugins` for
+[Loading in game](#loading-in-game). Every installed addon's manifest
+`commands` names register their first word, such as `/fps`, when the module
+starts. Names are read from inline tables in a `commands` array or from
+`[[commands]]` tables. A word must be `/` followed by 1 to 31 lowercase ASCII letters,
+digits, hyphens, or underscores. Reserved words, malformed words, and words
+already registered by an addon whose ID sorts earlier are ignored. A registered word is
+dispatched only while an addon that handles it is loaded.
 
 The host reads a bounded token vector from the retail parser. Malformed,
 unsupported, overlong, or unreadable inputs pass to retail. Recognition occurs
 only at the top-level retail lookup call; nested token lookups always pass
 through.
 
-The host calls each loaded addon's optional `command(command_name)` once in
-load order until one returns `true`. A `true` result supplies the retail
-unknown-command sentinel, which the validated retail path consumes without
-sending the command as chat. A missing callback, `false`, or callback error
-preserves the retail lookup path.
+The host joins the tokens with single spaces, up to 512 bytes, and calls each
+loaded addon's optional `command(command_name)` once in load order until one
+returns `true`. Addons validate their own arguments and return `false` for
+forms they do not support. A `true` result supplies the retail unknown-command
+sentinel, which the validated retail path consumes without sending the
+command as chat. A missing callback, `false`, or callback error preserves the
+retail lookup path.
 
-The command boundary is installed when any addon with a supported command is
-loaded. Loading `chatlogs` also installs the existing retail chat insertion
-boundary. The optional `BAHAMUT_TEST_COMMAND_BOUNDARY_RESULT_FILE` output is
-an aggregate diagnostic snapshot.
+The command boundary and the retail chat insertion boundary are installed in
+every session. Packet observation is installed when any installed addon
+consumes it. The optional `BAHAMUT_TEST_COMMAND_BOUNDARY_RESULT_FILE` output
+is an aggregate diagnostic snapshot.
 
 ## Host API
 
@@ -718,6 +760,5 @@ The API does not provide target or party adapters, chat modification, general
 event subscriptions, callback budgets, raw input logging, arbitrary hooks,
 packet mutation, or a public native plugin ABI.
 
-The retail chat hook recognizes only the command patterns implemented in
-`client/src/command_boundary.cpp`. Manifest metadata cannot add patterns or
-make unsupported host services available.
+Manifest command names register chat command words only. They cannot make
+unsupported host services available.

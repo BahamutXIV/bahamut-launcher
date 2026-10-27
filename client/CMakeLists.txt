@@ -215,6 +215,8 @@ add_library(bahamut SHARED
     src/dat_overlay.h
     src/retail_identity.cpp
     src/retail_identity.h
+    src/runtime_commands.cpp
+    src/runtime_commands.h
     src/startup_script.cpp
     src/startup_script.h
 )
@@ -402,6 +404,34 @@ target_include_directories(bahamut-addon-host-tests PRIVATE
 )
 target_link_libraries(bahamut-addon-host-tests PRIVATE lua51 minhook)
 bahamut_unicode_entry(bahamut-addon-host-tests)
+
+add_executable(bahamut-runtime-commands-tests
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    src/actor_name.h
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    src/player_state.h
+    src/runtime_commands.cpp
+    src/runtime_commands.h
+    src/target_distance.h
+    tests/runtime_commands_tests.cpp
+)
+target_include_directories(bahamut-runtime-commands-tests PRIVATE
+    api
+    src
+    vendor/minhook/include
+)
+target_link_libraries(bahamut-runtime-commands-tests PRIVATE lua51 minhook)
+bahamut_unicode_entry(bahamut-runtime-commands-tests)
 
 add_executable(bahamut-command-boundary-tests
     $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
@@ -614,6 +644,17 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )
 add_test(NAME bahamut-command-boundary COMMAND bahamut-command-boundary-tests)
+add_test(
+    NAME bahamut-runtime-commands
+    COMMAND bahamut-runtime-commands-tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/pos/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/command-words/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/load-fault/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/command-table/addon.toml
+        ${CMAKE_CURRENT_BINARY_DIR}/runtime-commands-test-settings
+        ${CMAKE_CURRENT_BINARY_DIR}/runtime-commands-test-chat-logs
+)
 add_test(NAME bahamut-custom-timer COMMAND bahamut-custom-timer-tests)
 add_test(NAME bahamut-enemy-cast COMMAND bahamut-enemy-cast-tests)
 add_test(NAME bahamut-player-state COMMAND bahamut-player-state-tests)

@@ -1,0 +1,6 @@
+manifest_schema_version = 1
+id = "load-fault-test"
+kind = "addon"
+name = "Load fault"
+entry = "fault.lua"
+commands = []

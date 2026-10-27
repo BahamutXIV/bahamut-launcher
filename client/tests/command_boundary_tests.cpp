@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -91,7 +92,12 @@ int wmain()
         return 1;
     }
 
-    const std::array<std::pair<std::string_view, bool>, 31> recognition = { {
+    const std::vector<std::string> words = {
+        "/addon", "/load", "/unload", "/plugins", "/pos", "/fps", "/wiki", "/distance", "/enemycast", "/targethp", "/customtimer", "/packetlogger", "/combatparser", "/loadout"
+    };
+    DispatchState                                           recognitionDispatch;
+    CommandBoundary                                         recognizer(&recognitionDispatch, &Dispatch, words);
+    const std::array<std::pair<std::string_view, bool>, 38> recognition = { {
         { "/pos", true },
         { "/pos ", true },
         { "/pos\targ", true },
@@ -123,12 +129,19 @@ int wmain()
         { "/combatparser reset", true },
         { "/combatparser", true },
         { "/combatparsers", false },
+        { "/addon", true },
+        { "/addons", false },
+        { "/load", true },
+        { "/loader", false },
+        { "/loadout", true },
+        { "/loadout set", true },
+        { "/nolock", false },
     } };
     for (const auto& [input, expected] : recognition)
     {
         TokenElement token;
         token.text = input.data();
-        if (!Require(CommandBoundary::RecognizesAddonCommand(&token) == expected,
+        if (!Require(recognizer.RecognizesCommand(&token) == expected,
                      "command token boundary recognition failed"))
         {
             return 1;
@@ -188,7 +201,7 @@ int wmain()
     DispatchState dispatch;
     OriginalState originalState;
     gOriginalState = &originalState;
-    CommandBoundary               boundary(&dispatch, &Dispatch);
+    CommandBoundary               boundary(&dispatch, &Dispatch, words);
     std::array<unsigned char, 16> output;
     output.fill(0x5A);
     auto handleLookup = [&](std::initializer_list<const char*> tokenTexts)
@@ -270,8 +283,6 @@ int wmain()
                  "packetlogger stop command was not dispatched") ||
         !Require(handleLookup({ "/packetlogger", "split" }) == -2 && dispatch.lastCommand == "/packetlogger split",
                  "packetlogger split command was not dispatched") ||
-        !Require(handleLookup({ "/packetlogger", "split", "extra" }) == 42,
-                 "packetlogger split extra argument did not forward") ||
         !Require(handleLookup({ "/packetlogger", "status" }) == -2 && dispatch.lastCommand == "/packetlogger status",
                  "packetlogger status command was not dispatched") ||
         !Require(handleLookup({ "/combatparser" }) == -2 && dispatch.lastCommand == "/combatparser",
@@ -336,71 +347,24 @@ int wmain()
     boundary.ResetDiagnostics();
     dispatch.calls            = 0;
     originalState.lookupCalls = 0;
-    if (!Require(handleLookup({ "/pos", "window" }) == 42,
-                 "incomplete window command did not forward") ||
-        !Require(handleLookup({ "/pos", "help", "extra" }) == 42,
-                 "help arguments did not forward") ||
-        !Require(handleLookup({ "/pos", "window", "ON" }) == 42,
-                 "unknown window value did not forward") ||
-        !Require(handleLookup({ "/pos", "window", "toggle" }) == 42,
-                 "removed window value did not forward") ||
-        !Require(handleLookup({ "/pos", "window", "on" }) == 42,
-                 "removed window-on command did not forward") ||
-        !Require(handleLookup({ "/pos", "window", "on", "extra" }) == 42,
-                 "extra command token did not forward") ||
-        !Require(handleLookup({ "/positional" }) == 42,
-                 "non-pos token did not forward") ||
-        !Require(handleLookup({ "/pos", "overlong" }) == 42,
-                 "overlong token did not forward") ||
-        !Require(handleLookup({ "/fps", "extra" }) == 42,
-                 "fps arguments did not forward") ||
-        !Require(handleLookup({ "/fps", "help", "extra" }) == 42,
-                 "fps help arguments did not forward") ||
-        !Require(handleLookup({ "/fps", "lock", "extra" }) == 42,
-                 "fps lock arguments did not forward") ||
-        !Require(handleLookup({ "/pos", "lock", "extra" }) == 42,
-                 "pos lock arguments did not forward") ||
-        !Require(handleLookup({ "/distance" }) == 42,
-                 "distance without lock did not forward") ||
-        !Require(handleLookup({ "/distance", "help", "extra" }) == 42,
-                 "distance help arguments did not forward") ||
-        !Require(handleLookup({ "/enemycast", "extra" }) == 42,
-                 "enemycast unknown argument did not forward") ||
-        !Require(handleLookup({ "/targethp", "lock", "extra" }) == 42,
-                 "targethp extra argument did not forward") ||
-        !Require(handleLookup({ "/targethp", "help", "extra" }) == 42,
-                 "targethp help arguments did not forward") ||
-        !Require(handleLookup({ "/customtimer", "help" }) == 42,
-                 "customtimer unsupported help did not forward") ||
-        !Require(handleLookup({ "/packetlogger", "help" }) == 42,
-                 "packetlogger unsupported help did not forward") ||
-        !Require(handleLookup({ "/packetlogger", "start", "extra" }) == 42,
-                 "packetlogger extra argument did not forward") ||
-        !Require(handleLookup({ "/combatparser", "save" }) == 42,
-                 "combatparser removed save command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "clear" }) == 42,
-                 "combatparser removed clear command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "self" }) == 42,
-                 "combatparser removed self command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "party" }) == 42,
-                 "combatparser removed party command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "abilities" }) == 42,
-                 "combatparser removed abilities command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "off" }) == 42,
-                 "combatparser removed off command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "status" }) == 42,
-                 "combatparser removed status command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "dps" }) == 42,
-                 "combatparser removed dps command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "hps" }) == 42,
-                 "combatparser removed hps command was still intercepted") ||
-        !Require(handleLookup({ "/combatparser", "help", "extra" }) == 42,
-                 "combatparser help arguments did not forward") ||
-        !Require(handleLookup({ "/combatparser", "widget", "party" }) == 42,
-                 "combatparser unsupported widget syntax did not forward"))
+    dispatch.handled          = false;
+    if (!Require(handleLookup({ "/pos", "window" }) == 42 && dispatch.lastCommand == "/pos window",
+                 "declined command did not forward with its exact text") ||
+        !Require(handleLookup({ "/combatparser", "widget", "party" }) == 42 && dispatch.lastCommand == "/combatparser widget party",
+                 "declined multi-word command did not forward") ||
+        !Require(handleLookup({ "/positional" }) == 42 && dispatch.calls == 2,
+                 "unclaimed word was dispatched"))
     {
         return 1;
     }
+    dispatch.handled = true;
+    if (!Require(handleLookup({ "/addon", "load", "fps" }) == -2 && dispatch.lastCommand == "/addon load fps",
+                 "runtime command was not dispatched"))
+    {
+        return 1;
+    }
+    dispatch.calls            = 0;
+    originalState.lookupCalls = 0;
     TokenElement unreadableToken;
     unreadableToken.text = reinterpret_cast<const char*>(
         static_cast<std::uintptr_t>(1));
@@ -418,7 +382,7 @@ int wmain()
     {
         return 1;
     }
-    if (!Require(dispatch.calls == 0 && originalState.lookupCalls == 33,
+    if (!Require(dispatch.calls == 0 && originalState.lookupCalls == 2,
                  "invalid commands were dispatched or not all forwarded"))
     {
         return 1;

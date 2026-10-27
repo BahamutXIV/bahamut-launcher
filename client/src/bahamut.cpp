@@ -14,6 +14,7 @@
 #include "render_boundary.h"
 #include "retail_identity.h"
 #include "runtime_api.h"
+#include "runtime_commands.h"
 #include "startup_script.h"
 #include "target_distance.h"
 #include "targetlines.h"
@@ -305,6 +306,13 @@ public:
             return nativePluginFailed_ ? 15 : 13;
         }
         ConfigureBuiltInHotkeys(fillModeHotkeyEnabled_, fpsHotkeyEnabled_);
+        runtimeCommands_.Configure(&addonHost_,
+                                   manifestsById,
+                                   {
+                                       { "screenshot", this, &LoadScreenshotCommand, &UnloadScreenshotCommand, &ScreenshotLoaded },
+                                       { "discord-rpc", this, &LoadDiscordCommand, &UnloadDiscordCommand, &DiscordLoaded },
+                                   },
+                                   { nullptr, &PrintAddonChatText });
         packetObserver_.SetSink([this](const packet_observer::GameMessage& message)
                                 {
                                     playerState_.Observe(message);
@@ -320,12 +328,12 @@ public:
                                      {
                                          addonHost_.QueuePacketFrame(frame);
                                      });
-        if (!InstallRenderBoundary(telemetry_, &sharedState_->bootstrap, frameEvent_, &addonHost_, &nativePluginHost_, &discordPluginHost_, &playerState_, &packetObserver_, &objectDistance_, EnvironmentValue(kObjectDistanceEnabledEnvironment) == L"true", &cameraZoom_, EnvironmentValue(kCameraZoomEnabledEnvironment) == L"true", EnvironmentValue(kBorderlessEnvironment) == L"true"))
+        if (!InstallRenderBoundary(telemetry_, &sharedState_->bootstrap, frameEvent_, &addonHost_, &runtimeCommands_, &nativePluginHost_, &discordPluginHost_, &playerState_, &packetObserver_, &objectDistance_, EnvironmentValue(kObjectDistanceEnabledEnvironment) == L"true", &cameraZoom_, EnvironmentValue(kCameraZoomEnabledEnvironment) == L"true", EnvironmentValue(kBorderlessEnvironment) == L"true"))
         {
             ReleaseHandles();
             return 12;
         }
-        bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled());
+        bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled() || runtimeCommands_.IsInstalled("targetlines"));
         if (!datOverlay_.Install(PathList(kDatPackageRootsEnvironment),
                                  !HasValue(kTestStubEnvironment)))
         {
@@ -386,22 +394,19 @@ private:
     {
         switch (action.kind)
         {
-            case StartupActionKind::ScreenshotLoad:
-                screenshotConfiguration_.enabled = true;
-                if (!LoadScreenshotPlugin())
+            case StartupActionKind::PluginLoad:
+            case StartupActionKind::PluginUnload:
+            {
+                const bool screenshot = action.addonId == "screenshot";
+                const bool applied    = action.kind == StartupActionKind::PluginLoad
+                                            ? LoadPlugin(screenshot)
+                                            : UnloadPlugin(screenshot);
+                if (!applied)
                 {
-                    RecordPluginError("screenshot", nativePluginHost_.LastError());
-                    return false;
+                    RecordPluginError(action.addonId.c_str(), PluginHost(screenshot).LastError());
                 }
-                return true;
-            case StartupActionKind::ScreenshotUnload:
-                screenshotConfiguration_.enabled = false;
-                if (!nativePluginHost_.SetEnabled(false))
-                {
-                    RecordPluginError("screenshot", nativePluginHost_.LastError());
-                    return false;
-                }
-                return true;
+                return applied;
+            }
             case StartupActionKind::ScreenshotBind:
                 screenshotConfiguration_.hotkey       = action.virtualKey;
                 screenshotConfiguration_.hideOverlays = action.hideOverlays;
@@ -476,6 +481,83 @@ private:
              message.size());
     }
 
+    NativePluginHost& PluginHost(bool screenshot)
+    {
+        return screenshot ? nativePluginHost_ : discordPluginHost_;
+    }
+
+    bool LoadPlugin(bool screenshot)
+    {
+        if (screenshot)
+        {
+            screenshotConfiguration_.enabled = true;
+            return LoadScreenshotPlugin();
+        }
+        discordConfiguration_.enabled = true;
+        return discordPluginHost_.Load(discordPluginPath_, "discord-rpc", discordConfiguration_);
+    }
+
+    // Unload disables the plugin and keeps its DLL mapped, so no plugin code
+    // is released while a worker or callback could still reference it.
+    bool UnloadPlugin(bool screenshot)
+    {
+        (screenshot ? screenshotConfiguration_ : discordConfiguration_).enabled = false;
+        return PluginHost(screenshot).SetEnabled(false);
+    }
+
+    bool PluginLoaded(bool screenshot)
+    {
+        return PluginHost(screenshot).IsLoaded() &&
+               (screenshot ? screenshotConfiguration_ : discordConfiguration_).enabled;
+    }
+
+    static bool ReportPluginResult(bool applied, const NativePluginHost& plugin, std::string& error)
+    {
+        if (!applied)
+        {
+            error = plugin.LastError();
+        }
+        return applied;
+    }
+
+    static bool LoadScreenshotCommand(void* context, std::string& error)
+    {
+        auto&      host    = *static_cast<RuntimeHost*>(context);
+        const bool applied = host.LoadPlugin(true);
+        RefreshNativePluginActivation();
+        return ReportPluginResult(applied, host.nativePluginHost_, error);
+    }
+
+    static bool UnloadScreenshotCommand(void* context, std::string& error)
+    {
+        auto&      host    = *static_cast<RuntimeHost*>(context);
+        const bool applied = host.UnloadPlugin(true);
+        RefreshNativePluginActivation();
+        return ReportPluginResult(applied, host.nativePluginHost_, error);
+    }
+
+    static bool ScreenshotLoaded(void* context)
+    {
+        return static_cast<RuntimeHost*>(context)->PluginLoaded(true);
+    }
+
+    static bool LoadDiscordCommand(void* context, std::string& error)
+    {
+        auto& host = *static_cast<RuntimeHost*>(context);
+        return ReportPluginResult(host.LoadPlugin(false), host.discordPluginHost_, error);
+    }
+
+    static bool UnloadDiscordCommand(void* context, std::string& error)
+    {
+        auto& host = *static_cast<RuntimeHost*>(context);
+        return ReportPluginResult(host.UnloadPlugin(false), host.discordPluginHost_, error);
+    }
+
+    static bool DiscordLoaded(void* context)
+    {
+        return static_cast<RuntimeHost*>(context)->PluginLoaded(false);
+    }
+
     bool LoadScreenshotPlugin()
     {
         if (nativePluginHost_.IsLoaded())
@@ -548,6 +630,7 @@ private:
     bahamut_client::ObjectDistanceService objectDistance_;
     bahamut_client::CameraZoomService     cameraZoom_;
     AddonHost                             addonHost_;
+    RuntimeCommands                       runtimeCommands_;
     std::filesystem::path                 screenshotPluginPath_;
     NativePluginConfiguration             screenshotConfiguration_;
     NativePluginHost                      nativePluginHost_;

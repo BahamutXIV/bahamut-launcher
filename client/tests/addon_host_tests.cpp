@@ -1953,18 +1953,15 @@ end
     AddonHost   packetOnlyHost;
     DrawCapture packetOnlyCapture;
     packetOnlyHost.SetChatSink({ &packetOnlyCapture, &CaptureChat });
-    if (packetOnlyHost.HasCommandAddons())
-    {
-        std::cerr << "empty addon selection required command hooks\n";
-        return 1;
-    }
     packetOnlyHost.LoadManifests({ packetloggerManifest }, settings / L"packet-only", chatLogs);
-    if (packetOnlyHost.LoadedCount() != 1 || !packetOnlyHost.HasCommandAddons() ||
+    if (packetOnlyHost.LoadedCount() != 1 ||
+        packetOnlyHost.LoadedIds() != std::vector<std::string>{ "packetlogger" } ||
         !packetOnlyHost.DispatchCommand("/packetlogger start") ||
         !packetOnlyHost.DispatchCommand("/packetlogger status") ||
         !packetOnlyHost.DispatchCommand("/packetlogger stop") ||
+        packetOnlyHost.DispatchCommand("/packetlogger start extra") ||
         packetOnlyCapture.chatLines.size() != 3 ||
-        !packetOnlyHost.Disable("packetlogger") || packetOnlyHost.HasCommandAddons())
+        !packetOnlyHost.Disable("packetlogger") || !packetOnlyHost.LoadedIds().empty())
     {
         std::cerr << "Packetlogger-only selection did not activate its commands\n";
         return 1;
@@ -2039,6 +2036,14 @@ end
         lockCapture.chatLines.size() != 1 || lockCapture.chatLines.front() != "0")
     {
         std::cerr << "addon Lua callbacks overlapped across threads\n";
+        return 1;
+    }
+    // Manifest command names claim only their first word, once.
+    if (ReadAddonManifestCommandWords(packetloggerManifest) != std::vector<std::string>{ "/packetlogger" } ||
+        ReadAddonManifestCommandWords(fpsManifest) != std::vector<std::string>{ "/fps" } ||
+        !ReadAddonManifestCommandWords(chatlogsManifest).empty())
+    {
+        std::cerr << "manifest command words were not read\n";
         return 1;
     }
     std::cout << "addon-host-tests: PASS\n";
