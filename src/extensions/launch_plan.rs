@@ -39,6 +39,7 @@ pub const CAMERA_ZOOM_LIMIT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_LIM
 pub const BORDERLESS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS";
 pub const BORDERLESS_MONITOR_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS_MONITOR";
 pub const LAUNCHER_VERSION_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_LAUNCHER_VERSION";
+pub const SERVER_ID_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_SERVER_ID";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionLaunchRequest {
@@ -69,6 +70,8 @@ pub struct ExtensionLaunchRequest {
     pub server_utc_patch: Vec<u8>,
     pub lobby_host_patch: Vec<u8>,
     pub launch_argument: String,
+    /// `ServerProfile::stable_id` of the launched server; empty when unknown.
+    pub server_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,6 +345,10 @@ fn helper_environment(
         LAUNCHER_VERSION_ENVIRONMENT.into(),
         env!("BAHAMUT_GIT_DESCRIBE").into(),
     ));
+    environment.push((
+        SERVER_ID_ENVIRONMENT.into(),
+        request.server_id.clone().into(),
+    ));
     Ok(environment)
 }
 
@@ -434,6 +441,7 @@ mod tests {
             server_utc_patch: vec![0xB8, 0x12, 0xE8, 0xE0, 0x50],
             lobby_host_patch: b"127.0.0.1\0".to_vec(),
             launch_argument: "sqex0002abc!////".to_owned(),
+            server_id: "0123456789abcdef".to_owned(),
         }
     }
 
@@ -454,7 +462,7 @@ mod tests {
         assert_eq!(args[7], "3132372E302E302E3100");
         assert_eq!(args[8], "--launch-argument");
         assert_eq!(args[9], request().launch_argument);
-        assert_eq!(invocation.environment.len(), 22);
+        assert_eq!(invocation.environment.len(), 23);
         assert_eq!(invocation.environment[0].0, STARTUP_SCRIPT_ENVIRONMENT);
         assert_eq!(invocation.environment[0].1, request().startup_script_path);
         assert_eq!(invocation.environment[1].0, SCREENSHOT_PLUGIN_ENVIRONMENT);
@@ -539,6 +547,8 @@ mod tests {
             invocation.environment[21].1,
             OsString::from(env!("BAHAMUT_GIT_DESCRIBE"))
         );
+        assert_eq!(invocation.environment[22].0, SERVER_ID_ENVIRONMENT);
+        assert_eq!(invocation.environment[22].1, "0123456789abcdef");
     }
 
     #[test]
@@ -733,7 +743,7 @@ mod tests {
     fn wine_plan_maps_path_environment_and_keeps_scalars() {
         let wine = wine_plan(&request());
         let host = plan_verified_extension_launch(&request()).unwrap();
-        assert_eq!(wine.environment.len(), 22);
+        assert_eq!(wine.environment.len(), 23);
         let mapped = [
             (
                 STARTUP_SCRIPT_ENVIRONMENT,
