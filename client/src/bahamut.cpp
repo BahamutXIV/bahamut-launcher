@@ -1,6 +1,7 @@
 #include "action_movement_runtime.h"
 #include "actor_name.h"
 #include "addon_host.h"
+#include "autologin.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
 #include "custom_timer.h"
@@ -289,6 +290,7 @@ public:
         addonHost_.SetTargetDistanceService(&targetDistance_);
         addonHost_.SetCustomTimerService(&customTimer_);
         addonHost_.SetEnemyCastService(&enemyCast_);
+        addonHost_.SetAutologinService(&bahamut_client::ProductionAutologinService());
         addonHost_.SetActorNameService(&actorNames_);
         addonHost_.SetClipboardSink({ nullptr, &SetAddonClipboardText });
         addonHost_.SetChatSink({ nullptr, &PrintAddonChatText });

@@ -557,6 +557,8 @@ const CLIENT_EXTENSION_PATHS: &[&str] = &[
     "addons/targetlines/targetlines.lua",
     "addons/nolock/addon.toml",
     "addons/nolock/nolock.lua",
+    "addons/autologin/addon.toml",
+    "addons/autologin/autologin.lua",
 ];
 
 const MACOS_APP_CONTENTS: &str = "Bahamut Launcher.app/Contents/";
@@ -1279,6 +1281,7 @@ fn validate_archive_directory(
                 | "addons/wiki"
                 | "addons/targetlines"
                 | "addons/nolock"
+                | "addons/autologin"
                 | "plugins"
                 | "plugins/dats"
                 | "config"
@@ -1540,6 +1543,8 @@ mod tests {
         "addons/targetlines/targetlines.lua",
         "addons/nolock/addon.toml",
         "addons/nolock/nolock.lua",
+        "addons/autologin/addon.toml",
+        "addons/autologin/autologin.lua",
         "scripts/default.txt",
         "LICENSE.md",
         "README.md",

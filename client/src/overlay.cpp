@@ -1,5 +1,6 @@
 #include "overlay.h"
 #include "addon_host.h"
+#include "autologin.h"
 #include "input.h"
 #include "native_plugin_host.h"
 #include "player_state.h"
@@ -871,6 +872,7 @@ void DrawOverlay(IDirect3DDevice9*                   device,
         return;
     }
     UpdateControllerObservation();
+    bahamut_client::StepAutologin();
 
     if (discordPluginHost != nullptr && playerState != nullptr)
     {

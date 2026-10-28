@@ -42,6 +42,7 @@ $posAddonDestination = Join-Path $destinationPath 'addons\pos'
 $wikiAddonDestination = Join-Path $destinationPath 'addons\wiki'
 $targetLinesAddonDestination = Join-Path $destinationPath 'addons\targetlines'
 $noLockAddonDestination = Join-Path $destinationPath 'addons\nolock'
+$autologinAddonDestination = Join-Path $destinationPath 'addons\autologin'
 New-Item -ItemType Directory -Force -Path $licenseDestination | Out-Null
 foreach ($directory in @(
     $chatlogsAddonDestination
@@ -57,6 +58,7 @@ foreach ($directory in @(
     $wikiAddonDestination
     $targetLinesAddonDestination
     $noLockAddonDestination
+    $autologinAddonDestination
     (Join-Path $destinationPath 'plugins\dats')
     (Join-Path $destinationPath 'config\addons')
     (Join-Path $destinationPath 'config\plugins')
@@ -111,6 +113,8 @@ $copies = @(
     @{ Source = Join-Path $repositoryRoot 'addons/targetlines/targetlines.lua'; Destination = Join-Path $targetLinesAddonDestination 'targetlines.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/nolock/addon.toml'; Destination = Join-Path $noLockAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/nolock/nolock.lua'; Destination = Join-Path $noLockAddonDestination 'nolock.lua' }
+    @{ Source = Join-Path $repositoryRoot 'addons/autologin/addon.toml'; Destination = Join-Path $autologinAddonDestination 'addon.toml' }
+    @{ Source = Join-Path $repositoryRoot 'addons/autologin/autologin.lua'; Destination = Join-Path $autologinAddonDestination 'autologin.lua' }
     @{ Source = Join-Path $repositoryRoot 'scripts/default.txt'; Destination = Join-Path $destinationPath 'scripts\default.txt' }
 )
 

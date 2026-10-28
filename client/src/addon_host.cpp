@@ -3,6 +3,7 @@
 #include "action_movement.h"
 #include "actor_name.h"
 #include "area_names.h"
+#include "autologin.h"
 #include "custom_timer.h"
 #include "enemy_cast.h"
 #include "player_state.h"
@@ -295,6 +296,8 @@ struct AddonHost::Instance
     bahamut_client::TargetDistanceService* targetDistance        = nullptr;
     bahamut_client::CustomTimerService*    customTimer           = nullptr;
     bahamut_client::EnemyCastService*      enemyCast             = nullptr;
+    bahamut_client::AutologinService*      autologin             = nullptr;
+    bool                                   autologinStopped      = false;
     const AddonClipboardSink*              clipboardSink         = nullptr;
     const AddonChatSink*                   chatSink              = nullptr;
     const AddonUrlSink*                    urlSink               = nullptr;
@@ -404,6 +407,16 @@ void AddonHost::SetActorNameService(bahamut_client::ActorNameService* actorNames
 {
     const LuaLock luaLock(luaMutex_);
     actorNames_ = actorNames;
+}
+
+void AddonHost::SetAutologinService(bahamut_client::AutologinService* autologin)
+{
+    const LuaLock luaLock(luaMutex_);
+    autologin_ = autologin;
+    for (const auto& addon : addons_)
+    {
+        addon->autologin = autologin;
+    }
 }
 
 bool IsHexDigit(unsigned char value)
@@ -639,7 +652,7 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
     {
         return true;
     }
-    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto addon = LoadOne(manifestPath, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, autologin_, &clipboardSink_, &chatSink_, &urlSink_);
     if (addon == nullptr)
     {
         return false;
@@ -711,7 +724,7 @@ bool AddonHost::ReloadAddon(std::string_view addonId, packet_capture::EndReason 
         combatDropped_ = 0;
     }
     Close(**found);
-    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, &clipboardSink_, &chatSink_, &urlSink_);
+    auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, autologin_, &clipboardSink_, &chatSink_, &urlSink_);
     if (replacement == nullptr)
     {
         addons_.erase(found);
@@ -822,6 +835,7 @@ bool AddonHost::DispatchCommand(std::string_view command)
         bool       handled = false;
         const bool invoked = InvokeCommand(*addon, command, handled);
         StopFaultedCombatParser();
+        StopFaultedAutologin();
         if (!invoked)
         {
             continue;
@@ -1078,6 +1092,7 @@ void AddonHost::Update(double frameDeltaSeconds)
         Invoke(*addon, "update", 1);
     }
     StopFaultedCombatParser();
+    StopFaultedAutologin();
     DispatchAreaTransition();
     // Last, so a restart never runs inside the addon loop above.
     HandlePacketLoggerFault();
@@ -1143,6 +1158,7 @@ void AddonHost::Draw(const AddonWindowSink& sink)
         addon->drawSink = nullptr;
     }
     StopFaultedCombatParser();
+    StopFaultedAutologin();
 }
 
 // First fault: restart the addon once in a new session. Second fault: stop.
@@ -1291,6 +1307,7 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     bahamut_client::TargetDistanceService* targetDistance,
     bahamut_client::CustomTimerService*    customTimer,
     bahamut_client::EnemyCastService*      enemyCast,
+    bahamut_client::AutologinService*      autologin,
     const AddonClipboardSink*              clipboardSink,
     const AddonChatSink*                   chatSink,
     const AddonUrlSink*                    urlSink)
@@ -1314,6 +1331,7 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     addon->targetDistance = targetDistance;
     addon->customTimer    = customTimer;
     addon->enemyCast      = enemyCast;
+    addon->autologin      = autologin;
     addon->clipboardSink  = clipboardSink;
     addon->chatSink       = chatSink;
     addon->urlSink        = urlSink;
@@ -1404,6 +1422,10 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     {
         registerFunction("target_hp", &LuaTargetHp);
     }
+    if (addon->id == "autologin")
+    {
+        registerFunction("autologin_start", &LuaAutologinStart);
+    }
     if (addon->id == "customtimer")
     {
         registerFunction("custom_timer", &LuaCustomTimer);
@@ -1468,6 +1490,12 @@ void AddonHost::Close(Instance& addon)
     if (!addon.faulted)
     {
         Invoke(addon, "unload");
+    }
+    // Cancel on unload, disable or reload; the run cannot restart in this process.
+    // Host destruction skips Close.
+    if (addon.id == "autologin" && addon.autologin != nullptr)
+    {
+        addon.autologin->Cancel();
     }
     lua_close(addon.state);
     addon.state    = nullptr;
@@ -1646,6 +1674,19 @@ int AddonHost::LuaPacketLogStatus(lua_State* state)
     lua_pushlstring(state, status.error.data(), status.error.size());
     lua_setfield(state, -2, "error");
     return 1;
+}
+
+// A faulted addon must not leave its native run active.
+void AddonHost::StopFaultedAutologin()
+{
+    for (const auto& addon : addons_)
+    {
+        if (addon->id == "autologin" && addon->faulted && addon->autologin != nullptr && !addon->autologinStopped)
+        {
+            addon->autologinStopped = true;
+            addon->autologin->Cancel();
+        }
+    }
 }
 
 void AddonHost::StopFaultedCombatParser()
@@ -2032,6 +2073,49 @@ int AddonHost::LuaTargetHp(lua_State* state)
         lua_pushnil(state);
     }
     return 4;
+}
+
+namespace
+{
+
+int PushAutologinStatus(lua_State* state, const bahamut_client::AutologinStatus& status)
+{
+    const char* const phase = bahamut_client::AutologinPhaseName(status.phase);
+    lua_pushstring(state, phase);
+    lua_pushinteger(state, static_cast<lua_Integer>(status.slot));
+    lua_pushstring(state, status.reason);
+    return 3;
+}
+
+int PushAutologinUnavailable(lua_State* state)
+{
+    lua_pushstring(state, "unavailable");
+    lua_pushinteger(state, 0);
+    lua_pushstring(state, "service unavailable");
+    return 3;
+}
+
+} // namespace
+
+int AddonHost::LuaAutologinStart(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->autologin == nullptr)
+    {
+        return PushAutologinUnavailable(state);
+    }
+    // The service validates the slot; invalid Lua arguments reach it as slot 0
+    // and produce needs-user.
+    std::uint32_t slot = 0;
+    if (lua_type(state, 1) == LUA_TNUMBER)
+    {
+        const lua_Number number = lua_tonumber(state, 1);
+        if (number >= 0.0 && number <= 4294967295.0 && number == std::floor(number))
+        {
+            slot = static_cast<std::uint32_t>(number);
+        }
+    }
+    return PushAutologinStatus(state, addon->autologin->Start(slot));
 }
 
 int AddonHost::LuaCustomTimer(lua_State* state)

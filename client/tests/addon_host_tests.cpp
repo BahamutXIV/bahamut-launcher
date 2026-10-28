@@ -1,4 +1,5 @@
 #include "addon_host.h"
+#include "autologin.h"
 #include "enemy_cast.h"
 #include "packet_observer.h"
 #include "player_state.h"
@@ -8,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -22,6 +24,36 @@
 
 namespace
 {
+
+class FakeAutologinService final : public bahamut_client::AutologinService
+{
+public:
+    bahamut_client::AutologinStatus Start(std::uint32_t slot) override
+    {
+        ++startCalls;
+        startSlots.push_back(slot);
+        return Make(bahamut_client::AutologinPhase::WaitTitle, slot, "reason-start");
+    }
+
+    bahamut_client::AutologinStatus Cancel() override
+    {
+        ++cancelCalls;
+        return Make(bahamut_client::AutologinPhase::Cancelled, 0, "reason-cancel");
+    }
+
+    static bahamut_client::AutologinStatus Make(bahamut_client::AutologinPhase phase, std::uint32_t slot, const char* reason)
+    {
+        bahamut_client::AutologinStatus status;
+        status.phase = phase;
+        status.slot  = slot;
+        std::snprintf(status.reason, sizeof(status.reason), "%s", reason);
+        return status;
+    }
+
+    int                        startCalls  = 0;
+    int                        cancelCalls = 0;
+    std::vector<std::uint32_t> startSlots;
+};
 
 struct DrawCapture
 {
@@ -172,9 +204,9 @@ void ResetDrawCapture(DrawCapture& capture)
 
 int wmain(int argc, wchar_t** argv)
 {
-    if (argc != 17)
+    if (argc != 18)
     {
-        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <enemycast-manifest> <targethp-manifest> <customtimer-manifest> <combatparser-manifest> <targetlines-manifest> <settings> <chat-logs>\n";
+        std::cerr << "usage: addon-host-tests <fps-manifest> <fault-manifest> <pos-manifest> <wiki-manifest> <chatlogs-manifest> <zonename-manifest> <packetlogger-manifest> <fault-packetlogger-manifest> <distance-manifest> <enemycast-manifest> <targethp-manifest> <customtimer-manifest> <combatparser-manifest> <targetlines-manifest> <autologin-manifest> <settings> <chat-logs>\n";
         return 2;
     }
     bahamut_client::PlayerStateService  castPlayer;
@@ -242,8 +274,9 @@ int wmain(int argc, wchar_t** argv)
     };
     const std::filesystem::path combatParserManifest(argv[13]);
     const std::filesystem::path targetlinesManifest(argv[14]);
-    const std::filesystem::path settings(argv[15]);
-    const std::filesystem::path chatLogs(argv[16]);
+    const std::filesystem::path autologinManifest(argv[15]);
+    const std::filesystem::path settings(argv[16]);
+    const std::filesystem::path chatLogs(argv[17]);
     const std::time_t           now = std::time(nullptr);
     std::tm                     local{};
     localtime_s(&local, &now);
@@ -2041,9 +2074,138 @@ end
     // Manifest command names claim only their first word, once.
     if (ReadAddonManifestCommandWords(packetloggerManifest) != std::vector<std::string>{ "/packetlogger" } ||
         ReadAddonManifestCommandWords(fpsManifest) != std::vector<std::string>{ "/fps" } ||
-        !ReadAddonManifestCommandWords(chatlogsManifest).empty())
+        !ReadAddonManifestCommandWords(chatlogsManifest).empty() || !ReadAddonManifestCommandWords(autologinManifest).empty())
     {
         std::cerr << "manifest command words were not read\n";
+        return 1;
+    }
+
+    const std::filesystem::path autologinState = settings / L"autologin-state";
+    std::filesystem::remove(autologinState / L"autologin" / L"settings.ini", cleanupError);
+    cleanupError.clear();
+    FakeAutologinService fakeAutologin;
+    AddonHost            autologinHost;
+    autologinHost.SetAutologinService(&fakeAutologin);
+    autologinHost.LoadManifests({ autologinManifest }, autologinState, chatLogs);
+    if (autologinHost.LoadedCount() != 1 || autologinHost.FaultedCount() != 0 ||
+        fakeAutologin.startCalls != 1 || fakeAutologin.startSlots.front() != 1u)
+    {
+        std::cerr << "autologin did not start the default slot on load\n";
+        return 1;
+    }
+    std::filesystem::create_directories(autologinState / L"autologin");
+    {
+        std::ofstream file(autologinState / L"autologin" / L"settings.ini", std::ios::trunc);
+        file << "slot=3\n";
+    }
+    if (!autologinHost.Reload("autologin") || fakeAutologin.startCalls != 2 || fakeAutologin.startSlots.back() != 3u ||
+        fakeAutologin.cancelCalls != 1)
+    {
+        std::cerr << "autologin reload did not cancel the run or read the saved slot\n";
+        return 1;
+    }
+    {
+        std::ofstream file(autologinState / L"autologin" / L"settings.ini", std::ios::trunc);
+        file << "slot=abc\n";
+    }
+    if (!autologinHost.Reload("autologin") || fakeAutologin.startCalls != 3 || fakeAutologin.startSlots.back() != 0u ||
+        autologinHost.FaultedCount() != 0)
+    {
+        std::cerr << "autologin did not pass a non-numeric slot as 0\n";
+        return 1;
+    }
+    if (!autologinHost.Disable("autologin") || fakeAutologin.cancelCalls != 3)
+    {
+        std::cerr << "autologin disable did not cancel the run\n";
+        return 1;
+    }
+
+    // A faulted autologin addon no longer owns its run.
+    const std::filesystem::path autologinFaultRoot = settings / "autologin-fault";
+    std::filesystem::create_directories(autologinFaultRoot);
+    {
+        std::ofstream manifest(autologinFaultRoot / "addon.toml", std::ios::trunc);
+        manifest << "id = \"autologin\"\nentry = \"autologin.lua\"\n";
+        std::ofstream script(autologinFaultRoot / "autologin.lua", std::ios::trunc);
+        script << "function load() bahamut.autologin_start(1) end\nfunction update() error('fault') end\n";
+    }
+    FakeAutologinService faultAutologin;
+    AddonHost            autologinFaultHost;
+    autologinFaultHost.SetAutologinService(&faultAutologin);
+    autologinFaultHost.LoadManifests({ autologinFaultRoot / "addon.toml" }, settings / "autologin-fault-state", chatLogs);
+    autologinFaultHost.Update(0.02);
+    autologinFaultHost.Update(0.02);
+    if (autologinFaultHost.FaultedCount() != 1 || faultAutologin.startCalls != 1 || faultAutologin.cancelCalls != 1)
+    {
+        std::cerr << "autologin fault did not cancel the run exactly once\n";
+        return 1;
+    }
+
+    // Only the autologin id receives the API; results are phase, slot and reason.
+    const std::filesystem::path autologinFixtureRoot = settings / "autologin-fixture";
+    const std::filesystem::path autologinOtherRoot   = settings / "autologin-fixture-other";
+    std::filesystem::create_directories(autologinFixtureRoot);
+    std::filesystem::create_directories(autologinOtherRoot);
+    {
+        std::ofstream manifest(autologinFixtureRoot / "addon.toml", std::ios::trunc);
+        manifest << "id = \"autologin\"\nentry = \"autologin.lua\"\n";
+        std::ofstream script(autologinFixtureRoot / "autologin.lua", std::ios::trunc);
+        script << R"lua(
+local function show(label, phase, slot, reason)
+    bahamut.chat_print(label .. '|' .. phase .. '|' .. slot .. '|' .. reason)
+end
+function load()
+    show('str', bahamut.autologin_start('2'))
+    show('frac', bahamut.autologin_start(2.5))
+    show('neg', bahamut.autologin_start(-1))
+    show('nil', bahamut.autologin_start())
+    show('int', bahamut.autologin_start(3))
+end
+)lua";
+        std::ofstream otherManifest(autologinOtherRoot / "addon.toml", std::ios::trunc);
+        otherManifest << "id = \"autologin-other\"\nentry = \"autologin-other.lua\"\n";
+        std::ofstream otherScript(autologinOtherRoot / "autologin-other.lua", std::ios::trunc);
+        otherScript << R"lua(
+function load()
+    if bahamut.autologin_start ~= nil then
+        error("autologin API leaked")
+    end
+end
+)lua";
+    }
+    FakeAutologinService fixtureService;
+    DrawCapture          fixtureCapture;
+    AddonHost            fixtureHost;
+    fixtureHost.SetChatSink({ &fixtureCapture, &CaptureChat });
+    fixtureHost.SetAutologinService(&fixtureService);
+    fixtureHost.LoadManifests({ autologinFixtureRoot / "addon.toml", autologinOtherRoot / "addon.toml" }, settings / "autologin-fixture-state", chatLogs);
+    const std::vector<std::string> expectedLines = {
+        "str|wait-title|0|reason-start",
+        "frac|wait-title|0|reason-start",
+        "neg|wait-title|0|reason-start",
+        "nil|wait-title|0|reason-start",
+        "int|wait-title|3|reason-start",
+    };
+    if (fixtureHost.LoadedCount() != 2 || fixtureHost.FaultedCount() != 0 || fixtureCapture.chatLines != expectedLines ||
+        fixtureService.startSlots != std::vector<std::uint32_t>{ 0u, 0u, 0u, 0u, 3u })
+    {
+        std::cerr << "autologin start did not validate the slot or return the status triple\n";
+        return 1;
+    }
+    AddonHost   unavailableHost;
+    DrawCapture unavailableCapture;
+    unavailableHost.SetChatSink({ &unavailableCapture, &CaptureChat });
+    unavailableHost.LoadManifests({ autologinFixtureRoot / "addon.toml" }, settings / "autologin-fixture-state", chatLogs);
+    const std::vector<std::string> unavailableLines = {
+        "str|unavailable|0|service unavailable",
+        "frac|unavailable|0|service unavailable",
+        "neg|unavailable|0|service unavailable",
+        "nil|unavailable|0|service unavailable",
+        "int|unavailable|0|service unavailable",
+    };
+    if (unavailableHost.FaultedCount() != 0 || unavailableCapture.chatLines != unavailableLines)
+    {
+        std::cerr << "autologin start without a service did not report unavailable\n";
         return 1;
     }
     std::cout << "addon-host-tests: PASS\n";

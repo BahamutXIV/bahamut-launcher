@@ -407,6 +407,28 @@ only on the exact supported retail client (see
 [NoLock movement policy](#nolock-movement-policy)); without it, waits stay
 normal. Live acceptance of this build on the retail client is pending.
 
+### Autologin
+
+Autologin is disabled by default. Enable it in Addons for the next game
+launch. It enters the character in the configured character-list slot using
+the client's title and character-list actions. The title screen advances without
+its Start confirmation, and the list may log in before its highlight visibly
+moves. It acts about 4 seconds after the title screen appears and about 3 seconds
+after the character list opens. It finishes when the game reaches the world. If
+the addon starts while the game is already in the world, it does nothing.
+
+The `slot` key in `config/addons/autologin/settings.ini` selects the
+character-list position. It defaults to 1 and accepts 1 through 8. A value
+outside that range, an empty slot, or a slot the list would warn about or
+refuse stops the run and leaves selection to the player. The slot is a
+list position, so deleting or reordering characters changes which character
+it selects.
+
+Input and window focus do not affect the run. It runs once per game
+launch; disabling or reloading the addon stops it, and reloading does not
+start another run. It does not store passwords or log in to the launcher.
+It has no commands or window.
+
 ## DiscordRPC presence
 
 DiscordRPC is a launcher plugin configured in `extensions.ini`. A bounded
@@ -768,6 +790,10 @@ saved in `config/addons/<id>/settings.ini`.
   `casting = false` denotes an idle row.
   `completed` also becomes true when the estimate expires, as described in
   [Enemy Cast](#enemy-cast).
+- `bahamut.autologin_start(slot)` is available only to addon ID
+  `autologin`. It requests a run for a slot from 1 to 8 and returns the
+  current `phase`, `slot`, and `reason`. See [Autologin](#autologin) for the
+  once-per-launch limit.
 
 These functions expose copied state, not client memory or raw packets. Like
 other addon ID restrictions, they do not authenticate replacement packages.
