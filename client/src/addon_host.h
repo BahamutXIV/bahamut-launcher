@@ -25,6 +25,7 @@ class EnemyCastService;
 class ActorNameService;
 class ActionMovementService;
 struct ActionMovementStatus;
+class AutologinService;
 
 } // namespace bahamut_client
 
@@ -88,6 +89,7 @@ public:
     void SetCustomTimerService(bahamut_client::CustomTimerService* customTimer);
     void SetEnemyCastService(bahamut_client::EnemyCastService* enemyCast);
     void SetActorNameService(bahamut_client::ActorNameService* actorNames);
+    void SetAutologinService(bahamut_client::AutologinService* autologin);
     void SetClipboardSink(const AddonClipboardSink& sink);
     void SetChatSink(const AddonChatSink& sink);
     void SetUrlSink(const AddonUrlSink& sink);
@@ -142,6 +144,7 @@ private:
     static int LuaPlayerState(lua_State* state);
     static int LuaTargetDistance(lua_State* state);
     static int LuaTargetHp(lua_State* state);
+    static int LuaAutologinStart(lua_State* state);
     static int LuaCustomTimer(lua_State* state);
     static int LuaEnemyCasts(lua_State* state);
     static int LuaWindow(lua_State* state);
@@ -169,6 +172,7 @@ private:
         bahamut_client::TargetDistanceService* targetDistance,
         bahamut_client::CustomTimerService*    customTimer,
         bahamut_client::EnemyCastService*      enemyCast,
+        bahamut_client::AutologinService*      autologin,
         const AddonClipboardSink*              clipboardSink,
         const AddonChatSink*                   chatSink,
         const AddonUrlSink*                    urlSink);
@@ -193,6 +197,7 @@ private:
     void                                                 DispatchAreaTransition();
     void                                                 ResetAreaTransition();
     void                                                 StopFaultedCombatParser();
+    void                                                 StopFaultedAutologin();
     bool                                                 StartPacketCapture(Instance& addon);
     bool                                                 StopPacketCapture();
     bool                                                 SplitPacketCapture();
@@ -237,6 +242,7 @@ private:
     std::vector<CombatEvent>                                          combatQueue_;
     std::uint64_t                                                     combatDropped_          = 0;
     bahamut_client::ActorNameService*                                 actorNames_             = nullptr;
+    bahamut_client::AutologinService*                                 autologin_              = nullptr;
     bool                                                              actionMovementShutdown_ = false;
 
     struct ActionMovementRegistration

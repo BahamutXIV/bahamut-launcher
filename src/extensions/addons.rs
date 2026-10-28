@@ -349,6 +349,23 @@ mod tests {
     }
 
     #[test]
+    fn autologin_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("addons");
+        let packages = discover_addons(&root).unwrap();
+        let autologin = packages
+            .iter()
+            .find(|package| package.id == "autologin")
+            .expect("autologin package should be shipped");
+
+        assert_eq!(autologin.name, "autologin");
+        assert_eq!(autologin.author, "Aeshur");
+        assert_eq!(autologin.version, "1.0");
+        assert!(autologin.capabilities.is_empty());
+        assert!(autologin.commands.is_empty());
+        assert!(select_addon_manifests(std::slice::from_ref(autologin), &[]).is_empty());
+    }
+
+    #[test]
     fn packetlogger_is_a_discoverable_default_addon() {
         let manifest =
             toml::from_str::<AddonManifest>(include_str!("../../addons/packetlogger/addon.toml"))

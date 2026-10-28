@@ -765,6 +765,7 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/customtimer/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/combatparser/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targetlines/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/autologin/addon.toml
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-settings
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )

@@ -97,7 +97,7 @@ int wmain()
     };
     DispatchState                                           recognitionDispatch;
     CommandBoundary                                         recognizer(&recognitionDispatch, &Dispatch, words);
-    const std::array<std::pair<std::string_view, bool>, 38> recognition = { {
+    const std::array<std::pair<std::string_view, bool>, 39> recognition = { {
         { "/pos", true },
         { "/pos ", true },
         { "/pos\targ", true },
@@ -136,6 +136,7 @@ int wmain()
         { "/loadout", true },
         { "/loadout set", true },
         { "/nolock", false },
+        { "/autologin", false },
     } };
     for (const auto& [input, expected] : recognition)
     {

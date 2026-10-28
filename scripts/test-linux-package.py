@@ -23,7 +23,7 @@ LINUX = REPO / "packaging" / "linux"
 TOP = "bahamut-launcher"
 LABEL = "bahamut-launcher-test-linux-x86_64"
 PE_NAMES = ["bahamut-loader.exe", "bahamut.dll", "screenshot.dll", "discord-rpc.dll"]
-ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "customtimer", "distance", "enemycast", "targethp", "fps", "pos", "wiki", "targetlines", "nolock"]
+ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "customtimer", "distance", "enemycast", "targethp", "fps", "pos", "wiki", "targetlines", "nolock", "autologin"]
 LICENSES = [
     "MinHook-LICENSE.txt",
     "Dear-ImGui-LICENSE.txt",
