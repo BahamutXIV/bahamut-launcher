@@ -68,8 +68,8 @@ function command(name)
 end
 
 function draw()
-    local current, maximum, _, actor_id = bahamut.target_hp()
-    if actor_id == nil or current == nil or maximum == nil then
+    local current, maximum, _, actor_id, battle = bahamut.target_hp()
+    if actor_id == nil or current == nil or maximum == nil or not battle then
         return
     end
 

@@ -834,9 +834,12 @@ the route; offline fixtures do not establish live retail movement behavior.
   and actor ID. Range is `nil` when targeting yourself or if the position is
   unavailable. All three values are `nil` if no target is selected.
 - `bahamut.target_hp()` is available only to the packaged `targethp` addon.
-  It returns current HP, maximum HP, resolved name, and actor ID. Both HP
-  values are `nil` until a complete health update is available; all four are
-  `nil` if no target is selected.
+  It returns current HP, maximum HP, resolved name, actor ID, and whether the
+  target is a battle character. Both HP values are `nil` until a complete
+  health update is available. The battle flag is the target's latest
+  `charaWork.property[2]` value: true for players and battle NPCs, false for
+  populace NPCs or when no value has been seen. All five are `nil` if no
+  target is selected.
 - `bahamut.combat_events()` is available only to the packaged `combatparser`
   addon. It drains up to 256 validated records with `source_id`, `amount`,
   `kind`, `source_name`, `source_class_id`, and `source_job_id` fields. Class

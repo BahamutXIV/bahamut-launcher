@@ -26,6 +26,20 @@ constexpr std::size_t   kMaximumTrackedActors   = 2048u;
 // MurmurHash2 ids for charaWork.parameterSave.hp[0] and hpMax[0].
 constexpr std::uint32_t kCurrentHpProperty = 0x4232BCAAu;
 constexpr std::uint32_t kMaxHpProperty     = 0x7BCDFB69u;
+// charaWork.property[2] is the client's isBattleCharacter() input; players and
+// battle NPCs set it, populace NPCs do not:
+// https://github.com/XIVLegacy/xivl-client-structs/blob/efdb38e6399f15ec3a3204aa0bf2e9e88806546b/docs/actor-hostility-classification.md#wire-inputs
+constexpr std::uint32_t kBattleProperty = 0x7B675313u;
+// 0x0137 ends with a target marker: 0x82 + length for a final bundle, 0x60 +
+// length when more bundles follow.
+constexpr std::uint8_t kSingleTargetMarker = 0x82u;
+constexpr std::uint8_t kMoreTargetMarker   = 0x60u;
+
+struct ActorPropertyUpdate
+{
+    std::optional<std::pair<std::uint16_t, std::uint16_t>> health;
+    std::optional<bool>                                    battle;
+};
 
 bool IsActorId(std::uint32_t id)
 {
@@ -42,8 +56,7 @@ bool ReadU32(const std::vector<std::uint8_t>& data, std::size_t offset, std::uin
     return true;
 }
 
-std::optional<std::pair<std::uint16_t, std::uint16_t>> ReadHealth(
-    const std::vector<std::uint8_t>& data)
+std::optional<ActorPropertyUpdate> ReadActorProperties(const std::vector<std::uint8_t>& data)
 {
     if (data.empty())
     {
@@ -57,10 +70,11 @@ std::optional<std::pair<std::uint16_t, std::uint16_t>> ReadHealth(
 
     std::size_t valuesEnd = 0;
     for (const std::string_view group : { std::string_view("/_init"),
-                                          std::string_view("charaWork/stateAtQuicklyForAll") })
+                                          std::string_view("charaWork/stateAtQuicklyForAll"),
+                                          std::string_view("charaWork/property") })
     {
-        if (end >= group.size() + 2u &&
-            data[end - group.size() - 1u] == 0x82u + group.size() &&
+        const std::size_t marker = end >= group.size() + 2u ? data[end - group.size() - 1u] : 0u;
+        if ((marker == kSingleTargetMarker + group.size() || marker == kMoreTargetMarker + group.size()) &&
             std::memcmp(data.data() + end - group.size(), group.data(), group.size()) == 0)
         {
             valuesEnd = end - group.size() - 1u;
@@ -74,6 +88,7 @@ std::optional<std::pair<std::uint16_t, std::uint16_t>> ReadHealth(
 
     std::optional<std::uint16_t> current;
     std::optional<std::uint16_t> maximum;
+    ActorPropertyUpdate          update;
     for (std::size_t offset = 1u; offset < valuesEnd;)
     {
         if (valuesEnd - offset < 5u)
@@ -101,14 +116,22 @@ std::optional<std::pair<std::uint16_t, std::uint16_t>> ReadHealth(
             }
             field = value;
         }
+        else if (propertyId == kBattleProperty)
+        {
+            if (width != 1u || update.battle)
+            {
+                return std::nullopt;
+            }
+            update.battle = data[offset + 5u] != 0u;
+        }
         offset += 5u + width;
     }
     // A partial update cannot be joined to an older actor value safely.
-    if (!current || !maximum || *maximum == 0u || *current > *maximum)
+    if (current && maximum && *maximum != 0u && *current <= *maximum)
     {
-        return std::nullopt;
+        update.health = std::pair{ *current, *maximum };
     }
-    return std::pair{ *current, *maximum };
+    return update;
 }
 
 bool ReadFloat(const std::vector<std::uint8_t>& data, std::size_t offset, float& value)
@@ -186,6 +209,24 @@ void TargetDistanceService::SyncPlayer(const PlayerStateSnapshot& player)
     zoneId_                  = player.zoneId;
 }
 
+void TargetDistanceService::StoreBattle(std::uint32_t actorId, bool enabled)
+{
+    // Evict the oldest entry, most likely a stale actor from an earlier zone.
+    if (battle_.size() >= kMaximumTrackedActors && !battle_.contains(actorId))
+    {
+        auto oldest = battle_.begin();
+        for (auto entry = battle_.begin(); entry != battle_.end(); ++entry)
+        {
+            if (entry->second.sequence < oldest->second.sequence)
+            {
+                oldest = entry;
+            }
+        }
+        battle_.erase(oldest);
+    }
+    battle_[actorId] = { enabled, ++battleSequence_ };
+}
+
 void TargetDistanceService::ClearActive()
 {
     positions_.clear();
@@ -251,6 +292,7 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
     if (message.opcode == kRemoveActor || message.opcode == kAddActor)
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        battle_.erase(message.sourceId);
         if (IsActorId(localActorId_) && message.sourceId == localActorId_)
         {
             ClearActive();
@@ -287,6 +329,13 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
         {
             StorePosition(pendingPositions_, actorId, position);
         }
+        if (message.opcode == kActorProperty && IsActorId(message.sourceId))
+        {
+            if (const auto update = ReadActorProperties(message.payload); update && update->battle)
+            {
+                StoreBattle(message.sourceId, *update->battle);
+            }
+        }
         return;
     }
 
@@ -306,8 +355,16 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
 
     if (message.opcode == kActorProperty)
     {
-        const auto health = ReadHealth(data);
-        if (!IsActorId(message.sourceId) || !health)
+        const auto update = ReadActorProperties(data);
+        if (!IsActorId(message.sourceId) || !update)
+        {
+            return;
+        }
+        if (update->battle)
+        {
+            StoreBattle(message.sourceId, *update->battle);
+        }
+        if (!update->health)
         {
             return;
         }
@@ -315,7 +372,7 @@ void TargetDistanceService::Observe(const packet_observer::GameMessage& message)
         {
             health_.clear();
         }
-        health_[message.sourceId] = { health->first, health->second };
+        health_[message.sourceId] = { update->health->first, update->health->second };
         return;
     }
 
@@ -359,6 +416,10 @@ std::optional<TargetDistanceSnapshot> TargetDistanceService::Snapshot()
     {
         snapshot.currentHp = health->second.current;
         snapshot.maxHp     = health->second.maximum;
+    }
+    if (const auto battle = battle_.find(targetActorId_); battle != battle_.end())
+    {
+        snapshot.battle = battle->second.enabled;
     }
     // The local actor's wire position can lag its live client position.
     if (targetActorId_ == localActorId_)
@@ -427,6 +488,7 @@ void TargetDistanceService::Clear()
     std::lock_guard<std::mutex> lock(mutex_);
     ClearActive();
     pendingPositions_.clear();
+    battle_.clear();
     pendingZoneId_           = 0;
     pendingPositionsAllowed_ = !hasSynchronizedPlayer_;
 }

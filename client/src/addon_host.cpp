@@ -2748,6 +2748,7 @@ int AddonHost::LuaTargetHp(lua_State* state)
         }
         lua_pushlstring(state, snapshot->name.data(), snapshot->name.size());
         lua_pushinteger(state, static_cast<lua_Integer>(snapshot->actorId));
+        lua_pushboolean(state, snapshot->battle ? 1 : 0);
     }
     else
     {
@@ -2755,8 +2756,9 @@ int AddonHost::LuaTargetHp(lua_State* state)
         lua_pushnil(state);
         lua_pushnil(state);
         lua_pushnil(state);
+        lua_pushnil(state);
     }
-    return 4;
+    return 5;
 }
 
 namespace
