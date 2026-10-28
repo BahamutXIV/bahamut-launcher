@@ -392,6 +392,21 @@ are outside its coverage. It uses the shared overlay visibility control
 and has no slash commands or adjustable visual settings. See the
 [native Targetlines contract](../client/README.md#targetlines) for projection and testing limits.
 
+### NoLock
+
+NoLock (`nolock`) is disabled by default. Enable it in
+Extensions before the next game launch. For admitted local-player calls, it
+retains 50% of the wait after an action before your character can move again.
+Disable it in Extensions for normal waits on the next launch. The percentage
+is fixed, and the addon has no commands of its own.
+
+It affects only that movement wait for the local player. It does not shorten
+casts, recasts or animations, and it does not change server timing. The
+effect needs the native NoLock movement service, which the runtime provides
+only on the exact supported retail client (see
+[NoLock movement policy](#nolock-movement-policy)); without it, waits stay
+normal. Live acceptance of this build on the retail client is pending.
+
 ## DiscordRPC presence
 
 DiscordRPC is a launcher plugin configured in `extensions.ini`. A bounded
@@ -637,32 +652,76 @@ receives the bounded URL service.
 
 ### NoLock movement policy
 
-The NoLock movement service is unavailable in the retail runtime, and no addon
-API exposes it. Native host admission requires a healthy loaded instance, a
-current verified session and an independently qualified movement boundary.
-Manifest metadata grants no admission. The host revokes policy before reload,
-disable or unload, and on callback faults. Revocation does not retire a native
-hook or establish call quiescence.
+The runtime provides the NoLock movement service after verifying the exact
+retail executable and mapped movement bytes and installing the wrapper hook.
+If installation fails, the host registers no movement consumer and the status
+reason is `not_admitted`; a target mismatch leaves the image unchanged. The
+addon ships disabled by default. Admission requires a healthy loaded `nolock`
+instance and the current service session. Reloads and late loads receive fresh
+admission before their load callbacks; faulted or closing instances and loads
+after shutdown cannot be admitted. Manifest metadata grants no admission.
+These APIs are exposed only in the `nolock` Lua state:
 
-Native candidate admission also checks copied evidence for one client clip
-path through the primary movement wrapper and setter. The target preflight
-requires exact executable/version identity and mapped instruction windows;
-it accepts no test-stub identity exception. The call check requires a current
-service session, qualified recovery and synchronous borrowed lifetime, matching
-owner/controller, primary vptr/gate, thread, callers and duration, and an
-actor ID equal to the validated player-state active actor ID.
-These are native-owner inputs; no retail producer currently supplies them.
-A clip class name or matching pointer does not establish gameplay eligibility.
-Any reduction that rounds a positive input to zero needs its own qualified
-native outcome. Missing evidence forwards the original duration once.
+- `bahamut.action_movement_configure(retain_percent, enabled)` accepts exactly
+  a numeric integer from 0 through 100 and a boolean. It returns `accepted,
+  reason`. Invalid types, fractions, nonfinite values, bounds or argument counts
+  return `false, 'invalid_request'` without changing policy. Unavailable or stale
+  admission also rejects the request. Owner and session tokens stay native.
+- `bahamut.action_movement_status()` returns a copied table with `available`,
+  `enabled`, `requested_percent`, `effective_percent` and `reason`. Unavailable
+  instances report disabled policy, requested 0 and effective 100, without
+  exposing another consumer's policy. Extra arguments return `nil,
+  'invalid_request'`.
+
+Reasons are `ready`, `not_admitted`, `session_unavailable`, `unavailable`,
+`target_mismatch`, `install_failed` and `cleanup_failed`. A copied status is
+observational; a later configuration can fail if admission has changed. The
+host revokes policy before reload, disable or unload, and on callback faults.
+Lua cannot rearm a closing or faulted instance. Revocation does not retire a
+native hook. Runtime shutdown disables it but keeps the hook, trampoline and
+detour resident for the process lifetime because call quiescence cannot be
+established.
+
+The addon has no commands, chat output or saved preference; see
+[NoLock](#nolock). Changes in Extensions apply on the next launch. In game,
+`/addon load nolock` and `/addon unload nolock` load and unload it for the
+current session. The load callback calls
+`bahamut.action_movement_configure(50, true)`. Startup-loaded instances receive
+admission after their load callback and apply the policy on update. Each
+update repeats the call
+when the service is available but not enabled at 50%. Reload revokes the old
+instance and admits its replacement before the load callback runs. `/nolock`
+passes to retail.
+
+An unavailable service reports effective 100%. On older hosts, the addon does
+nothing if the configure or status functions are missing.
+Version metadata does not substitute for these checks. The policy applies
+only to admitted post-action movement waits; it does not alter
+recast, casting, animation or server timing. Offline fixtures do not establish
+retail movement behavior.
+
+The target preflight requires exact executable/version identity and the
+mapped instruction windows; it accepts no test-stub identity exception. The
+hook covers only the primary movement wrapper and admits only a call returning
+to `0x008284AE`. Before the original call the runtime copies the actor, owner,
+controller, vtable, gate target, gate word, timer flag and actor ID with
+fault-guarded reads. Scaling requires a verified target, a current service
+session and complete reads. The owner's actor reference and the controller's
+first word must equal the actor pointer. The vtable and gate target must match
+the primary values, the gate bit and timer flag must be clear, and the actor
+ID must be nonzero, distinct from `0xC0000000` and equal to the validated
+player-state active actor ID. Missing or stale evidence, or a positive duration
+that scales to zero or less, preserves the original duration. Every call
+forwards exactly once. Calls admitted before shutdown may finish with a reduced
+duration; calls entering after shutdown begins forward unchanged. A clip class
+name or matching pointer alone does not establish gameplay eligibility.
 
 The [native admission declaration](../client/src/action_movement_admission.h)
-cites the exact-client static source. Its setter return is `0x0065ED59`; the
-client clip calls the wrapper at `0x008284A9` and returns at `0x008284AE`.
-The byte windows were checked against the executable identity in
-[runtime_contract.h](../client/api/runtime_contract.h) using pefile 2024.8.26
-and Capstone 5.0.7. This is exact-binary validation of the candidate route,
-not a retail recovery classification or movement result.
+cites the exact-client static source. The client clip calls the wrapper at
+`0x008284A9` and returns at `0x008284AE`. The byte windows were checked against
+the executable identity in [runtime_contract.h](../client/api/runtime_contract.h)
+using pefile 2024.8.26 and Capstone 5.0.7. This is exact-binary validation of
+the route; offline fixtures do not establish live retail movement behavior.
 
 ### Settings and player state
 

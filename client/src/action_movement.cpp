@@ -15,18 +15,6 @@ std::int32_t ScaleActionMovementDuration(std::int32_t duration, std::uint32_t re
     return static_cast<std::int32_t>((static_cast<std::int64_t>(duration) * retainPercent) / 100);
 }
 
-void ForwardActionMovement(void*                receiver,
-                           std::int32_t         duration,
-                           bool                 eligible,
-                           ActionMovementPolicy policy,
-                           ActionMovementSetter original)
-{
-    const std::int32_t forwarded = policy.enabled && eligible
-                                       ? ScaleActionMovementDuration(duration, policy.retainPercent)
-                                       : duration;
-    original(receiver, forwarded);
-}
-
 void ActionMovementService::ClearConsumer()
 {
     published_.store(0, std::memory_order_release);
@@ -138,24 +126,24 @@ ActionMovementStatus ActionMovementService::Status() const
     return { boundary_, session_, owner_, requestedPercent_, enabled ? (policy & 0xFFu) : 100u, enabled };
 }
 
-void ActionMovementService::Forward(void* receiver, std::int32_t duration, bool eligible, ActionMovementSetter original) const
+void ActionMovementService::ForwardWrapper(void* actor, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementWrapper original) const
 {
-    const std::uint32_t policy = published_.load(std::memory_order_acquire);
-    ForwardActionMovement(receiver, duration, eligible, { (policy & 0x100u) != 0, policy & 0xFFu }, original);
+    ForwardWrapper(actor, duration, context, original, ActionMovementIdentity{});
 }
 
-void ActionMovementService::Forward(void* receiver, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementSetter original) const
+void ActionMovementService::ForwardWrapper(void* actor, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementWrapper original, const ActionMovementIdentity& identity) const
 {
     // Session loads bracket policy so an obsolete context cannot use a replacement's request.
-    const std::uint64_t session   = publishedSession_.load(std::memory_order_acquire);
-    const std::uint32_t policy    = published_.load(std::memory_order_acquire);
-    const bool          current   = session != 0 && context.session == session &&
-                                    publishedSession_.load(std::memory_order_acquire) == session;
-    const std::int32_t  forwarded = (policy & 0x100u) != 0
-                                        ? ScaleActionMovementDuration(duration, policy & 0xFFu)
-                                        : duration;
-    const bool          admitted  = current && AdmitActionMovementCall(context, receiver, duration, forwarded) == ActionMovementCallAdmission::Admitted;
-    original(receiver, admitted ? forwarded : duration);
+    const std::uint64_t session  = publishedSession_.load(std::memory_order_acquire);
+    const std::uint32_t policy   = published_.load(std::memory_order_acquire);
+    const bool          stable   = publishedSession_.load(std::memory_order_acquire) == session;
+    auto                evidence = context;
+    evidence.currentSession      = stable ? session : 0;
+    const std::int32_t forwarded = (policy & 0x100u) != 0
+                                       ? ScaleActionMovementDuration(duration, policy & 0xFFu)
+                                       : duration;
+    const bool         admitted  = AdmitActionMovementCall(evidence, duration, forwarded, identity) == ActionMovementCallAdmission::Admitted;
+    original(actor, admitted ? forwarded : duration);
 }
 
 } // namespace bahamut_client

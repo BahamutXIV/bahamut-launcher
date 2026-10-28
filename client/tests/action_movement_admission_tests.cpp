@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -82,32 +83,27 @@ bool StubIdentityTest(const std::filesystem::path& fixture)
 ActionMovementCallContext Context(std::uintptr_t actor, std::uint64_t session)
 {
     ActionMovementCallContext context;
-    context.targetVerified            = true;
-    context.recoveryQualified         = true;
-    context.borrowedLifetimeQualified = true;
+    context.targetVerified = true;
     context.session = context.currentSession = session;
-    context.thread = context.borrowedThread = GetCurrentThreadId();
-    context.actor = context.ownerActor = actor;
+    context.callerReturn                     = 0x8284AEu;
+    context.actor = context.ownerActor = context.controllerActor = actor;
+    context.actorVptr                                            = 0xFC0D34u;
+    context.gateTarget                                           = 0x669650u;
     context.actorId = context.localActorId = 0x48u;
-    context.actorVptr                      = 0xFC0D34u;
-    context.gateTarget                     = 0x669650u;
-    context.producerReturn                 = 0x8284AEu;
-    context.setterReturn                   = 0x65ED59u;
-    context.gateResult                     = 0;
     context.originalDuration               = 125;
+    context.readsComplete                  = true;
     return context;
 }
 
 bool ContextTests()
 {
-    const auto valid    = Context(0x100000u, 1);
-    const auto receiver = reinterpret_cast<void*>(0x100BF0u);
-    bool       passed   = Check(AdmitActionMovementCall(valid, receiver, 125, 50) == Result::Admitted, "Synthetic borrowed recovery rejected");
-    const auto reject   = [&](auto mutate, Result expected)
+    const auto valid  = Context(0x100000u, 1);
+    bool       passed = Check(AdmitActionMovementCall(valid, 125, 50) == Result::Admitted, "Synthetic wrapper evidence rejected");
+    const auto reject = [&](auto mutate, Result expected)
     {
         auto context = valid;
         mutate(context);
-        return Check(AdmitActionMovementCall(context, receiver, 125, 50) == expected, "Missing or inconsistent evidence admitted");
+        return Check(AdmitActionMovementCall(context, 125, 50) == expected, "Missing or inconsistent evidence admitted");
     };
     passed &= reject([](auto& c)
                      {
@@ -116,12 +112,12 @@ bool ContextTests()
                      Result::TargetUnavailable);
     passed &= reject([](auto& c)
                      {
-                         c.recoveryQualified = false;
+                         c.session = 0;
                      },
-                     Result::ContextUnqualified);
+                     Result::SessionUnavailable);
     passed &= reject([](auto& c)
                      {
-                         c.session = 0;
+                         c.currentSession = 0;
                      },
                      Result::SessionUnavailable);
     passed &= reject([](auto& c)
@@ -131,47 +127,37 @@ bool ContextTests()
                      Result::SessionUnavailable);
     passed &= reject([](auto& c)
                      {
-                         c.borrowedLifetimeQualified = false;
+                         c.readsComplete = false;
                      },
-                     Result::BorrowUnavailable);
+                     Result::ReadsIncomplete);
     passed &= reject([](auto& c)
                      {
-                         c.thread = 0;
+                         ++c.callerReturn;
                      },
-                     Result::BorrowUnavailable);
+                     Result::CallerMismatch);
     passed &= reject([](auto& c)
                      {
-                         ++c.borrowedThread;
+                         c.callerReturn = 0x65ED59u;
                      },
-                     Result::BorrowUnavailable);
+                     Result::CallerMismatch);
     passed &= reject([](auto& c)
                      {
-                         c.actor = 0;
+                         ++c.originalDuration;
                      },
-                     Result::IdentityMismatch);
+                     Result::CallerMismatch);
     passed &= reject([](auto& c)
                      {
-                         ++c.localActorId;
-                     },
-                     Result::IdentityMismatch);
-    passed &= reject([](auto& c)
-                     {
-                         c.localActorId = 0;
-                     },
-                     Result::IdentityMismatch);
-    passed &= reject([](auto& c)
-                     {
-                         c.actorId = c.localActorId = 0;
-                     },
-                     Result::IdentityMismatch);
-    passed &= reject([](auto& c)
-                     {
-                         c.actorId = c.localActorId = kActionMovementNoActorId;
+                         c.actor = c.ownerActor = c.controllerActor = 0;
                      },
                      Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
                          ++c.ownerActor;
+                     },
+                     Result::IdentityMismatch);
+    passed &= reject([](auto& c)
+                     {
+                         ++c.controllerActor;
                      },
                      Result::IdentityMismatch);
     passed &= reject([](auto& c)
@@ -186,27 +172,32 @@ bool ContextTests()
                      Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
-                         c.actor = c.ownerActor = std::numeric_limits<std::uintptr_t>::max();
+                         ++c.localActorId;
                      },
                      Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
-                         ++c.producerReturn;
+                         c.localActorId = 0;
                      },
-                     Result::CallerMismatch);
+                     Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
-                         ++c.setterReturn;
+                         c.actorId = 0;
                      },
-                     Result::CallerMismatch);
+                     Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
-                         ++c.originalDuration;
+                         c.actorId = c.localActorId = 0;
                      },
-                     Result::CallerMismatch);
+                     Result::IdentityMismatch);
     passed &= reject([](auto& c)
                      {
-                         c.gateResult = 1;
+                         c.actorId = c.localActorId = kActionMovementNoActorId;
+                     },
+                     Result::IdentityMismatch);
+    passed &= reject([](auto& c)
+                     {
+                         c.actorWord2B70 = 1u << 6;
                      },
                      Result::GateMismatch);
     passed &= reject([](auto& c)
@@ -214,15 +205,129 @@ bool ContextTests()
                          c.controllerFlags = 4;
                      },
                      Result::GateMismatch);
-    passed &= Check(AdmitActionMovementCall(valid, nullptr, 125, 50) == Result::IdentityMismatch, "Wrong controller admitted");
-    passed &= Check(AdmitActionMovementCall(valid, receiver, 125, 0) == Result::ZeroResultUnqualified, "Unqualified zero admitted");
-    passed &= Check(AdmitActionMovementCall(valid, receiver, 0, 0) == Result::NonPositive, "Nonpositive input classified as recovery");
+    auto open            = valid;
+    open.actorWord2B70   = ~(1u << 6);
+    open.controllerFlags = ~4u;
+    passed &= Check(AdmitActionMovementCall(open, 125, 50) == Result::Admitted, "Unrelated gate or flag bits rejected a call");
+    // A substituted identity admits only under that identity; production uses the defaults.
+    auto                   substituted = valid;
+    ActionMovementIdentity fake{ 0x3000u, 0x1000u, 0x2000u };
+    substituted.callerReturn = 0x3000u;
+    substituted.actorVptr    = 0x1000u;
+    substituted.gateTarget   = 0x2000u;
+    passed &= Check(AdmitActionMovementCall(substituted, 125, 50, fake) == Result::Admitted && AdmitActionMovementCall(substituted, 125, 50) == Result::CallerMismatch,
+                    "Substituted identity was ignored or leaked into the defaults");
+    passed &= Check(AdmitActionMovementCall(valid, 125, 50, fake) == Result::CallerMismatch, "Retail constants admitted under a substituted identity");
+    passed &= Check(AdmitActionMovementCall(valid, 125, 0) == Result::ScaledNonPositive, "Scaled zero admitted");
+    passed &= Check(AdmitActionMovementCall(valid, 125, -1) == Result::ScaledNonPositive, "Negative scaled duration admitted");
+    passed &= Check(AdmitActionMovementCall(valid, 0, 0) == Result::NonPositive, "Zero input classified as a scale result");
+    passed &= Check(AdmitActionMovementCall(valid, -1, -1) == Result::NonPositive, "Negative input admitted");
+    return passed;
+}
+
+struct Arena
+{
+    unsigned char* data = static_cast<unsigned char*>(VirtualAlloc(nullptr, 0x4000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+
+    Arena()
+    {
+        if (data == nullptr)
+            std::terminate();
+        // A fake vtable, owner and inline controller in one allocation; no fixed image base.
+        Put(0, reinterpret_cast<std::uintptr_t>(data + 0x3000));
+        Put(0x118, reinterpret_cast<std::uintptr_t>(data + 0x3500));
+        Put(0xBF0, reinterpret_cast<std::uintptr_t>(data));
+        Put(0xBF0 + 4, 0xAABBCC04u);
+        Put(0xDC, 0x48u);
+        Put(0x2B70, 0x200u);
+        Put(0x3000 + 0x268, 0x669650u);
+        Put(0x3500 + 0xD0, reinterpret_cast<std::uintptr_t>(data));
+    }
+
+    Arena(const Arena&)            = delete;
+    Arena& operator=(const Arena&) = delete;
+
+    ~Arena()
+    {
+        if (data != nullptr)
+            VirtualFree(data, 0, MEM_RELEASE);
+    }
+
+    void Put(std::size_t offset, std::uint32_t value) const
+    {
+        std::memcpy(data + offset, &value, sizeof(value));
+    }
+};
+
+bool CaptureTests()
+{
+    Arena                     arena;
+    const auto                base = reinterpret_cast<std::uintptr_t>(arena.data);
+    ActionMovementCallContext context;
+    context.targetVerified = true;
+    context.session        = 7;
+    context.localActorId   = 0x99u;
+    bool passed            = Check(CaptureActionMovementCallContext(arena.data, 0x8284AEu, 125, context), "Valid arena capture failed");
+    passed &= Check(context.readsComplete && context.callerReturn == 0x8284AEu && context.originalDuration == 125 && context.actor == base &&
+                        context.ownerActor == base && context.controllerActor == base && context.actorVptr == base + 0x3000u &&
+                        context.gateTarget == 0x669650u && context.actorId == 0x48u && context.actorWord2B70 == 0x200u &&
+                        context.controllerFlags == 0x04u,
+                    "Capture copied the wrong fixed-offset values");
+    passed &= Check(context.targetVerified && context.session == 7 && context.currentSession == 0 && context.localActorId == 0x99u,
+                    "Capture changed host-owned context fields");
+
+    context.currentSession = 7;
+    context.localActorId   = 0x48u;
+    context.controllerFlags &= ~0x04u;
+    passed &= Check(AdmitActionMovementCall(context, 125, 50) == Result::IdentityMismatch, "Non-retail vtable admitted");
+    context.actorVptr = kActionMovementPrimaryActorVtable;
+    passed &= Check(AdmitActionMovementCall(context, 125, 50) == Result::Admitted, "Captured evidence rejected");
+
+    arena.Put(0x2B70, 0x240u);
+    arena.Put(0xBF0 + 4, 0);
+    ActionMovementCallContext gated;
+    passed &= Check(CaptureActionMovementCallContext(arena.data, 0x8284AEu, 125, gated) && gated.actorWord2B70 == 0x240u && gated.controllerFlags == 0,
+                    "Capture missed the gate word or controller flag");
+
+    const auto fails = [&](auto mutate, const char* message)
+    {
+        Arena bad;
+        mutate(bad);
+        ActionMovementCallContext captured;
+        captured.actor         = 0x1234u;
+        captured.readsComplete = true;
+        return Check(!CaptureActionMovementCallContext(bad.data, 0x8284AEu, 125, captured) && !captured.readsComplete && captured.actor == 0x1234u, message);
+    };
+    passed &= fails([](Arena& a)
+                    {
+                        a.Put(0, 0);
+                    },
+                    "Null vtable captured");
+    passed &= fails([](Arena& a)
+                    {
+                        a.Put(0, 0x1000u);
+                    },
+                    "Unreadable vtable captured");
+    passed &= fails([](Arena& a)
+                    {
+                        a.Put(0x118, 0);
+                    },
+                    "Null owner captured");
+    passed &= fails([](Arena& a)
+                    {
+                        a.Put(0x118, 0x1000u);
+                    },
+                    "Unreadable owner captured");
+    ActionMovementCallContext untouched;
+    passed &= Check(!CaptureActionMovementCallContext(nullptr, 0x8284AEu, 125, untouched) && !untouched.readsComplete, "Null actor captured");
+    passed &= Check(!CaptureActionMovementCallContext(reinterpret_cast<void*>(0x1000u), 0x8284AEu, 125, untouched) && !untouched.readsComplete, "Unreadable actor captured");
+    passed &= Check(!CaptureActionMovementCallContext(reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max() - 8), 0x8284AEu, 125, untouched), "Overflowing actor captured");
     return passed;
 }
 
 struct Capture
 {
-    void*                  receiver   = nullptr;
+    void*                  actor      = nullptr;
     std::int32_t           duration   = 0;
     unsigned               calls      = 0;
     ActionMovementService* endService = nullptr;
@@ -231,9 +336,9 @@ struct Capture
 
 thread_local Capture gCapture;
 
-void __fastcall Setter(void* receiver, void*, std::int32_t duration)
+void __stdcall Wrapper(void* actor, std::int32_t duration)
 {
-    gCapture.receiver = receiver;
+    gCapture.actor    = actor;
     gCapture.duration = duration;
     ++gCapture.calls;
     if (gCapture.endService != nullptr)
@@ -244,16 +349,15 @@ bool ForwardTests()
 {
     ActionMovementService service;
     service.SetBoundaryState(ActionMovementBoundaryState::Ready);
-    auto       session  = service.BeginSession();
-    auto       owner    = service.BindConsumer(session);
-    auto       context  = Context(0x100000u, session);
-    auto       receiver = reinterpret_cast<void*>(0x100BF0u);
-    const auto original = reinterpret_cast<ActionMovementSetter>(&Setter);
-    const auto forward  = [&](const ActionMovementCallContext& evidence, std::int32_t input, std::int32_t expected)
+    auto       session = service.BeginSession();
+    auto       owner   = service.BindConsumer(session);
+    auto       context = Context(0x100000u, session);
+    auto       actor   = reinterpret_cast<void*>(0x100000u);
+    const auto forward = [&](const ActionMovementCallContext& evidence, std::int32_t input, std::int32_t expected)
     {
         gCapture = {};
-        service.Forward(receiver, input, evidence, original);
-        return Check(gCapture.calls == 1 && gCapture.receiver == receiver && gCapture.duration == expected, "Admission forwarding changed receiver, duration or call count");
+        service.ForwardWrapper(actor, input, evidence, &Wrapper);
+        return Check(gCapture.calls == 1 && gCapture.actor == actor && gCapture.duration == expected, "Admission forwarding changed actor, duration or call count");
     };
     bool passed = Check(service.Configure(owner, session, 40, true), "Policy setup failed");
     passed &= forward({}, 125, 125);
@@ -262,19 +366,18 @@ bool ForwardTests()
     passed &= forward(context, 125, 125);
     passed &= Check(service.Configure(owner, session, 0, true), "Zero setup failed");
     passed &= forward(context, 125, 125);
-    context.zeroResultQualified = true;
-    passed &= forward(context, 125, 0);
-    context.zeroResultQualified = false;
-    context.originalDuration    = 1;
+    context.originalDuration = 1;
     passed &= Check(service.Configure(owner, session, 40, true), "Rounding setup failed");
     passed &= forward(context, 1, 1);
-    context.zeroResultQualified = true;
-    passed &= forward(context, 1, 0);
     passed &= forward(context, 0, 0);
     passed &= forward(context, -1, -1);
     context.originalDuration = 125;
     passed &= Check(service.Configure(owner, session, 40, false), "Off setup failed");
     passed &= forward(context, 125, 125);
+    auto rejected          = context;
+    rejected.actorWord2B70 = 1u << 6;
+    passed &= Check(service.Configure(owner, session, 40, true), "Gate setup failed");
+    passed &= forward(rejected, 125, 125);
     const auto stale = context;
     session          = service.BeginSession();
     owner            = service.BindConsumer(session);
@@ -282,10 +385,14 @@ bool ForwardTests()
     passed &= forward(stale, 125, 125);
     context.session = context.currentSession = session;
     passed &= forward(context, 125, 50);
+    // The service stamps the session, so a caller-supplied currentSession cannot admit a stale context.
+    auto forged           = stale;
+    forged.currentSession = stale.session;
+    passed &= forward(forged, 125, 125);
     gCapture            = {};
     gCapture.endService = &service;
     gCapture.session    = session;
-    service.Forward(receiver, 125, context, original);
+    service.ForwardWrapper(actor, 125, context, &Wrapper);
     passed &= Check(gCapture.calls == 1 && gCapture.duration == 50 && service.Status().session == 0, "Reentrant session end did not preserve admitted original");
     passed &= forward(context, 125, 125);
     service.Shutdown();
@@ -311,7 +418,7 @@ bool SessionRaceTests()
                            do
                            {
                                gCapture = {};
-                               service.Forward(reinterpret_cast<void*>(0x100BF0u), 125, stale, reinterpret_cast<ActionMovementSetter>(&Setter));
+                               service.ForwardWrapper(reinterpret_cast<void*>(0x100000u), 125, stale, &Wrapper);
                                passed &= gCapture.calls == 1 && gCapture.duration == 125;
                            } while (!done.load(std::memory_order_acquire));
                              });
@@ -343,5 +450,5 @@ int wmain(int argc, wchar_t** argv)
     }
     if (argc != 2)
         return 2;
-    return TargetTests() && StubIdentityTest(argv[1]) && ContextTests() && ForwardTests() && SessionRaceTests() ? 0 : 1;
+    return TargetTests() && StubIdentityTest(argv[1]) && ContextTests() && CaptureTests() && ForwardTests() && SessionRaceTests() ? 0 : 1;
 }

@@ -160,8 +160,14 @@ endif()
 add_library(bahamut SHARED
     src/action_movement.cpp
     src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
+    src/action_movement_hook.cpp
+    src/action_movement_hook.h
+    src/action_movement_runtime.cpp
+    src/action_movement_runtime.h
     src/action_movement_target.cpp
     src/action_movement.h
+    src/native_state.h
     api/native_plugin_api.h
     api/runtime_api.h
     ${BAHAMUT_RUNTIME_DEF}
@@ -369,17 +375,23 @@ target_include_directories(bahamut-input-policy-tests PRIVATE src)
 add_executable(bahamut-action-movement-tests
     src/action_movement.cpp
     src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
     src/action_movement.h
     src/action_movement_hook.cpp
     src/action_movement_hook.h
+    src/action_movement_runtime.cpp
+    src/action_movement_runtime.h
+    src/action_movement_target.cpp
+    src/retail_identity.cpp
     tests/action_movement_tests.cpp
 )
-target_include_directories(bahamut-action-movement-tests PRIVATE api src)
-target_link_libraries(bahamut-action-movement-tests PRIVATE minhook)
+target_include_directories(bahamut-action-movement-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-action-movement-tests PRIVATE bcrypt minhook)
 
 add_executable(bahamut-action-movement-admission-tests
     src/action_movement.cpp
     src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
     src/action_movement_target.cpp
     src/retail_identity.cpp
     tests/action_movement_admission_tests.cpp
@@ -492,6 +504,25 @@ add_executable(bahamut-action-movement-addon-tests
 target_include_directories(bahamut-action-movement-addon-tests PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-action-movement-addon-tests PRIVATE lua51 minhook)
 bahamut_unicode_entry(bahamut-action-movement-addon-tests)
+
+add_executable(bahamut-action-movement-lua-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/chat_boundary.cpp
+    src/command_boundary.cpp
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/retail_identity.cpp
+    src/runtime_commands.cpp
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    tests/action_movement_lua_tests.cpp
+)
+target_include_directories(bahamut-action-movement-lua-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-action-movement-lua-tests PRIVATE bcrypt lua51 minhook)
+bahamut_unicode_entry(bahamut-action-movement-lua-tests)
 
 add_executable(bahamut-command-boundary-tests
     $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
@@ -682,6 +713,12 @@ set_tests_properties(bahamut-action-movement PROPERTIES TIMEOUT 15)
 add_test(NAME bahamut-action-movement-addon
     COMMAND bahamut-action-movement-addon-tests ${CMAKE_CURRENT_BINARY_DIR}/action-movement-addon-fixtures)
 set_tests_properties(bahamut-action-movement-addon PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-action-movement-lua
+    COMMAND bahamut-action-movement-lua-tests
+        ${CMAKE_CURRENT_BINARY_DIR}/action-movement-lua-fixtures
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/nolock/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml)
+set_tests_properties(bahamut-action-movement-lua PROPERTIES TIMEOUT 15)
 add_test(NAME bahamut-discord-rpc COMMAND bahamut-discord-rpc-tests)
 if(CMAKE_CROSSCOMPILING_EMULATOR)
     # A cold Wine prefix can take minutes to initialize on the first test.

@@ -3,7 +3,6 @@
 #include "runtime_contract.h"
 
 #include <algorithm>
-#include <limits>
 
 namespace bahamut_client
 {
@@ -33,34 +32,29 @@ bool MatchActionMovementTargetBytes(std::uintptr_t imageBase, std::span<const st
 }
 
 ActionMovementCallAdmission AdmitActionMovementCall(const ActionMovementCallContext& context,
-                                                    const void*                      receiver,
                                                     std::int32_t                     originalDuration,
-                                                    std::int32_t                     retainedDuration) noexcept
+                                                    std::int32_t                     retainedDuration,
+                                                    const ActionMovementIdentity&    identity) noexcept
 {
     using Result = ActionMovementCallAdmission;
     if (originalDuration <= 0)
         return Result::NonPositive;
     if (!context.targetVerified)
         return Result::TargetUnavailable;
-    if (!context.recoveryQualified)
-        return Result::ContextUnqualified;
     if (context.session == 0 || context.session != context.currentSession)
         return Result::SessionUnavailable;
-    if (!context.borrowedLifetimeQualified || context.thread == 0 || context.thread != context.borrowedThread)
-        return Result::BorrowUnavailable;
-    if (context.actor == 0 || context.actor != context.ownerActor || context.actorId == 0 ||
-        context.actorId == kActionMovementNoActorId || context.actorId != context.localActorId ||
-        context.actor > std::numeric_limits<std::uintptr_t>::max() - 0xBF0u ||
-        reinterpret_cast<std::uintptr_t>(receiver) != context.actor + 0xBF0u ||
-        context.actorVptr != 0x00FC0D34u || context.gateTarget != 0x00669650u)
-        return Result::IdentityMismatch;
-    if (context.producerReturn != kActionMovementProducerCallVa + 5u || context.setterReturn != 0x0065ED59u ||
-        context.originalDuration != originalDuration)
+    if (!context.readsComplete)
+        return Result::ReadsIncomplete;
+    if (context.callerReturn != identity.producerReturn || context.originalDuration != originalDuration)
         return Result::CallerMismatch;
-    if (context.gateResult != 0 || (context.controllerFlags & 0x4u) != 0)
+    if (context.actor == 0 || context.actor != context.ownerActor || context.actor != context.controllerActor ||
+        context.actorVptr != identity.actorVptr || context.gateTarget != identity.gateTarget ||
+        context.actorId == 0 || context.actorId == kActionMovementNoActorId || context.actorId != context.localActorId)
+        return Result::IdentityMismatch;
+    if ((context.actorWord2B70 & kActionMovementGateBit) != 0 || (context.controllerFlags & kActionMovementAlternateTimerFlag) != 0)
         return Result::GateMismatch;
-    if (retainedDuration == 0 && !context.zeroResultQualified)
-        return Result::ZeroResultUnqualified;
+    if (retainedDuration <= 0)
+        return Result::ScaledNonPositive;
     return Result::Admitted;
 }
 

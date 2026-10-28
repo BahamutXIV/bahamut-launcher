@@ -1,48 +1,16 @@
 #include "action_movement_observer.h"
 
 #include "fault_guard.h"
+#include "native_state.h"
 
 #include <windows.h>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
-#include <array>
 #include <limits>
 
 namespace bahamut_client
 {
 namespace
 {
-
-struct alignas(16) NativeState
-{
-    std::array<unsigned char, 512> fp;
-    DWORD                          lastError;
-    // Keep the complete object a multiple of FXSAVE's required alignment.
-    std::array<unsigned char, 12> reserved;
-};
-
-void SaveNativeState(NativeState& state) noexcept
-{
-#if defined(_MSC_VER)
-    _fxsave(state.fp.data());
-#else
-    __asm__ volatile("fxsave %0" : "=m"(state.fp) : : "memory");
-#endif
-    state.lastError = GetLastError();
-}
-
-void RestoreNativeState(const NativeState& state) noexcept
-{
-    SetLastError(state.lastError);
-#if defined(_MSC_VER)
-    _fxrstor(const_cast<unsigned char*>(state.fp.data()));
-#else
-    __asm__ volatile("fxrstor %0" : : "m"(state.fp) : "memory");
-#endif
-}
 
 bool Clock(std::int64_t& counter) noexcept
 {
@@ -118,8 +86,8 @@ bool ActionMovementObserver::Capture(ActionMovementObservationKind kind, void* o
         return false;
     }
     guardedBatches_.fetch_add(1, std::memory_order_relaxed);
-    // One fail-fast guard for this call. No probes, virtual calls or reads after
-    // original. Offsets/structural meanings are the cited admission source's facts.
+    // One fault guard covers all reads; no virtual calls or reads after original.
+    // Offsets and structural meanings come from the source cited in action_movement_admission.h.
     BAHAMUT_FAULT_TRY
     {
         const auto actor = kind == ActionMovementObservationKind::WrapperEntry

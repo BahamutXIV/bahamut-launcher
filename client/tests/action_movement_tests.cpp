@@ -1,5 +1,8 @@
 #include "action_movement.h"
+#include "action_movement_admission.h"
 #include "action_movement_hook.h"
+#include "action_movement_runtime.h"
+#include "player_state.h"
 
 #include <atomic>
 #include <cstdint>
@@ -185,18 +188,20 @@ void SetEnvironment(unsigned int rounding, unsigned int mxcsr, DWORD lastError)
     SetLastError(lastError);
 }
 
-bahamut_client::ActionMovementSetter       gOriginal = nullptr;
-bahamut_client::ActionMovementPolicy       gPolicy;
+bahamut_client::ActionMovementWrapper      gOriginal           = nullptr;
 bahamut_client::ActionMovementService*     gService            = nullptr;
 bahamut_client::ActionMovementHook*        gLifecycle          = nullptr;
+bahamut_client::ActionMovementRuntime*     gRuntime            = nullptr;
 bool                                       gShutdownDuringCall = false;
 bahamut_client::ActionMovementHookShutdown gShutdownResult     = bahamut_client::ActionMovementHookShutdown::Complete;
+bool                                       gRuntimeShutdown    = false;
+bahamut_client::ActionMovementHookShutdown gRuntimeResult      = bahamut_client::ActionMovementHookShutdown::Complete;
 std::uint64_t                              gRevokeDuringCall   = 0;
 bool                                       gRevokedDuringCall  = false;
-bool                                       gEligible           = false;
-unsigned int                               gCalls              = 0;
-void*                                      gReceiver           = nullptr;
-std::int32_t                               gDuration           = 0;
+bahamut_client::ActionMovementCallContext  gContext;
+unsigned int                               gCalls    = 0;
+void*                                      gActor    = nullptr;
+std::int32_t                               gDuration = 0;
 Environment                                gEntry;
 Environment                                gAfter;
 bool                                       gFreed        = false;
@@ -207,27 +212,32 @@ std::uint32_t                              gPreservedEsi = 0;
 std::uint32_t                              gPreservedEdi = 0;
 std::uint32_t                              gPreservedEbp = 0;
 
-extern "C" void __cdecl RecordSetter(void* receiver, std::int32_t duration)
+extern "C" void __cdecl RecordWrapper(void* actor, std::int32_t duration)
 {
-    // Record before any other Win32 call; release detects a receiver read after forwarding.
+    // Record before any other Win32 call; release detects an actor read after forwarding.
     gEntry = CaptureEnvironment();
     ++gCalls;
-    gReceiver = receiver;
+    gActor    = actor;
     gDuration = duration;
     if (gShutdownDuringCall)
     {
         gShutdownResult = gLifecycle->Shutdown(false);
     }
+    if (gRuntimeShutdown)
+    {
+        gRuntimeResult = gRuntime->Shutdown();
+    }
     if (gRevokeDuringCall != 0)
     {
         gRevokedDuringCall = gService->RevokeConsumer(gRevokeDuringCall);
     }
-    gFreed = VirtualFree(receiver, 0, MEM_RELEASE) != FALSE;
+    gFreed = VirtualFree(actor, 0, MEM_RELEASE) != FALSE;
     SetEnvironment(_RC_UP, 0x5F81u, 0x2468u);
     gAfter = CaptureEnvironment();
 }
 
-extern "C" __declspec(naked) void FakeSetter()
+// Retail shape: stdcall (actor, duration), RET 8, with room for a five-byte patch.
+extern "C" __declspec(naked) void FakeWrapper()
 {
     __asm
         {
@@ -237,28 +247,21 @@ extern "C" __declspec(naked) void FakeSetter()
         nop
         nop
         nop
-        push dword ptr [esp+4]
-        push ecx
-        call RecordSetter
+        push dword ptr [esp+8]
+        push dword ptr [esp+8]
+        call RecordWrapper
         add esp, 8
-        ret 4
+        ret 8
         }
 }
 
-void __fastcall HookSetter(void* receiver, void*, std::int32_t duration)
+void __stdcall HookWrapper(void* actor, std::int32_t duration)
 {
-    if (gService != nullptr)
-    {
-        const auto original = gLifecycle != nullptr ? gLifecycle->Original() : gOriginal;
-        gService->Forward(receiver, duration, gEligible, original);
-    }
-    else
-    {
-        bahamut_client::ForwardActionMovement(receiver, duration, gEligible, gPolicy, gOriginal);
-    }
+    const auto original = gLifecycle != nullptr ? gLifecycle->Original() : gOriginal;
+    gService->ForwardWrapper(actor, duration, gContext, original);
 }
 
-__declspec(naked) void __stdcall InvokeSetter(void*, std::int32_t)
+__declspec(naked) void __stdcall InvokeWrapper(void*, std::int32_t)
 {
     __asm
         {
@@ -271,9 +274,9 @@ __declspec(naked) void __stdcall InvokeSetter(void*, std::int32_t)
         mov esi, 33445566h
         mov edi, 44556677h
         mov dword ptr [gStackBefore], esp
-        mov ecx, dword ptr [esp+20]
         push dword ptr [esp+24]
-        call FakeSetter
+        push dword ptr [esp+24]
+        call FakeWrapper
         mov dword ptr [gStackAfter], esp
         mov dword ptr [gPreservedEbp], ebp
         mov dword ptr [gPreservedEbx], ebx
@@ -287,36 +290,57 @@ __declspec(naked) void __stdcall InvokeSetter(void*, std::int32_t)
         }
 }
 
-bool CheckForwarding(bahamut_client::ActionMovementPolicy policy, bool eligible, std::int32_t duration, std::int32_t expected)
+bahamut_client::ActionMovementCallContext MakeContext(std::uint64_t session, std::int32_t duration)
 {
-    void* receiver = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (receiver == nullptr)
+    bahamut_client::ActionMovementCallContext context;
+    context.targetVerified = true;
+    context.session = context.currentSession = session;
+    context.callerReturn                     = 0x8284AEu;
+    context.actor = context.ownerActor = context.controllerActor = 0x100000u;
+    context.actorVptr                                            = 0xFC0D34u;
+    context.gateTarget                                           = 0x669650u;
+    context.actorId = context.localActorId = 0x48u;
+    context.originalDuration               = duration;
+    context.readsComplete                  = true;
+    return context;
+}
+
+// Calls the hooked fake through a stdcall frame that checks stack, callee-saved registers, x87,
+// MXCSR and LastError, and frees the actor inside the original to catch a read after forwarding.
+bool CheckInvoke(std::int32_t duration, std::int32_t expected)
+{
+    void* actor = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (actor == nullptr)
     {
         return false;
     }
-    gPolicy                   = policy;
-    gEligible                 = eligible;
     gCalls                    = 0;
     gFreed                    = false;
     const Environment initial = CaptureEnvironment();
     SetEnvironment(_RC_DOWN, 0x1FA0u, 0x1357u);
     const Environment entry = CaptureEnvironment();
-    InvokeSetter(receiver, duration);
+    InvokeWrapper(actor, duration);
     const Environment after  = CaptureEnvironment();
-    const bool        passed = gCalls == 1 && gReceiver == receiver && gDuration == expected && gFreed &&
+    const bool        passed = gCalls == 1 && gActor == actor && gDuration == expected && gFreed &&
                                gStackBefore == gStackAfter && gPreservedEbp == 0x11223344u &&
                                gPreservedEbx == 0x22334455u && gPreservedEsi == 0x33445566u && gPreservedEdi == 0x44556677u &&
                                SameEnvironment(entry, gEntry) && SameEnvironment(after, gAfter);
     RestoreEnvironment(initial);
     if (!gFreed)
     {
-        VirtualFree(receiver, 0, MEM_RELEASE);
+        VirtualFree(actor, 0, MEM_RELEASE);
     }
     if (!passed)
     {
-        std::fprintf(stderr, "Forwarding failed: enabled=%d eligible=%d percent=%u duration=%d\n", policy.enabled, eligible, policy.retainPercent, duration);
+        std::fprintf(stderr, "Forwarding failed: duration=%d expected=%d got=%d calls=%u\n", duration, expected, gDuration, gCalls);
     }
     return passed;
+}
+
+bool CheckForwarding(bool eligible, std::int32_t duration, std::int32_t expected)
+{
+    gContext = eligible ? MakeContext(gService->Status().session, duration) : bahamut_client::ActionMovementCallContext{};
+    return CheckInvoke(duration, expected);
 }
 
 bool CheckServiceForwarding()
@@ -325,48 +349,52 @@ bool CheckServiceForwarding()
     gService       = &service;
     const auto run = [&]()
     {
-        if (!CheckForwarding({}, true, 125, 125))
+        if (!CheckForwarding(true, 125, 125))
         {
             return false;
         }
         service.SetBoundaryState(bahamut_client::ActionMovementBoundaryState::Ready);
         const auto session = service.BeginSession();
         const auto owner   = service.BindConsumer(session);
-        if (!service.Configure(owner, session, 40, true) || !CheckForwarding({}, true, 125, 50) ||
-            !CheckForwarding({}, false, 125, 125) || !CheckForwarding({}, true, 1, 0) ||
-            !CheckForwarding({}, true, -1, -1))
+        if (!service.Configure(owner, session, 40, true) || !CheckForwarding(true, 125, 50) ||
+            !CheckForwarding(false, 125, 125) || !CheckForwarding(true, 1, 1) ||
+            !CheckForwarding(true, -1, -1))
         {
             return false;
         }
-        if (!service.Configure(owner, session, 0, false) || !CheckForwarding({}, true, 125, 125) ||
-            !service.Configure(owner, session, 0, true) || !CheckForwarding({}, true, 125, 0))
+        if (!service.Configure(owner, session, 0, false) || !CheckForwarding(true, 125, 125) ||
+            !service.Configure(owner, session, 0, true) || !CheckForwarding(true, 125, 125))
+        {
+            return false;
+        }
+        if (!service.Configure(owner, session, 40, true))
         {
             return false;
         }
         gRevokeDuringCall   = owner;
         gRevokedDuringCall  = false;
-        const bool inFlight = CheckForwarding({}, true, 125, 0);
+        const bool inFlight = CheckForwarding(true, 125, 50);
         gRevokeDuringCall   = 0;
-        if (!inFlight || !gRevokedDuringCall || !CheckForwarding({}, true, 125, 125) ||
+        if (!inFlight || !gRevokedDuringCall || !CheckForwarding(true, 125, 125) ||
             service.Configure(owner, session, 0, true))
         {
             return false;
         }
         const auto replacement = service.BindConsumer(session);
         if (!service.Configure(replacement, session, 40, true) || service.RevokeConsumer(owner) ||
-            !CheckForwarding({}, true, 125, 50) || !service.EndSession(session) ||
-            !CheckForwarding({}, true, 125, 125))
+            !CheckForwarding(true, 125, 50) || !service.EndSession(session) ||
+            !CheckForwarding(true, 125, 125))
         {
             return false;
         }
         service.SetBoundaryState(bahamut_client::ActionMovementBoundaryState::CleanupFailed);
-        if (!CheckForwarding({}, true, 125, 125))
+        if (!CheckForwarding(true, 125, 125))
         {
             return false;
         }
         service.Shutdown();
         return service.Status().boundary == bahamut_client::ActionMovementBoundaryState::CleanupFailed &&
-               CheckForwarding({}, true, 125, 125);
+               CheckForwarding(true, 125, 125);
     };
     const bool passed = run();
     gService          = nullptr;
@@ -377,7 +405,7 @@ bool CheckServiceForwarding()
 std::atomic<unsigned int> gConcurrentCalls = 0;
 std::atomic<bool>         gConcurrentError = false;
 
-extern "C" void __cdecl RecordConcurrentSetter(std::int32_t duration)
+extern "C" void __cdecl RecordConcurrentWrapper(std::int32_t duration)
 {
     if (duration != 50 && duration != 125)
     {
@@ -386,14 +414,14 @@ extern "C" void __cdecl RecordConcurrentSetter(std::int32_t duration)
     gConcurrentCalls.fetch_add(1);
 }
 
-__declspec(naked) void ConcurrentSetter()
+__declspec(naked) void ConcurrentWrapper()
 {
     __asm
         {
-        push dword ptr [esp+4]
-        call RecordConcurrentSetter
+        push dword ptr [esp+8]
+        call RecordConcurrentWrapper
         add esp, 4
-        ret 4
+        ret 8
         }
 }
 
@@ -409,6 +437,7 @@ bool CheckConcurrentPublication()
     }
     gConcurrentCalls.store(0);
     gConcurrentError.store(false);
+    const auto             context    = MakeContext(session, 125);
     std::atomic<bool>      started    = false;
     constexpr unsigned int iterations = 4096;
     std::thread            reader([&]()
@@ -416,7 +445,7 @@ bool CheckConcurrentPublication()
                            started.store(true);
                            for (unsigned int index = 0; index < iterations; ++index)
                            {
-                               service.Forward(nullptr, 125, true, reinterpret_cast<bahamut_client::ActionMovementSetter>(&ConcurrentSetter));
+                               service.ForwardWrapper(nullptr, 125, context, reinterpret_cast<bahamut_client::ActionMovementWrapper>(&ConcurrentWrapper));
                            }
                                   });
     while (!started.load())
@@ -441,32 +470,44 @@ bool CheckNativeAdapter()
     {
         return false;
     }
-    void* target     = reinterpret_cast<void*>(&FakeSetter);
+    void* target     = reinterpret_cast<void*>(&FakeWrapper);
     void* trampoline = nullptr;
-    if (MH_CreateHook(target, reinterpret_cast<void*>(&HookSetter), &trampoline) != MH_OK)
+    if (MH_CreateHook(target, reinterpret_cast<void*>(&HookWrapper), &trampoline) != MH_OK)
     {
         MH_Uninitialize();
         return false;
     }
-    gOriginal = reinterpret_cast<bahamut_client::ActionMovementSetter>(trampoline);
+    gOriginal = reinterpret_cast<bahamut_client::ActionMovementWrapper>(trampoline);
     if (MH_EnableHook(target) != MH_OK)
     {
         MH_RemoveHook(target);
         MH_Uninitialize();
         return false;
     }
-    const bool passed   = CheckForwarding({}, true, 125, 125) &&
-                          CheckForwarding({ true, 40 }, false, 125, 125) &&
-                          CheckForwarding({ true, 100 }, true, 125, 125) &&
-                          CheckForwarding({ true, 40 }, true, 125, 50) &&
-                          CheckForwarding({ true, 0 }, true, 125, 0) &&
-                          CheckForwarding({ true, 40 }, true, 1, 0) &&
-                          CheckForwarding({ true, 0 }, true, -1, -1) &&
-                          CheckForwarding({ true, 40 }, true, 0, 0) &&
-                          CheckForwarding({ true, 101 }, true, 125, 125) &&
+    bahamut_client::ActionMovementService service;
+    gService = &service;
+    service.SetBoundaryState(bahamut_client::ActionMovementBoundaryState::Ready);
+    const auto session = service.BeginSession();
+    const auto owner   = service.BindConsumer(session);
+
+    const auto policy = [&](std::uint32_t percent, bool enabled, bool eligible, std::int32_t duration, std::int32_t expected)
+    {
+        return service.Configure(owner, session, percent, enabled) && CheckForwarding(eligible, duration, expected);
+    };
+    const bool passed   = policy(0, false, true, 125, 125) &&
+                          policy(40, true, false, 125, 125) &&
+                          policy(100, true, true, 125, 125) &&
+                          policy(40, true, true, 125, 50) &&
+                          policy(0, true, true, 125, 125) &&
+                          policy(40, true, true, 1, 1) &&
+                          policy(0, true, true, -1, -1) &&
+                          policy(40, true, true, 0, 0) &&
                           CheckServiceForwarding();
+    gService            = nullptr;
     const bool disabled = MH_DisableHook(target) == MH_OK;
-    const bool unhooked = disabled && CheckForwarding({ true, 0 }, true, 125, 125);
+    gService            = &service;
+    const bool unhooked = disabled && service.Configure(owner, session, 40, true) && CheckForwarding(true, 125, 125);
+    gService            = nullptr;
     const bool removed  = MH_RemoveHook(target) == MH_OK;
     const bool shutdown = MH_Uninitialize() == MH_OK;
     return passed && unhooked && removed && shutdown;
@@ -515,7 +556,7 @@ MH_STATUS WINAPI TestHookEnable(LPVOID target)
     if (result == MH_OK && gHookFaults.enableBeforeError)
     {
         // Entry before Install returns must find a trampoline and disabled policy.
-        gHookFaults.probePassed = CheckForwarding({}, true, 125, 125);
+        gHookFaults.probePassed = CheckForwarding(true, 125, 125);
         return gHookFaults.enableError;
     }
     return result;
@@ -547,8 +588,8 @@ bool CheckHookLifecycle()
     gService          = &service;
     gLifecycle        = &hook;
     gHookFaults       = {};
-    void*      target = reinterpret_cast<void*>(&FakeSetter);
-    void*      detour = reinterpret_cast<void*>(&HookSetter);
+    void*      target = reinterpret_cast<void*>(&FakeWrapper);
+    void*      detour = reinterpret_cast<void*>(&HookWrapper);
     const auto run    = [&]()
     {
         if (hook.Install(target, detour, false) || hook.Install(nullptr, detour, true) || hook.Install(target, nullptr, true) ||
@@ -608,7 +649,7 @@ bool CheckHookLifecycle()
         if (hook.Install(target, detour, true) || !gHookFaults.probePassed || hook.Status().disabled ||
             hook.Status().cleanupFailure != Stage::Disable || hook.Status().cleanupError != MH_ERROR_MEMORY_PROTECT ||
             hook.Original() == nullptr || service.Status().boundary != State::CleanupFailed ||
-            !CheckForwarding({}, true, 125, 125))
+            !CheckForwarding(true, 125, 125))
         {
             return false;
         }
@@ -621,7 +662,7 @@ bool CheckHookLifecycle()
         }
         gHookFaults.disableError = MH_OK;
         if (hook.Shutdown(false) != Result::AwaitingCalls || !hook.Status().disabled ||
-            hook.Original() != retained || gHookFaults.removes != 0 || !CheckForwarding({}, true, 125, 125) ||
+            hook.Original() != retained || gHookFaults.removes != 0 || !CheckForwarding(true, 125, 125) ||
             hook.Shutdown(true) != Result::Complete || hook.Original() != nullptr ||
             hook.Status().cleanupFailure != Stage::None || service.Status().boundary != State::InstallFailed)
         {
@@ -634,25 +675,25 @@ bool CheckHookLifecycle()
         }
         const auto session = service.BeginSession();
         const auto owner   = service.BindConsumer(session);
-        if (!service.Configure(owner, session, 40, true) || !CheckForwarding({}, true, 125, 50) ||
+        if (!service.Configure(owner, session, 40, true) || !CheckForwarding(true, 125, 50) ||
             hook.Install(target, detour, true) || service.Status().effectivePercent != 40)
         {
             return false;
         }
         const auto activeOriginal   = hook.Original();
         gShutdownDuringCall         = true;
-        const bool admittedFinished = CheckForwarding({}, true, 125, 50);
+        const bool admittedFinished = CheckForwarding(true, 125, 50);
         gShutdownDuringCall         = false;
         if (!admittedFinished || gShutdownResult != Result::AwaitingCalls || !hook.Status().disabled ||
             hook.Original() != activeOriginal || gHookFaults.removes != 0 || service.Status().enabled ||
-            service.Configure(owner, session, 0, true) || !CheckForwarding({}, true, 125, 125))
+            service.Configure(owner, session, 0, true) || !CheckForwarding(true, 125, 125))
         {
             return false;
         }
         gHookFaults.removeError = MH_ERROR_MEMORY_PROTECT;
         if (hook.Shutdown(true) != Result::Failed || hook.Status().cleanupFailure != Stage::Remove ||
             hook.Original() != activeOriginal || service.Status().boundary != State::CleanupFailed ||
-            !CheckForwarding({}, true, 125, 125))
+            !CheckForwarding(true, 125, 125))
         {
             return false;
         }
@@ -665,8 +706,8 @@ bool CheckHookLifecycle()
         }
         const auto newSession = service.BeginSession();
         const auto newOwner   = service.BindConsumer(newSession);
-        return service.Configure(newOwner, newSession, 0, true) && CheckForwarding({}, true, 125, 0) &&
-               hook.Shutdown(true) == Result::Complete && CheckForwarding({}, true, 125, 125);
+        return service.Configure(newOwner, newSession, 40, true) && CheckForwarding(true, 125, 50) &&
+               hook.Shutdown(true) == Result::Complete && CheckForwarding(true, 125, 125);
     };
     const bool passed        = run();
     gShutdownDuringCall      = false;
@@ -680,6 +721,231 @@ bool CheckHookLifecycle()
         std::fprintf(stderr, "Hook lifecycle checks failed\n");
     }
     return passed && cleaned && uninitialized;
+}
+
+std::uint32_t gActiveActorId = 0x48u;
+
+std::uint32_t TestActiveActorId(const void*) noexcept
+{
+    return gActiveActorId;
+}
+
+// Substitute gFakeVtable and its gate target so fixtures need no fixed image base.
+constexpr std::uint32_t kFakeGateTarget = 0x00112233u;
+alignas(16) unsigned char gFakeVtable[0x300];
+alignas(16) unsigned char gOtherVtable[0x300];
+
+void PutWord(unsigned char* base, std::size_t offset, std::uintptr_t value)
+{
+    std::memcpy(base + offset, &value, sizeof(value));
+}
+
+// The fake original frees this actor to expose reads after forwarding.
+unsigned char* AllocActor()
+{
+    auto* data = static_cast<unsigned char*>(VirtualAlloc(nullptr, 0x4000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (data == nullptr)
+    {
+        std::terminate();
+    }
+    PutWord(data, 0, reinterpret_cast<std::uintptr_t>(gFakeVtable));
+    PutWord(data, 0xDC, 0x48u);
+    PutWord(data, 0x118, reinterpret_cast<std::uintptr_t>(data + 0x3500));
+    PutWord(data, 0xBF0, reinterpret_cast<std::uintptr_t>(data));
+    PutWord(data, 0x2B70, 0x200u);
+    PutWord(data, 0x3500 + 0xD0, reinterpret_cast<std::uintptr_t>(data));
+    return data;
+}
+
+// Direct runtime entry supplies the caller site; the original must see the entry environment.
+// Reads must finish before the original frees the actor.
+template <class Mutate>
+bool CheckRuntimeCall(Mutate mutate, std::int32_t duration, std::uintptr_t callerReturn, std::int32_t expected, const char* name)
+{
+    unsigned char* actor = AllocActor();
+    mutate(actor);
+    gCalls                    = 0;
+    gFreed                    = false;
+    const Environment initial = CaptureEnvironment();
+    SetEnvironment(_RC_DOWN, 0x1FA0u, 0x1357u);
+    const Environment entry = CaptureEnvironment();
+    gRuntime->ForwardWrapper(actor, duration, callerReturn);
+    const Environment after  = CaptureEnvironment();
+    const bool        passed = gCalls == 1 && gActor == actor && gDuration == expected && gFreed &&
+                               SameEnvironment(entry, gEntry) && SameEnvironment(after, gAfter);
+    RestoreEnvironment(initial);
+    if (!gFreed)
+    {
+        VirtualFree(actor, 0, MEM_RELEASE);
+    }
+    if (!passed)
+    {
+        std::fprintf(stderr, "Runtime case failed: %s: calls=%u duration=%d expected=%d\n", name, gCalls, gDuration, expected);
+    }
+    return passed;
+}
+
+bool CheckRuntime()
+{
+    using State  = bahamut_client::ActionMovementBoundaryState;
+    using Result = bahamut_client::ActionMovementHookShutdown;
+    if (MH_Initialize() != MH_OK)
+    {
+        return false;
+    }
+    PutWord(gFakeVtable, 0x268, kFakeGateTarget);
+    PutWord(gOtherVtable, 0x268, kFakeGateTarget);
+    const std::uintptr_t                                 producer = 0x8284AEu;
+    const bahamut_client::ActionMovementIdentity         identity{ producer, reinterpret_cast<std::uintptr_t>(gFakeVtable), kFakeGateTarget };
+    const bahamut_client::ActionMovementLocalActorSource source{ nullptr, &TestActiveActorId };
+    void*                                                target = reinterpret_cast<void*>(&FakeWrapper);
+    const auto                                           none   = [](unsigned char*)
+    {
+    };
+    const auto run = [&]()
+    {
+        bahamut_client::ActionMovementRuntime unverified;
+        if (unverified.InstallAt(target, false, source, identity) || unverified.Service().Status().boundary != State::TargetMismatch ||
+            unverified.Session() != 0 || MH_DisableHook(target) != MH_ERROR_NOT_CREATED)
+        {
+            return false;
+        }
+        bahamut_client::PlayerStateService    playerState;
+        bahamut_client::ActionMovementRuntime retail;
+        if (retail.Install(playerState) || retail.Service().Status().boundary != State::TargetMismatch ||
+            MH_DisableHook(reinterpret_cast<void*>(bahamut_client::kActionMovementWrapperVa)) != MH_ERROR_NOT_CREATED)
+        {
+            return false;
+        }
+        bahamut_client::ActionMovementRuntime runtime;
+        gRuntime = &runtime;
+        if (!runtime.InstallAt(target, true, source, identity) || runtime.Service().Status().boundary != State::Ready || runtime.Session() == 0)
+        {
+            return false;
+        }
+        bahamut_client::ActionMovementRuntime second;
+        if (second.InstallAt(target, true, source, identity) || second.Service().Status().boundary == State::Ready)
+        {
+            return false;
+        }
+        const auto session = runtime.Session();
+        const auto owner   = runtime.Service().BindConsumer(session);
+        gService           = &runtime.Service();
+        // Through the real detour the caller is the test frame, not the producer call.
+        if (!runtime.Service().Configure(owner, session, 40, true) || !CheckInvoke(125, 125))
+        {
+            return false;
+        }
+        bool admitted = CheckRuntimeCall(none, 125, producer, 50, "admitted");
+        admitted &= CheckRuntimeCall(none, 1, producer, 1, "scaled zero");
+        admitted &= CheckRuntimeCall(none, 0, producer, 0, "zero");
+        admitted &= CheckRuntimeCall(none, -1, producer, -1, "negative");
+        admitted &= CheckRuntimeCall(none, 125, producer + 1, 125, "caller");
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         PutWord(actor, 0x2B70, 0x240u);
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "gate bit");
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         actor[0xBF0 + 4] = 0x04;
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "timer flag");
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         PutWord(actor, 0xDC, 0x49u);
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "actor id");
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         PutWord(actor, 0, reinterpret_cast<std::uintptr_t>(gOtherVtable));
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "vtable");
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         PutWord(actor, 0x3500 + 0xD0, 0);
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "owner");
+        gActiveActorId = 0x49u;
+        admitted &= CheckRuntimeCall(none, 125, producer, 125, "local id");
+        gActiveActorId = 0x48u;
+        PutWord(gOtherVtable, 0x268, 0x1u);
+        admitted &= CheckRuntimeCall([](unsigned char* actor)
+                                     {
+                                         PutWord(actor, 0, reinterpret_cast<std::uintptr_t>(gOtherVtable));
+                                     },
+                                     125,
+                                     producer,
+                                     125,
+                                     "gate target");
+        if (!admitted)
+        {
+            return false;
+        }
+        // An unreadable actor at the producer site is forwarded unchanged without a fault.
+        gCalls = 0;
+        gRuntime->ForwardWrapper(reinterpret_cast<void*>(0x1000u), 125, producer);
+        if (gCalls != 1 || gDuration != 125)
+        {
+            return false;
+        }
+        // Shutdown from inside an admitted call: the call completes, and the hook stays resident.
+        gRuntimeShutdown    = true;
+        gRuntimeResult      = Result::Complete;
+        const bool inFlight = CheckRuntimeCall(none, 125, producer, 50, "shutdown in flight");
+        gRuntimeShutdown    = false;
+        if (!inFlight || gRuntimeResult != Result::AwaitingCalls || runtime.Service().Status().enabled || runtime.Session() != 0 ||
+            runtime.Service().Status().boundary != State::Unavailable || MH_DisableHook(target) != MH_ERROR_DISABLED)
+        {
+            return false;
+        }
+        // Late detour entries must forward unchanged exactly once.
+        if (!CheckInvoke(125, 125) || !CheckRuntimeCall(none, 125, producer, 125, "straggler") ||
+            runtime.Shutdown() != Result::AwaitingCalls || second.InstallAt(target, true, source, identity))
+        {
+            return false;
+        }
+        // The routing slot and trampoline outlive Shutdown; only a fixture may remove them.
+        if (MH_EnableHook(target) != MH_OK || !CheckInvoke(125, 125) || !CheckRuntimeCall(none, 125, producer, 125, "re-entered straggler") ||
+            MH_DisableHook(target) != MH_OK)
+        {
+            return false;
+        }
+        if (runtime.RemoveSyntheticHookForTesting() != Result::Complete || MH_DisableHook(target) != MH_ERROR_NOT_CREATED || !CheckInvoke(125, 125))
+        {
+            return false;
+        }
+        gRuntime = &second;
+        if (!second.InstallAt(target, true, source, identity) || second.Session() == 0)
+        {
+            return false;
+        }
+        return second.RemoveSyntheticHookForTesting() == Result::Complete && MH_DisableHook(target) == MH_ERROR_NOT_CREATED;
+    };
+    const bool passed        = run();
+    gRuntime                 = nullptr;
+    gService                 = nullptr;
+    const bool uninitialized = MH_Uninitialize() == MH_OK;
+    if (!passed)
+    {
+        std::fprintf(stderr, "Runtime checks failed\n");
+    }
+    return passed && uninitialized;
 }
 
 #endif
@@ -704,6 +970,10 @@ int main()
     if (!CheckHookLifecycle())
     {
         return 4;
+    }
+    if (!CheckRuntime())
+    {
+        return 5;
     }
 #endif
     return 0;

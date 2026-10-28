@@ -543,7 +543,25 @@ bool AddonHost::AdmitActionMovementConsumer(
     {
         return false;
     }
-    auto&      addon  = **found;
+    return BindActionMovement(**found, service, session);
+}
+
+bool AddonHost::RegisterActionMovementConsumer(
+    bahamut_client::ActionMovementService& service,
+    const std::filesystem::path&           manifestPath,
+    std::uint64_t                          session)
+{
+    if (actionMovementShutdown_ || !manifestPath.is_absolute() || session == 0)
+    {
+        return false;
+    }
+    actionMovementRegistration_ = ActionMovementRegistration{ &service, manifestPath, session };
+    static_cast<void>(AdmitActionMovementConsumer(service, manifestPath, session));
+    return true;
+}
+
+bool AddonHost::BindActionMovement(Instance& addon, bahamut_client::ActionMovementService& service, std::uint64_t session)
+{
     const auto status = service.Status();
     if (status.boundary != bahamut_client::ActionMovementBoundaryState::Ready || status.session != session)
     {
@@ -567,6 +585,16 @@ bool AddonHost::AdmitActionMovementConsumer(
     return true;
 }
 
+void AddonHost::AdmitRegisteredActionMovement(Instance& addon, const std::filesystem::path& manifestPath)
+{
+    if (actionMovementShutdown_ || !actionMovementRegistration_ || addon.id != "nolock" || addon.faulted || addon.closing ||
+        addon.state == nullptr || manifestPath.lexically_normal() != actionMovementRegistration_->manifestPath.lexically_normal())
+    {
+        return;
+    }
+    static_cast<void>(BindActionMovement(addon, *actionMovementRegistration_->service, actionMovementRegistration_->session));
+}
+
 void AddonHost::RevokeActionMovement(Instance& addon)
 {
     if (addon.actionMovement != nullptr)
@@ -581,6 +609,7 @@ void AddonHost::RevokeActionMovement(Instance& addon)
 void AddonHost::ShutdownActionMovement()
 {
     actionMovementShutdown_ = true;
+    actionMovementRegistration_.reset();
     for (const auto& addon : addons_)
     {
         RevokeActionMovement(*addon);
@@ -1362,6 +1391,11 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     registerFunction("settings_get", &LuaSettingsGet);
     registerFunction("settings_set", &LuaSettingsSet);
     registerFunction("player_state", &LuaPlayerState);
+    if (addon->id == "nolock")
+    {
+        registerFunction("action_movement_configure", &LuaActionMovementConfigure);
+        registerFunction("action_movement_status", &LuaActionMovementStatus);
+    }
     if (addon->id == "distance")
     {
         registerFunction("target_distance", &LuaTargetDistance);
@@ -1413,6 +1447,11 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
         lua_pop(state, 1);
         Fault(*addon);
         return addon;
+    }
+    // Admit before the load callback so it can apply policy to the new owner.
+    if (owner != nullptr)
+    {
+        owner->AdmitRegisteredActionMovement(*addon, manifestPath);
     }
     Invoke(*addon, "load");
     return addon;
@@ -1775,6 +1814,91 @@ int AddonHost::LuaChatLogWrite(lua_State* state)
             addon->chatLogDirectory / toPath(fallbackFilename), time, cleaned);
     }
     lua_pushboolean(state, written);
+    return 1;
+}
+
+const char* AddonHost::ActionMovementUnavailableReason(const Instance& addon, bahamut_client::ActionMovementStatus& status)
+{
+    if (addon.id != "nolock" || addon.faulted || addon.closing || addon.owner == nullptr ||
+        addon.owner->actionMovementShutdown_ || addon.actionMovement == nullptr)
+    {
+        return "not_admitted";
+    }
+    status = addon.actionMovement->Status();
+    using bahamut_client::ActionMovementBoundaryState;
+    switch (status.boundary)
+    {
+        case ActionMovementBoundaryState::Unavailable:
+            return "unavailable";
+        case ActionMovementBoundaryState::TargetMismatch:
+            return "target_mismatch";
+        case ActionMovementBoundaryState::InstallFailed:
+            return "install_failed";
+        case ActionMovementBoundaryState::CleanupFailed:
+            return "cleanup_failed";
+        case ActionMovementBoundaryState::Ready:
+            break;
+    }
+    if (status.session == 0 || status.session != addon.actionMovementSession)
+    {
+        return "session_unavailable";
+    }
+    if (status.owner == 0 || status.owner != addon.actionMovementOwner)
+    {
+        return "not_admitted";
+    }
+    return nullptr;
+}
+
+int AddonHost::LuaActionMovementConfigure(lua_State* state)
+{
+    if (lua_gettop(state) != 2 || lua_type(state, 1) != LUA_TNUMBER || lua_type(state, 2) != LUA_TBOOLEAN)
+    {
+        lua_pushboolean(state, false);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    const auto percent = lua_tonumber(state, 1);
+    if (!std::isfinite(percent) || percent < 0 || percent > 100 || percent != std::floor(percent))
+    {
+        lua_pushboolean(state, false);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    auto*                                addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    bahamut_client::ActionMovementStatus status;
+    const char*                          reason     = addon == nullptr ? "not_admitted" : ActionMovementUnavailableReason(*addon, status);
+    const bool                           configured = reason == nullptr && addon->actionMovement->Configure(
+                                                                               addon->actionMovementOwner, addon->actionMovementSession, static_cast<std::uint32_t>(percent), lua_toboolean(state, 2) != 0);
+    lua_pushboolean(state, configured);
+    lua_pushstring(state, configured ? "ready" : reason == nullptr ? "not_admitted"
+                                                                   : reason);
+    return 2;
+}
+
+int AddonHost::LuaActionMovementStatus(lua_State* state)
+{
+    if (lua_gettop(state) != 0)
+    {
+        lua_pushnil(state);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    auto*                                addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    bahamut_client::ActionMovementStatus status;
+    const char*                          reason    = addon == nullptr ? "not_admitted" : ActionMovementUnavailableReason(*addon, status);
+    const bool                           available = reason == nullptr;
+    lua_newtable(state);
+    lua_pushboolean(state, available);
+    lua_setfield(state, -2, "available");
+    lua_pushboolean(state, available && status.enabled);
+    lua_setfield(state, -2, "enabled");
+    lua_pushnumber(state, available ? status.requestedPercent : 0);
+    lua_setfield(state, -2, "requested_percent");
+    lua_pushnumber(state, available ? status.effectivePercent : 100);
+    lua_setfield(state, -2, "effective_percent");
+    lua_pushstring(state, available ? "ready" : reason);
+    lua_setfield(state, -2, "reason");
     return 1;
 }
 

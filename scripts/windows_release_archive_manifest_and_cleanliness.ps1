@@ -51,6 +51,8 @@ $expectedManifest = @(
     'addons/wiki/wiki.lua'
     'addons/targetlines/addon.toml'
     'addons/targetlines/targetlines.lua'
+    'addons/nolock/addon.toml'
+    'addons/nolock/nolock.lua'
     'scripts/default.txt'
 )
 
@@ -68,6 +70,7 @@ $expectedDirectories = @(
     'addons/pos/'
     'addons/wiki/'
     'addons/targetlines/'
+    'addons/nolock/'
     'licenses/'
     'config/'
     'config/addons/'

@@ -85,24 +85,30 @@ The native suite covers:
 - DAT opening and resolution for the exact supported client build.
 - D3D9 device, swap-chain `Present`, `Reset`, and input forwarding.
 - Telemetry and the isolated Lua addon lifecycle against the bundled test client.
-- Movement-duration policy and native addon consumer admission/revocation.
-  Synthetic Lua fixtures cover faults, reload, disable and explicit host shutdown.
-  The runtime supplies no retail movement admission or Lua movement API.
-  Exact setter/wrapper/producer-call byte fixtures and copied native call evidence
-  test candidate admission, stale-session fallback and zero-result rejection.
-  Synthetic test-client identity remains allowed for ordinary runtime checks
-  and is rejected by the stricter movement target check.
-  A test-only baseline observer records independent wrapper/setter entry facts
-  in fixed storage, forwards the duration unchanged and performs no reads after
-  the original. Caller filtering precedes guarded reads. The first read fault,
-  capacity limit, invalid object, failed clock, producer-thread change or
-  collection reentry stops recording. Rows confer no retail eligibility or
-  paired-call identity. The cold owner must stop and drain calls before reading
-  or retiring observer storage. Native fixtures check x87/MXCSR, LastError,
-  stack/register forwarding and an original that frees the receiver. Its
-  optional `--benchmark` measures fixture calls, not game performance.
-  MSVC Win32 also tests synthetic MinHook installation, rollback and cleanup
-  failures; the movement hook remains exclusive to its test target.
+- NoLock movement policy and addon admission, including typed Lua requests,
+  application of 50% on load or update, faults, reload, disable and host shutdown.
+  Offline fixtures check the absence of NoLock commands and handling of missing
+  older-host APIs. Exact setter, wrapper and producer-call byte fixtures cover
+  target verification; synthetic test-client identity is accepted for ordinary
+  runtime checks but rejected by the movement target check.
+  A synthetic actor, fake vtable and stub wrapper exercise the binding to
+  `FUN_0065ED30` and caller return `0x008284AE`, guarded capture,
+  stale-session fallback, rejection of a scaled duration of zero, installation
+  and shutdown with a resident trampoline and detour. Native fixtures check
+  x87/MXCSR, LastError, stack/register forwarding and an original that frees the
+  receiver to detect reads after forwarding. MSVC Win32 also tests synthetic
+  MinHook installation, rollback and cleanup failures in the dedicated
+  movement test target.
+  A test-only baseline observer records independent wrapper and setter entries
+  in fixed storage, forwards unchanged and reads nothing after the original.
+  Fixtures check caller filtering before reads and recording stops on a read
+  fault, capacity limit, invalid object, failed clock, producer-thread change
+  or collection reentry. Rows establish neither retail eligibility nor paired
+  calls; the caller must stop and drain calls before reading or retiring storage.
+  Its optional `--benchmark` measures fixture calls, not game performance.
+  See [NoLock movement policy](../docs/extensions.md#nolock-movement-policy)
+  for the runtime contract. These fixtures do not establish retail movement
+  behavior; live acceptance of this build is pending.
 
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.

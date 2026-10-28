@@ -34,7 +34,7 @@ bool ActionMovementHook::Install(void* target, void* detour, bool qualified)
         return false;
     }
     status_.target = target;
-    original_.store(reinterpret_cast<ActionMovementSetter>(trampoline), std::memory_order_release);
+    original_.store(reinterpret_cast<ActionMovementWrapper>(trampoline), std::memory_order_release);
     if (trampoline == nullptr)
     {
         status_.installFailure = ActionMovementHookStage::Trampoline;
@@ -100,7 +100,7 @@ ActionMovementHookShutdown ActionMovementHook::Shutdown(bool callsQuiescent)
     return ActionMovementHookShutdown::Complete;
 }
 
-ActionMovementSetter ActionMovementHook::Original() const
+ActionMovementWrapper ActionMovementHook::Original() const
 {
     return original_.load(std::memory_order_acquire);
 }

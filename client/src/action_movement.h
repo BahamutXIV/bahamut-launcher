@@ -8,27 +8,18 @@ namespace bahamut_client
 {
 
 struct ActionMovementCallContext;
-
-struct ActionMovementPolicy
-{
-    bool          enabled       = false;
-    std::uint32_t retainPercent = 0;
-};
+struct ActionMovementIdentity;
 
 // Retail 1.23b FUN_007B0700: ECX receiver, signed [ESP+4], void return, RET 4.
 // https://github.com/XIVLegacy/xivl-client-structs/blob/3227221932dc99a9c1183e388bd6684564f4c732/docs/action-movement-wait.md#native-boundary
 using ActionMovementSetter = void(__thiscall*)(void*, std::int32_t);
 
+// Retail 1.23b FUN_0065ED30: stack actor, signed [ESP+8] duration, void return, RET 8.
+// https://github.com/XIVLegacy/xivl-client-structs/blob/3227221932dc99a9c1183e388bd6684564f4c732/docs/action-movement-wait.md#native-boundary
+using ActionMovementWrapper = void(__stdcall*)(void*, std::int32_t);
+
 // Integer truncation is policy, not a claim about retail timer units or rounding.
 [[nodiscard]] std::int32_t ScaleActionMovementDuration(std::int32_t duration, std::uint32_t retainPercent) noexcept;
-
-// The caller supplies a copied policy and qualified eligibility; no retail hook is installed here.
-// original must be callable. The receiver remains borrowed only for that original call.
-void ForwardActionMovement(void*                receiver,
-                           std::int32_t         duration,
-                           bool                 eligible,
-                           ActionMovementPolicy policy,
-                           ActionMovementSetter original);
 
 enum class ActionMovementBoundaryState
 {
@@ -52,8 +43,8 @@ struct ActionMovementStatus
 class ActionMovementService
 {
 public:
-    // Host-only inputs: Ready follows hook qualification/installation; session and consumer
-    // admission follow verified gameplay and the intended healthy addon. This core proves neither.
+    // The host qualifies and installs the hook before reporting Ready, then starts a service session.
+    // Consumer admission selects the intended healthy addon; each wrapper call checks copied actor evidence.
     void                        SetBoundaryState(ActionMovementBoundaryState state);
     [[nodiscard]] std::uint64_t BeginSession();
     [[nodiscard]] std::uint64_t BindConsumer(std::uint64_t session);
@@ -64,12 +55,11 @@ public:
     void                               Shutdown();
     [[nodiscard]] ActionMovementStatus Status() const;
 
-    // The atomic load admits this call. Revocation affects later loads; an admitted
-    // original call may finish. The service and trampoline must outlive every call.
-    void Forward(void* receiver, std::int32_t duration, bool eligible, ActionMovementSetter original) const;
-
-    // Uses only copied entry evidence and the atomic policy; no native getters or locks.
-    void Forward(void* receiver, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementSetter original) const;
+    // Uses copied evidence and atomic policy only; stamps currentSession without native getters or locks.
+    // Calls original exactly once, scaling only admitted calls. Revocation affects later loads.
+    // An admitted call may finish; the service and trampoline must outlive every call.
+    void ForwardWrapper(void* actor, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementWrapper original, const ActionMovementIdentity& identity) const;
+    void ForwardWrapper(void* actor, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementWrapper original) const;
 
 private:
     void ClearConsumer();

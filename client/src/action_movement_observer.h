@@ -10,8 +10,6 @@
 namespace bahamut_client
 {
 
-using ActionMovementWrapper = void(__stdcall*)(void*, std::int32_t);
-
 enum class ActionMovementObservationKind : std::uint32_t
 {
     WrapperEntry,
@@ -85,8 +83,8 @@ public:
     [[nodiscard]] ActionMovementObservationStop StopReason() const noexcept;
     [[nodiscard]] std::uint32_t                 GuardedBatches() const noexcept;
     [[nodiscard]] std::uint32_t                 ReadFaults() const noexcept;
-    // Stop does not prove call drain. Read only after external quiescence; retain
-    // observer, storage and original code until then. Tokens are never dereferenced.
+    // Stop does not drain calls. Read only after the caller proves all calls have finished;
+    // retain the observer, storage and original code until then. Copied tokens are never dereferenced.
     [[nodiscard]] std::span<const ActionMovementObservation> RecordsAfterQuiescence() const noexcept;
 
 private:

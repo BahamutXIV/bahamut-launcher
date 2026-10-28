@@ -52,20 +52,20 @@ public:
 
     // One owner per service. The host owns MinHook initialization, target qualification,
     // serialized lifecycle calls and detour routing; all api entries must be callable.
-    // No retail image or caller classification is supplied here.
+    // The trampoline supplies the original wrapper; image and caller checks belong to the runtime.
     [[nodiscard]] bool Install(void* target, void* detour, bool qualified);
     // callsQuiescent is external proof that detour/trampoline calls have finished.
     // Retain this owner, service and detour code until Complete; destruction does no cleanup.
     [[nodiscard]] ActionMovementHookShutdown Shutdown(bool callsQuiescent);
-    [[nodiscard]] ActionMovementSetter       Original() const;
+    [[nodiscard]] ActionMovementWrapper      Original() const;
     [[nodiscard]] ActionMovementHookStatus   Status() const;
 
 private:
-    static_assert(std::atomic<ActionMovementSetter>::is_always_lock_free);
-    ActionMovementService&            service_;
-    ActionMovementHookApi             api_;
-    ActionMovementHookStatus          status_;
-    std::atomic<ActionMovementSetter> original_ = nullptr;
+    static_assert(std::atomic<ActionMovementWrapper>::is_always_lock_free);
+    ActionMovementService&             service_;
+    ActionMovementHookApi              api_;
+    ActionMovementHookStatus           status_;
+    std::atomic<ActionMovementWrapper> original_ = nullptr;
 };
 
 } // namespace bahamut_client
