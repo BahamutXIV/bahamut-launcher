@@ -2,10 +2,14 @@
 
 #include "action_movement.h"
 #include "actor_name.h"
+#include "addon_records.h"
 #include "area_names.h"
 #include "autologin.h"
 #include "custom_timer.h"
 #include "enemy_cast.h"
+#include "equipment_state.h"
+#include "gearsets_debug.h"
+#include "item_names.h"
 #include "player_state.h"
 #include "servicing_lock.h"
 #include "target_distance.h"
@@ -419,6 +423,28 @@ void AddonHost::SetAutologinService(bahamut_client::AutologinService* autologin)
     }
 }
 
+void AddonHost::SetEquipmentStateService(
+    const bahamut_client::EquipmentStateService* equipmentState)
+{
+    equipmentState_ = equipmentState;
+}
+
+void AddonHost::SetGearsetsRuntime(bahamut_client::GearsetsRuntime* runtime)
+{
+    gearsetsRuntime_ = runtime != nullptr ? runtime : &gearsetsFallback_;
+}
+
+void AddonHost::SetProfileKeyProvider(
+    std::function<std::optional<std::string>()> provider)
+{
+    profileKey_ = std::move(provider);
+}
+
+void AddonHost::SetGearsetsDebugPort(bahamut_client::GearsetsDebugPort* port)
+{
+    gearsetsDebug_ = port;
+}
+
 bool IsHexDigit(unsigned char value)
 {
     return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F');
@@ -634,6 +660,7 @@ void AddonHost::Fault(Instance& addon)
     RevokeActionMovement(addon);
     addon.faulted  = true;
     addon.drawSink = nullptr;
+    ReportGearsetsState(addon, false);
 }
 
 bool AddonHost::Enable(const std::filesystem::path& manifestPath)
@@ -658,6 +685,7 @@ bool AddonHost::Enable(const std::filesystem::path& manifestPath)
         return false;
     }
     addons_.push_back(std::move(addon));
+    ReportGearsetsState(*addons_.back(), !addons_.back()->faulted && addons_.back()->state != nullptr);
     if (*id == "zonename")
     {
         ResetAreaTransition();
@@ -723,6 +751,7 @@ bool AddonHost::ReloadAddon(std::string_view addonId, packet_capture::EndReason 
         combatQueue_.clear();
         combatDropped_ = 0;
     }
+    ReportGearsetsState(**found, false);
     Close(**found);
     auto replacement = LoadOne(manifest, settingsRoot_, chatLogsRoot_, this, playerState_, targetDistance_, customTimer_, enemyCast_, autologin_, &clipboardSink_, &chatSink_, &urlSink_);
     if (replacement == nullptr)
@@ -731,6 +760,7 @@ bool AddonHost::ReloadAddon(std::string_view addonId, packet_capture::EndReason 
         return false;
     }
     *found = std::move(replacement);
+    ReportGearsetsState(**found, !(*found)->faulted && (*found)->state != nullptr);
     if (addonId == "packetlogger")
     {
         ReplacePacketWriter(**found);
@@ -779,6 +809,7 @@ bool AddonHost::Disable(std::string_view addonId)
         combatQueue_.clear();
         combatDropped_ = 0;
     }
+    ReportGearsetsState(**found, false);
     Close(**found);
     addons_.erase(found);
     return true;
@@ -1051,6 +1082,10 @@ void AddonHost::QueueCombatResult(const packet_observer::GameMessage& message)
 void AddonHost::Update(double frameDeltaSeconds)
 {
     const LuaLock luaLock(luaMutex_);
+    if (gearsetsDebug_ != nullptr)
+    {
+        gearsetsDebug_->OnRenderFrame();
+    }
     if (const auto writer = PacketWriter(); writer != nullptr)
     {
         DrainPacketNotices(*writer);
@@ -1462,6 +1497,29 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     {
         registerFunction("open_url", &LuaOpenUrl);
     }
+    if (addon->id == "gearsets")
+    {
+        registerFunction("profile_key", &LuaProfileKey);
+        registerFunction("equipment_snapshot", &LuaEquipmentSnapshot);
+        registerFunction("equipment_session", &LuaEquipmentSession);
+        registerFunction("resolve_equipment_items", &LuaResolveEquipmentItems);
+        registerFunction("find_item_copy", &LuaFindItemCopy);
+        registerFunction("item_id", &LuaItemId);
+        registerFunction("item_name", &LuaItemName);
+        registerFunction("gearsets_window", &LuaGearsetsWindow);
+        registerFunction("gearsets_equip", &LuaGearsetsEquip);
+        registerFunction("gearsets_cancel", &LuaGearsetsCancel);
+        registerFunction("gearsets_result", &LuaGearsetsResult);
+        registerFunction("record_list", &LuaRecordList);
+        registerFunction("record_load", &LuaRecordLoad);
+        registerFunction("record_save", &LuaRecordSave);
+        registerFunction("record_delete", &LuaRecordDelete);
+        if (owner != nullptr && owner->gearsetsDebug_ != nullptr && owner->gearsetsDebug_->EquipEnabled())
+        {
+            registerFunction("debug_equip", &LuaDebugEquip);
+            registerFunction("debug_equip_status", &LuaDebugEquipStatus);
+        }
+    }
     lua_setglobal(state, "bahamut");
 
     if (luaL_loadbuffer(state, script->data(), script->size(), manifest->entry.c_str()) != 0 || lua_pcall(state, 0, 0, 0) != 0)
@@ -1522,6 +1580,19 @@ bool AddonHost::Invoke(Instance& addon, const char* callback, int argumentCount)
     lua_pop(state, 1);
     Fault(addon);
     return false;
+}
+
+void AddonHost::ReportGearsetsState(const Instance& addon, bool active)
+{
+    if (addon.id == "gearsets" && addon.owner != nullptr)
+    {
+        addon.owner->gearsetsActive_ = active;
+        addon.owner->gearsetsRuntime_->SetActive(active);
+    }
+    if (addon.id == "gearsets" && addon.owner != nullptr && addon.owner->gearsetsDebug_ != nullptr)
+    {
+        addon.owner->gearsetsDebug_->OnAddonStateChanged(active);
+    }
 }
 
 bool AddonHost::InvokeCommand(Instance& addon, std::string_view command, bool& handled)
@@ -1778,6 +1849,619 @@ int AddonHost::LuaTargetlines(lua_State* state)
     }
     addon->drawSink->targetlines(addon->drawSink->context, addon->id.c_str());
     return 0;
+}
+
+namespace
+{
+
+// Only a valid key from the host can identify the current record profile.
+std::optional<std::string> CurrentProfileKey(const std::function<std::optional<std::string>()>& provider)
+{
+    if (!provider)
+    {
+        return std::nullopt;
+    }
+    std::optional<std::string> key = provider();
+    if (!key || !bahamut_client::IsRecordKey(*key))
+    {
+        return std::nullopt;
+    }
+    return key;
+}
+
+// Recheck the caller's profile key: a character switch must refuse the call,
+// never redirect it to the new character's records.
+std::optional<std::string> ExpectedProfileKey(lua_State* state, int index, const std::function<std::optional<std::string>()>& provider)
+{
+    std::size_t length   = 0;
+    const char* expected = lua_type(state, index) == LUA_TSTRING ? lua_tolstring(state, index, &length) : nullptr;
+    auto        key      = expected != nullptr ? CurrentProfileKey(provider) : std::nullopt;
+    if (!key || *key != std::string_view(expected, length))
+    {
+        return std::nullopt;
+    }
+    return key;
+}
+
+} // namespace
+
+int AddonHost::LuaProfileKey(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->id != "gearsets" || addon->owner == nullptr)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    const auto key = CurrentProfileKey(addon->owner->profileKey_);
+    if (!key)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    lua_pushlstring(state, key->data(), key->size());
+    return 1;
+}
+
+int AddonHost::LuaEquipmentSession(lua_State* state)
+{
+    auto*      addon   = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto session = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && addon->owner->equipmentState_ != nullptr
+                             ? addon->owner->equipmentState_->SessionGeneration()
+                             : 0;
+    const auto text    = std::to_string(session);
+    lua_pushlstring(state, text.data(), text.size());
+    return 1;
+}
+
+int AddonHost::LuaEquipmentSnapshot(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->id != "gearsets" || addon->owner == nullptr || addon->owner->equipmentState_ == nullptr)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    const auto snapshot = addon->owner->equipmentState_->Snapshot();
+    if (!snapshot)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    lua_newtable(state);
+    lua_pushboolean(state, snapshot->complete ? 1 : 0);
+    lua_setfield(state, -2, "complete");
+    lua_pushnumber(state, static_cast<lua_Number>(snapshot->generation));
+    lua_setfield(state, -2, "generation");
+    const auto session = std::to_string(snapshot->session);
+    lua_pushlstring(state, session.data(), session.size());
+    lua_setfield(state, -2, "session");
+    if (snapshot->classId)
+    {
+        lua_pushnumber(state, *snapshot->classId);
+        lua_setfield(state, -2, "class_id");
+    }
+    if (snapshot->jobId)
+    {
+        lua_pushnumber(state, *snapshot->jobId);
+        lua_setfield(state, -2, "job_id");
+    }
+    lua_newtable(state);
+    int row = 0;
+    for (const auto& slot : snapshot->slots)
+    {
+        lua_newtable(state);
+        lua_pushnumber(state, slot.slot);
+        lua_setfield(state, -2, "slot");
+        switch (slot.state)
+        {
+            case bahamut_client::EquipmentSlotState::Empty:
+                lua_pushstring(state, "empty");
+                break;
+            case bahamut_client::EquipmentSlotState::Item:
+                lua_pushstring(state, "item");
+                break;
+            case bahamut_client::EquipmentSlotState::Unknown:
+                lua_pushstring(state, "unknown");
+                break;
+        }
+        lua_setfield(state, -2, "state");
+        if (slot.state == bahamut_client::EquipmentSlotState::Item)
+        {
+            // Instance ids can exceed 2^53, so Lua receives fixed-width hex text.
+            char uid[17]{};
+            std::snprintf(uid, sizeof(uid), "%016llx", static_cast<unsigned long long>(slot.uid));
+            lua_pushstring(state, uid);
+            lua_setfield(state, -2, "uid");
+            lua_pushnumber(state, static_cast<lua_Number>(slot.catalogId));
+            lua_setfield(state, -2, "catalog");
+        }
+        lua_rawseti(state, -2, ++row);
+    }
+    lua_setfield(state, -2, "slots");
+    return 1;
+}
+
+int AddonHost::LuaRecordList(lua_State* state)
+{
+    auto*      addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto key   = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && !addon->owner->settingsRoot_.empty()
+                           ? ExpectedProfileKey(state, 1, addon->owner->profileKey_)
+                           : std::nullopt;
+    if (!key)
+    {
+        lua_pushstring(state, "unavailable");
+        lua_newtable(state);
+        return 2;
+    }
+    std::vector<std::string>               names;
+    const bahamut_client::AddonRecordStore store(addon->owner->settingsRoot_ / L"gearsets" / L"sets");
+    const bahamut_client::RecordStatus     status = store.List(*key, names);
+    const std::string_view                 label  = bahamut_client::RecordStatusName(status);
+    lua_pushlstring(state, label.data(), label.size());
+    lua_newtable(state);
+    int index = 0;
+    for (const auto& entry : names)
+    {
+        lua_pushlstring(state, entry.data(), entry.size());
+        lua_rawseti(state, -2, ++index);
+    }
+    return 2;
+}
+
+int AddonHost::LuaRecordLoad(lua_State* state)
+{
+    auto*       addon  = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    std::size_t length = 0;
+    const char* name   = lua_tolstring(state, 1, &length);
+    const auto  key    = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && !addon->owner->settingsRoot_.empty()
+                             ? ExpectedProfileKey(state, 2, addon->owner->profileKey_)
+                             : std::nullopt;
+    if (!key)
+    {
+        lua_pushstring(state, "unavailable");
+        lua_pushnil(state);
+        return 2;
+    }
+    if (name == nullptr)
+    {
+        lua_pushstring(state, "invalid");
+        lua_pushnil(state);
+        return 2;
+    }
+    std::string                            body;
+    const bahamut_client::AddonRecordStore store(addon->owner->settingsRoot_ / L"gearsets" / L"sets");
+    const bahamut_client::RecordStatus     status = store.Load(*key, std::string_view(name, length), body);
+    const std::string_view                 label  = bahamut_client::RecordStatusName(status);
+    lua_pushlstring(state, label.data(), label.size());
+    if (status == bahamut_client::RecordStatus::Ok)
+    {
+        lua_pushlstring(state, body.data(), body.size());
+    }
+    else
+    {
+        lua_pushnil(state);
+    }
+    return 2;
+}
+
+int AddonHost::LuaRecordDelete(lua_State* state)
+{
+    auto*       addon  = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    std::size_t length = 0;
+    const char* name   = lua_tolstring(state, 1, &length);
+    const auto  key    = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && !addon->owner->settingsRoot_.empty()
+                             ? ExpectedProfileKey(state, 2, addon->owner->profileKey_)
+                             : std::nullopt;
+    if (!key)
+    {
+        lua_pushstring(state, "unavailable");
+        return 1;
+    }
+    const bahamut_client::AddonRecordStore store(addon->owner->settingsRoot_ / L"gearsets" / L"sets");
+    const auto                             status = name != nullptr ? store.Delete(*key, std::string_view(name, length)) : bahamut_client::RecordStatus::Invalid;
+    const auto                             label  = bahamut_client::RecordStatusName(status);
+    lua_pushlstring(state, label.data(), label.size());
+    return 1;
+}
+
+int AddonHost::LuaRecordSave(lua_State* state)
+{
+    auto*       addon      = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    std::size_t nameLength = 0;
+    std::size_t bodyLength = 0;
+    const char* name       = lua_tolstring(state, 1, &nameLength);
+    const char* body       = lua_tolstring(state, 2, &bodyLength);
+    const auto  key        = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && !addon->owner->settingsRoot_.empty()
+                                 ? ExpectedProfileKey(state, 3, addon->owner->profileKey_)
+                                 : std::nullopt;
+    if (!key)
+    {
+        lua_pushstring(state, "unavailable");
+        return 1;
+    }
+    if (name == nullptr || body == nullptr)
+    {
+        lua_pushstring(state, "invalid");
+        return 1;
+    }
+    const bahamut_client::AddonRecordStore store(addon->owner->settingsRoot_ / L"gearsets" / L"sets");
+    const bahamut_client::RecordStatus     status = store.Save(*key, std::string_view(name, nameLength), std::string_view(body, bodyLength));
+    const std::string_view                 label  = bahamut_client::RecordStatusName(status);
+    lua_pushlstring(state, label.data(), label.size());
+    return 1;
+}
+
+namespace
+{
+
+std::optional<std::uint32_t> WholeArgument(lua_State* state, int index, std::uint32_t minimum, std::uint32_t maximum)
+{
+    if (lua_type(state, index) != LUA_TNUMBER)
+    {
+        return std::nullopt;
+    }
+    const lua_Number value = lua_tonumber(state, index);
+    if (!std::isfinite(value) || value < minimum || value > maximum || value != std::floor(value))
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+// A missing, fractional or out-of-range field reads as 0.
+std::uint32_t WholeField(lua_State* state, int table, const char* name, std::uint32_t maximum)
+{
+    lua_getfield(state, table, name);
+    const auto value = WholeArgument(state, -1, 0u, maximum);
+    lua_pop(state, 1);
+    return value.value_or(0u);
+}
+
+// Matches the addon's own set limit.
+constexpr std::size_t kMaximumGearsets = 100;
+
+// Instance ids travel as 1-16 hex digits so values above 2^53 stay exact.
+std::optional<std::uint64_t> HexUidArgument(lua_State* state, int index)
+{
+    std::size_t length = 0;
+    const char* text   = lua_type(state, index) == LUA_TSTRING ? lua_tolstring(state, index, &length) : nullptr;
+    if (text == nullptr || length == 0 || length > 16)
+    {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0;
+    for (std::size_t offset = 0; offset < length; ++offset)
+    {
+        const unsigned char digit = static_cast<unsigned char>(text[offset]);
+        if (!IsHexDigit(digit))
+        {
+            return std::nullopt;
+        }
+        const unsigned int nibble = digit <= '9' ? digit - '0' : (digit | 0x20u) - 'a' + 10u;
+        value                     = (value << 4u) | nibble;
+    }
+    return value;
+}
+
+// Registered only behind the equip switch; the service rechecks the switch.
+bahamut_client::GearsetsDebugPort* DebugEquipPort(const std::string& id, bahamut_client::GearsetsDebugPort* port)
+{
+    return id == "gearsets" ? port : nullptr;
+}
+
+} // namespace
+
+int AddonHost::LuaGearsetsEquip(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon != nullptr && addon->owner != nullptr && (!addon->owner->gearsetsActive_ || addon->faulted))
+    {
+        lua_pushboolean(state, 0);
+        lua_pushstring(state, "inactive");
+        return 2;
+    }
+    if (addon == nullptr || addon->id != "gearsets" || addon->owner == nullptr || !lua_istable(state, 1))
+    {
+        lua_pushboolean(state, 0);
+        lua_pushstring(state, "invalid-intent");
+        return 2;
+    }
+    bahamut_client::GearsetIntent intent;
+    lua_getfield(state, 1, "slots");
+    bool valid = lua_istable(state, -1);
+    for (std::size_t index = 0; valid && index < bahamut_client::kEquipmentSlotCount; ++index)
+    {
+        const auto slot = bahamut_client::kEquipmentSlots[index];
+        lua_rawgeti(state, -1, slot);
+        if (!lua_istable(state, -1))
+        {
+            lua_pop(state, 1);
+            valid = false;
+            break;
+        }
+        lua_getfield(state, -1, "state");
+        const char* kind  = lua_tostring(state, -1);
+        const bool  empty = kind != nullptr && std::string_view(kind) == "empty";
+        const bool  item  = kind != nullptr && std::string_view(kind) == "item";
+        lua_pop(state, 1);
+        lua_getfield(state, -1, "uid");
+        const auto uid      = item ? HexUidArgument(state, -1) : std::nullopt;
+        valid               = empty || (item && uid && *uid != 0);
+        intent.slots[index] = { slot, empty ? bahamut_client::EquipmentSlotState::Empty : bahamut_client::EquipmentSlotState::Item, uid.value_or(0), 0 };
+        lua_pop(state, 2);
+    }
+    lua_pop(state, 1);
+    if (!valid)
+    {
+        lua_pushboolean(state, 0);
+        lua_pushstring(state, "invalid-intent");
+        return 2;
+    }
+    bahamut_client::GearsetsView view;
+    if (addon->owner->equipmentState_ != nullptr)
+    {
+        if (const auto inventory = addon->owner->equipmentState_->Inventory())
+        {
+            view.inventory = *inventory;
+            view.session   = inventory->equipment.session;
+            view.classId   = inventory->equipment.classId.value_or(0);
+            view.jobId     = inventory->equipment.jobId.value_or(0);
+        }
+    }
+    intent.session   = view.session;
+    const auto begun = addon->owner->gearsetsRuntime_->Begin(intent, view);
+    lua_pushboolean(state, begun ? 1 : 0);
+    lua_pushstring(state, begun ? begun->reason.c_str() : "busy");
+    return 2;
+}
+
+int AddonHost::LuaGearsetsCancel(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr)
+        addon->owner->gearsetsRuntime_->Cancel();
+    return 0;
+}
+
+int AddonHost::LuaGearsetsResult(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->id != "gearsets" || addon->owner == nullptr)
+        return 0;
+    const auto result = addon->owner->gearsetsRuntime_->Result();
+    lua_newtable(state);
+    const auto phase = bahamut_client::GearsetsPhaseName(result.phase);
+    lua_pushlstring(state, phase.data(), phase.size());
+    lua_setfield(state, -2, "phase");
+    lua_pushlstring(state, result.reason.data(), result.reason.size());
+    lua_setfield(state, -2, "reason");
+    lua_pushnumber(state, result.submissions);
+    lua_setfield(state, -2, "submissions");
+    if (result.slot)
+    {
+        lua_pushnumber(state, *result.slot);
+        lua_setfield(state, -2, "slot");
+    }
+    lua_newtable(state);
+    int row = 0;
+    for (std::size_t index = 0; index < bahamut_client::kEquipmentSlotCount; ++index)
+    {
+        if (!result.changed[index])
+            continue;
+        lua_pushnumber(state, bahamut_client::kEquipmentSlots[index]);
+        lua_rawseti(state, -2, ++row);
+    }
+    lua_setfield(state, -2, "changed");
+    return 1;
+}
+
+int AddonHost::LuaGearsetsWindow(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    if (addon == nullptr || addon->id != "gearsets" || addon->drawSink == nullptr || addon->drawSink->gearsets == nullptr || !lua_istable(state, 1))
+        return 0;
+    const auto field = [state](int table, const char* name, std::size_t maximum)
+    {
+        lua_getfield(state, table, name);
+        std::size_t length = 0;
+        const char* text   = lua_type(state, -1) == LUA_TSTRING ? lua_tolstring(state, -1, &length) : nullptr;
+        std::string value  = text != nullptr && length <= maximum ? std::string(text, length) : std::string{};
+        lua_pop(state, 1);
+        return value;
+    };
+    const auto flag = [state](int table, const char* name)
+    {
+        lua_getfield(state, table, name);
+        const bool value = lua_toboolean(state, -1) != 0;
+        lua_pop(state, 1);
+        return value;
+    };
+    AddonGearsetsWindow window;
+    window.selected      = WholeField(state, 1, "selected", static_cast<std::uint32_t>(kMaximumGearsets));
+    window.maximum       = static_cast<std::uint32_t>(kMaximumGearsets);
+    window.status        = field(1, "status", 1024);
+    window.context       = field(1, "context", 256);
+    window.equipping     = flag(1, "equipping");
+    window.editable      = flag(1, "editable");
+    window.iconDirectory = addon->manifestPath.parent_path() / L"icons";
+    lua_getfield(state, 1, "rows");
+    if (!lua_istable(state, -1) || lua_objlen(state, -1) > kMaximumGearsets)
+        return 0;
+    const auto count = lua_objlen(state, -1);
+    for (std::size_t index = 1; index <= count; ++index)
+    {
+        lua_rawgeti(state, -1, static_cast<int>(index));
+        if (!lua_istable(state, -1))
+            return 0;
+        AddonGearsetsRow row;
+        row.name         = field(-1, "name", 64);
+        row.abbreviation = field(-1, "abbreviation", 3);
+        row.current      = flag(-1, "current");
+        lua_pop(state, 1);
+        // Only A-Z abbreviations may name an icon file.
+        if (!std::all_of(row.abbreviation.begin(), row.abbreviation.end(), [](char value)
+                         {
+                             return value >= 'A' && value <= 'Z';
+                         }))
+            row.abbreviation.clear();
+        window.rows.push_back(std::move(row));
+    }
+    lua_pop(state, 1);
+    const auto action = addon->drawSink->gearsets(addon->drawSink->context, window);
+    lua_newtable(state);
+    lua_pushlstring(state, action.kind.data(), action.kind.size());
+    lua_setfield(state, -2, "kind");
+    lua_pushnumber(state, static_cast<lua_Number>(action.row));
+    lua_setfield(state, -2, "row");
+    lua_pushlstring(state, action.text.data(), action.text.size());
+    lua_setfield(state, -2, "text");
+    return 1;
+}
+
+int AddonHost::LuaItemId(lua_State* state)
+{
+    std::size_t length = 0;
+    const char* name   = lua_type(state, 1) == LUA_TSTRING ? lua_tolstring(state, 1, &length) : nullptr;
+    const auto  id     = name != nullptr ? bahamut_client::ItemIdByName(std::string_view(name, length)) : std::nullopt;
+    if (!id)
+        return 0;
+    lua_pushnumber(state, static_cast<lua_Number>(*id));
+    return 1;
+}
+
+int AddonHost::LuaItemName(lua_State* state)
+{
+    const auto id   = WholeArgument(state, 1, 1u, 0xFFFFFFFFu);
+    const auto name = id ? bahamut_client::ItemNameById(static_cast<std::uint32_t>(*id)) : std::string_view{};
+    if (name.empty())
+        return 0;
+    lua_pushlstring(state, name.data(), name.size());
+    return 1;
+}
+
+// Returns the availability name and, when Available, the instance as 16
+// lowercase hex digits.
+int AddonHost::LuaFindItemCopy(lua_State* state)
+{
+    auto*      addon     = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto catalog   = WholeArgument(state, 1, 1u, 0xFFFFFFFFu);
+    const auto inventory = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && addon->owner->equipmentState_ != nullptr
+                               ? addon->owner->equipmentState_->Inventory()
+                               : std::nullopt;
+    const auto resolved  = catalog && inventory ? bahamut_client::ResolveEquipmentCatalog(*inventory, static_cast<std::uint32_t>(*catalog)) : bahamut_client::CatalogResolution{};
+    const auto label     = bahamut_client::ItemAvailabilityName(resolved.state);
+    lua_pushlstring(state, label.data(), label.size());
+    if (resolved.uid == 0)
+        return 1;
+    char hex[17]{};
+    std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(resolved.uid));
+    lua_pushstring(state, hex);
+    return 2;
+}
+
+int AddonHost::LuaResolveEquipmentItems(lua_State* state)
+{
+    auto*      addon     = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    const auto inventory = addon != nullptr && addon->id == "gearsets" && addon->owner != nullptr && addon->owner->equipmentState_ != nullptr
+                               ? addon->owner->equipmentState_->Inventory()
+                               : std::nullopt;
+    lua_newtable(state);
+    if (!lua_istable(state, 1) || lua_objlen(state, 1) > bahamut_client::kEquipmentSlotCount)
+        return 1;
+    for (std::size_t index = 1; index <= lua_objlen(state, 1); ++index)
+    {
+        lua_rawgeti(state, 1, static_cast<int>(index));
+        const auto uid = HexUidArgument(state, -1);
+        lua_pop(state, 1);
+        const auto resolved = uid && inventory ? bahamut_client::ResolveEquipmentUid(*inventory, *uid) : bahamut_client::ItemResolution{};
+        const auto label    = bahamut_client::ItemAvailabilityName(resolved.state);
+        lua_pushlstring(state, label.data(), label.size());
+        lua_rawseti(state, -2, static_cast<int>(index));
+    }
+    return 1;
+}
+
+int AddonHost::LuaDebugEquip(lua_State* state)
+{
+    auto* addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    auto* port  = addon != nullptr && addon->owner != nullptr ? DebugEquipPort(addon->id, addon->owner->gearsetsDebug_) : nullptr;
+    if (port == nullptr)
+    {
+        lua_pushboolean(state, 0);
+        lua_pushstring(state, "disabled");
+        return 2;
+    }
+    const auto bagSlot   = WholeArgument(state, 1, 0u, 0xFFFFu);
+    const auto equipSlot = WholeArgument(state, 2, 1u, 0xFFu);
+    const bool hasUid    = !lua_isnoneornil(state, 3);
+    const auto uid       = hasUid ? HexUidArgument(state, 3) : std::nullopt;
+    if (!bagSlot || !equipSlot || (hasUid && !uid))
+    {
+        lua_pushboolean(state, 0);
+        lua_pushstring(state, !bagSlot || !equipSlot ? "invalid-slot" : "invalid-uid");
+        return 2;
+    }
+    const auto result = port->SubmitDebugEquip(static_cast<std::uint16_t>(*bagSlot), static_cast<std::uint8_t>(*equipSlot), uid);
+    if (!result.accepted)
+    {
+        const std::string_view reason = bahamut_client::GearsetsEquipReasonName(result.reason);
+        lua_pushboolean(state, 0);
+        lua_pushlstring(state, reason.data(), reason.size());
+        return 2;
+    }
+    lua_pushboolean(state, 1);
+    lua_pushnumber(state, static_cast<lua_Number>(result.id));
+    return 2;
+}
+
+int AddonHost::LuaDebugEquipStatus(lua_State* state)
+{
+    auto*      addon  = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    auto*      port   = addon != nullptr && addon->owner != nullptr ? DebugEquipPort(addon->id, addon->owner->gearsetsDebug_) : nullptr;
+    const auto status = port != nullptr ? port->DebugEquipStatus() : std::nullopt;
+    if (!status)
+    {
+        lua_pushnil(state);
+        return 1;
+    }
+    const auto setText = [&](const char* field, std::string_view value)
+    {
+        lua_pushlstring(state, value.data(), value.size());
+        lua_setfield(state, -2, field);
+    };
+    const auto setNumber = [&](const char* field, std::uint64_t value)
+    {
+        lua_pushnumber(state, static_cast<lua_Number>(value));
+        lua_setfield(state, -2, field);
+    };
+    lua_newtable(state);
+    setNumber("id", status->id);
+    setText("phase", bahamut_client::GearsetsEquipPhaseName(status->phase));
+    setText("reason", bahamut_client::GearsetsEquipReasonName(status->reason));
+    lua_pushboolean(state, bahamut_client::IsTerminalGearsetsEquipPhase(status->phase) ? 1 : 0);
+    lua_setfield(state, -2, "terminal");
+    setNumber("generation", status->generation);
+    setNumber("bag_slot", status->bagSlot);
+    setNumber("equip_slot", status->equipSlot);
+    if (status->expectedUid)
+    {
+        setText("uid", bahamut_client::FormatGearsetsUid(*status->expectedUid));
+    }
+    if (status->catalogId != 0u)
+    {
+        setNumber("catalog", status->catalogId);
+    }
+    setNumber("invocations", status->invocations);
+    if (status->returnValue)
+    {
+        lua_pushboolean(state, *status->returnValue ? 1 : 0);
+        lua_setfield(state, -2, "return_value");
+    }
+    setNumber("submit_frame", status->submitFrame);
+    setNumber("invoke_frame", status->invokeFrame);
+    setNumber("finish_frame", status->finishFrame);
+    return 1;
 }
 
 int AddonHost::LuaChatLogWrite(lua_State* state)

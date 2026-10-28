@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gearsets_runtime.h"
+#include "gearsets_transaction.h"
 #include "packet_capture.h"
 #include "packet_observer.h"
 
@@ -8,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,6 +29,8 @@ class ActorNameService;
 class ActionMovementService;
 struct ActionMovementStatus;
 class AutologinService;
+class EquipmentStateService;
+class GearsetsDebugPort;
 
 } // namespace bahamut_client
 
@@ -40,6 +45,37 @@ struct AddonCombatMeterRow
     std::string   color;
 };
 
+struct AddonGearsetsRow
+{
+    std::string name;
+    // Class or job abbreviation such as CNJ, or empty when unknown; it also
+    // names the row's icon, <iconDirectory>/<lowercase abbreviation>.png.
+    std::string abbreviation;
+    bool        current = false;
+};
+
+struct AddonGearsetsWindow
+{
+    std::vector<AddonGearsetsRow> rows;
+    std::uint32_t                 selected = 0; // 1-based row, or 0
+    std::uint32_t                 maximum  = 0; // set limit, shown as rows/maximum
+    std::string                   status;
+    // Changes whenever the rows may name different sets; dialogs opened under
+    // another context must not act on a row number.
+    std::string           context;
+    std::filesystem::path iconDirectory;
+    bool                  equipping = false;
+    // False while the sets file cannot be read; changes would overwrite it.
+    bool editable = false;
+};
+
+struct AddonGearsetsAction
+{
+    std::string   kind;
+    std::uint32_t row = 0;
+    std::string   text;
+};
+
 struct AddonWindowSink
 {
     void* context                                                                                                                                                  = nullptr;
@@ -47,6 +83,7 @@ struct AddonWindowSink
     void (*rawText)(void* context, const char* addonId, const char* text, float red, float green, float blue, float alpha, bool locked, float fontSize)            = nullptr;
     void (*combatMeter)(void* context, const char* addonId, const char* mode, const AddonCombatMeterRow* rows, std::size_t rowCount, bool locked, bool incomplete) = nullptr;
     void (*targetlines)(void* context, const char* addonId)                                                                                                        = nullptr;
+    AddonGearsetsAction (*gearsets)(void* context, const AddonGearsetsWindow& window)                                                                              = nullptr;
 };
 
 struct AddonClipboardSink
@@ -93,6 +130,18 @@ public:
     void SetClipboardSink(const AddonClipboardSink& sink);
     void SetChatSink(const AddonChatSink& sink);
     void SetUrlSink(const AddonUrlSink& sink);
+    void SetEquipmentStateService(const bahamut_client::EquipmentStateService* equipmentState);
+    // Supplies the current server/character key on the addon callback's thread.
+    // Keys must satisfy bahamut_client::IsRecordKey; missing or invalid keys
+    // refuse record calls. Without a key, new managers keep sets only in memory.
+    void SetProfileKeyProvider(std::function<std::optional<std::string>()> provider);
+    // Set before LoadManifests, only with a debug switch. The port receives every
+    // gearsets load, reload, unload, and fault; debug equip bindings and commands
+    // require its equip switch.
+    void SetGearsetsDebugPort(bahamut_client::GearsetsDebugPort* port);
+    // Set before LoadManifests; receives every gearsets load, reload, unload,
+    // and fault. Without it Equip reports executor-unavailable.
+    void SetGearsetsRuntime(bahamut_client::GearsetsRuntime* runtime);
 
     // Admission requires a healthy loaded instance; manifest capabilities grant no admission.
     // The caller qualifies the native target and service session and serializes addon lifecycle operations.
@@ -162,6 +211,23 @@ private:
     static int LuaOpenUrl(lua_State* state);
     static int LuaActionMovementConfigure(lua_State* state);
     static int LuaActionMovementStatus(lua_State* state);
+    static int LuaProfileKey(lua_State* state);
+    static int LuaEquipmentSnapshot(lua_State* state);
+    static int LuaEquipmentSession(lua_State* state);
+    static int LuaResolveEquipmentItems(lua_State* state);
+    static int LuaFindItemCopy(lua_State* state);
+    static int LuaItemId(lua_State* state);
+    static int LuaItemName(lua_State* state);
+    static int LuaGearsetsWindow(lua_State* state);
+    static int LuaGearsetsEquip(lua_State* state);
+    static int LuaGearsetsCancel(lua_State* state);
+    static int LuaGearsetsResult(lua_State* state);
+    static int LuaRecordList(lua_State* state);
+    static int LuaRecordLoad(lua_State* state);
+    static int LuaRecordSave(lua_State* state);
+    static int LuaRecordDelete(lua_State* state);
+    static int LuaDebugEquip(lua_State* state);
+    static int LuaDebugEquipStatus(lua_State* state);
 
     static std::unique_ptr<Instance> LoadOne(
         const std::filesystem::path&           manifestPath,
@@ -186,6 +252,7 @@ private:
     static bool        InvokeCommand(Instance& addon, std::string_view command, bool& handled);
     static bool        InvokeChat(Instance& addon, std::string_view message);
     static bool        InvokeAreaChanged(Instance& addon, std::uint32_t zoneId, std::string_view areaName, std::string_view regionName);
+    static void        ReportGearsetsState(const Instance& addon, bool active);
 
     struct CombatEvent
     {
@@ -253,4 +320,12 @@ private:
     };
 
     std::optional<ActionMovementRegistration> actionMovementRegistration_;
+
+    const bahamut_client::EquipmentStateService* equipmentState_ = nullptr;
+    std::function<std::optional<std::string>()>  profileKey_;
+    bahamut_client::GearsetsDebugPort*           gearsetsDebug_ = nullptr;
+    bahamut_client::UnavailableGearsetsExecutor  gearsetsUnavailable_;
+    bahamut_client::GearsetsRuntime              gearsetsFallback_{ nullptr, gearsetsUnavailable_ };
+    bahamut_client::GearsetsRuntime*             gearsetsRuntime_ = &gearsetsFallback_;
+    bool                                         gearsetsActive_  = false;
 };

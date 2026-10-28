@@ -366,6 +366,29 @@ mod tests {
     }
 
     #[test]
+    fn gearsets_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("addons");
+        let packages = discover_addons(&root).unwrap();
+        let gearsets = packages
+            .iter()
+            .find(|package| package.id == "gearsets")
+            .expect("gearsets package should be shipped");
+
+        assert_eq!(gearsets.name, "gearsets");
+        assert_eq!(gearsets.author, "Aeshur");
+        assert_eq!(gearsets.version, "1.0.0");
+        assert_eq!(
+            gearsets
+                .commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>(),
+            ["/gearsets", "/gs"]
+        );
+        assert!(select_addon_manifests(std::slice::from_ref(gearsets), &[]).is_empty());
+    }
+
+    #[test]
     fn packetlogger_is_a_discoverable_default_addon() {
         let manifest =
             toml::from_str::<AddonManifest>(include_str!("../../addons/packetlogger/addon.toml"))

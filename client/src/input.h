@@ -13,6 +13,9 @@ bool InstallInputBoundary(HWND window, BahamutRuntimeTelemetry* telemetry, Addon
 void EnableOverlay();
 void DisableOverlay();
 bool IsOverlayVisible();
+// Published by the overlay after each frame: whether an open menu window,
+// such as Gear Sets, is under the pointer or has an active text field.
+void SetOverlayMenuInput(bool mouse, bool keyboard);
 void UpdateControllerObservation();
 // Replays the window's activation to native plugins on the window thread,
 // which RegisterHotKey requires. Safe from any thread; a no-op before install.

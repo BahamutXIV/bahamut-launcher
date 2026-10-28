@@ -43,6 +43,7 @@ $wikiAddonDestination = Join-Path $destinationPath 'addons\wiki'
 $targetLinesAddonDestination = Join-Path $destinationPath 'addons\targetlines'
 $noLockAddonDestination = Join-Path $destinationPath 'addons\nolock'
 $autologinAddonDestination = Join-Path $destinationPath 'addons\autologin'
+$gearsetsAddonDestination = Join-Path $destinationPath 'addons\gearsets'
 New-Item -ItemType Directory -Force -Path $licenseDestination | Out-Null
 foreach ($directory in @(
     $chatlogsAddonDestination
@@ -59,6 +60,7 @@ foreach ($directory in @(
     $targetLinesAddonDestination
     $noLockAddonDestination
     $autologinAddonDestination
+    $gearsetsAddonDestination
     (Join-Path $destinationPath 'plugins\dats')
     (Join-Path $destinationPath 'config\addons')
     (Join-Path $destinationPath 'config\plugins')
@@ -115,6 +117,8 @@ $copies = @(
     @{ Source = Join-Path $repositoryRoot 'addons/nolock/nolock.lua'; Destination = Join-Path $noLockAddonDestination 'nolock.lua' }
     @{ Source = Join-Path $repositoryRoot 'addons/autologin/addon.toml'; Destination = Join-Path $autologinAddonDestination 'addon.toml' }
     @{ Source = Join-Path $repositoryRoot 'addons/autologin/autologin.lua'; Destination = Join-Path $autologinAddonDestination 'autologin.lua' }
+    @{ Source = Join-Path $repositoryRoot 'addons/gearsets/addon.toml'; Destination = Join-Path $gearsetsAddonDestination 'addon.toml' }
+    @{ Source = Join-Path $repositoryRoot 'addons/gearsets/gearsets.lua'; Destination = Join-Path $gearsetsAddonDestination 'gearsets.lua' }
     @{ Source = Join-Path $repositoryRoot 'scripts/default.txt'; Destination = Join-Path $destinationPath 'scripts\default.txt' }
 )
 
@@ -195,6 +199,54 @@ if ($overlayPayload.Count -ne 0) {
         }
     }
     Write-Output "pinned official overlay files verified"
+}
+
+# The Gear Sets icons are optional: present only when the pinned PNGs were installed.
+$gearsetsIconsSource = Join-Path $repositoryRoot 'addons/gearsets/icons'
+if (Test-Path -LiteralPath $gearsetsIconsSource) {
+    if (-not (Test-Path -LiteralPath $gearsetsIconsSource -PathType Container) -or
+        ([System.IO.File]::GetAttributes($gearsetsIconsSource) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Gear Sets icon package is not a plain directory: $gearsetsIconsSource"
+    }
+    $iconEntries = @(Get-ChildItem -LiteralPath $gearsetsIconsSource -Force)
+    foreach ($entry in $iconEntries) {
+        $attributes = [System.IO.File]::GetAttributes($entry.FullName)
+        if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Gear Sets icon package contains a reparse point: $($entry.FullName)"
+        }
+        if ($entry.PSIsContainer) {
+            throw "Gear Sets icon package contains a directory: $($entry.FullName)"
+        }
+    }
+    if ($iconEntries.Count -ne 0) {
+        $gearsetsIconsDestination = Join-Path $gearsetsAddonDestination 'icons'
+        New-Item -ItemType Directory -Force -Path $gearsetsIconsDestination | Out-Null
+        foreach ($entry in $iconEntries) {
+            Copy-Item -LiteralPath $entry.FullName -Destination (Join-Path $gearsetsIconsDestination $entry.Name)
+        }
+        $iconPinPath = Join-Path $repositoryRoot 'manifests/gearsets-icons.json'
+        $iconPin = Get-Content -LiteralPath $iconPinPath -Raw | ConvertFrom-Json
+        $pinnedIcons = @($iconPin.files | ForEach-Object {
+            [pscustomobject]@{ Name = "$($_.key).png"; Size = [int64]$_.size; Sha256 = [string]$_.sha256 }
+        })
+        $stagedIconNames = @($iconEntries | ForEach-Object { $_.Name })
+        $difference = @(Compare-Object -ReferenceObject @($pinnedIcons | ForEach-Object { $_.Name }) -DifferenceObject $stagedIconNames -CaseSensitive)
+        if ($difference.Count -ne 0) {
+            $listed = ($difference | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join ', '
+            throw "Gear Sets icon payload differs from ${iconPinPath}: $listed"
+        }
+        foreach ($icon in $pinnedIcons) {
+            $stagedIcon = Get-Item -LiteralPath (Join-Path $gearsetsIconsDestination $icon.Name)
+            if ($stagedIcon.Length -ne $icon.Size) {
+                throw "Gear Sets icon size mismatch: $($icon.Name)"
+            }
+            $stagedHash = (Get-FileHash -LiteralPath $stagedIcon.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($stagedHash -cne $icon.Sha256) {
+                throw "Gear Sets icon SHA-256 mismatch: $($icon.Name)"
+            }
+        }
+        Write-Output "pinned Gear Sets icons verified"
+    }
 }
 
 $stagedFiles = Get-ChildItem -LiteralPath $destinationPath -File -Recurse |

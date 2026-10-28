@@ -1,0 +1,156 @@
+{
+    "repository": "BahamutXIV/bahamut-private-assets",
+    "commit": "f2fd4bdbc28972ce135f5666fce15331210420d7",
+    "files": [
+        {
+            "key": "gld",
+            "path": "icons-1.23b/0/icon00318.png",
+            "size": 1546,
+            "sha256": "7cafbdfe0eb5b973cdb78088c9b14bc000eaf8160493ab5d2756b2ad46d89e61"
+        },
+        {
+            "key": "pgl",
+            "path": "icons-1.23b/0/icon00321.png",
+            "size": 1453,
+            "sha256": "9977292c780e8da83492698da65104360e76d4b3ccb77368b80d9e389d3e940e"
+        },
+        {
+            "key": "mrd",
+            "path": "icons-1.23b/0/icon00319.png",
+            "size": 1798,
+            "sha256": "d96049f50983a71f5890b66c7939152ad70baf4fb111ad8a5e638050c047d989"
+        },
+        {
+            "key": "lnc",
+            "path": "icons-1.23b/0/icon00320.png",
+            "size": 1032,
+            "sha256": "c8baf05bf647a60662f290ba681b1db63136363231d1d272df4a242d14955442"
+        },
+        {
+            "key": "arc",
+            "path": "icons-1.23b/0/icon00322.png",
+            "size": 1657,
+            "sha256": "fc4c30b241e9edd9fd38569b7ac53a2f9309f7776c7baa615df0aa997114075b"
+        },
+        {
+            "key": "cnj",
+            "path": "icons-1.23b/0/icon00336.png",
+            "size": 2033,
+            "sha256": "32fc0422cce727989e195f480482e10a2b6222173d2a23a734b074035f953f50"
+        },
+        {
+            "key": "thm",
+            "path": "icons-1.23b/0/icon00335.png",
+            "size": 1953,
+            "sha256": "bd85ce9d5ab239dd7857e88afa6e1bf1538ff14054a080ef2267a0179a6db9be"
+        },
+        {
+            "key": "crp",
+            "path": "icons-1.23b/0/icon00327.png",
+            "size": 1134,
+            "sha256": "8fe2116e15f861b28926ab151fdf10742cf8ba1a550d4603f66b97caaac8d2b3"
+        },
+        {
+            "key": "bsm",
+            "path": "icons-1.23b/0/icon00324.png",
+            "size": 964,
+            "sha256": "09f6036c85a894d330b6bc8e723802dadcfef40005ce344b7eec7ccc004704b1"
+        },
+        {
+            "key": "arm",
+            "path": "icons-1.23b/0/icon00331.png",
+            "size": 1454,
+            "sha256": "22785ff1f5f510a9a7b7e2746b6cb22bac5fc78b87ea37c05c899ea1eeaa8f4e"
+        },
+        {
+            "key": "gsm",
+            "path": "icons-1.23b/0/icon00328.png",
+            "size": 1368,
+            "sha256": "2920ca8780af678b41b4866a5e50a0eedb72e047d541be628c78ee009c41c33d"
+        },
+        {
+            "key": "ltw",
+            "path": "icons-1.23b/0/icon00326.png",
+            "size": 1813,
+            "sha256": "a1debac0d5016e185e5e9231fc37fe6f922bb0c07cff682087994960f0c7c3c9"
+        },
+        {
+            "key": "wvr",
+            "path": "icons-1.23b/0/icon00325.png",
+            "size": 1420,
+            "sha256": "5ba1f6f00a2f0bada7c1ec7b4134a76f50c62eaa093b1a1d112280bf3bcbd24f"
+        },
+        {
+            "key": "alc",
+            "path": "icons-1.23b/0/icon00330.png",
+            "size": 1456,
+            "sha256": "a188a4fb79b4ed8c5c769c3bb95ecd748898c51cbb5030fece9741709910963c"
+        },
+        {
+            "key": "cul",
+            "path": "icons-1.23b/0/icon00329.png",
+            "size": 994,
+            "sha256": "61333001c2fe00255f1df64b753a6eb3377ef27e42c3d4274a27d03adaa77dd9"
+        },
+        {
+            "key": "min",
+            "path": "icons-1.23b/0/icon00332.png",
+            "size": 1183,
+            "sha256": "71ba627772ac041bc26d8c164c2452be52be533444165513fd9fa59ecdc3f562"
+        },
+        {
+            "key": "btn",
+            "path": "icons-1.23b/0/icon00333.png",
+            "size": 1276,
+            "sha256": "fd2b4b66756c090f5553661f7d8a04f716a9405e07df6f68ec7bc32355802751"
+        },
+        {
+            "key": "fsh",
+            "path": "icons-1.23b/0/icon00334.png",
+            "size": 1304,
+            "sha256": "da5ab4b52ebae3fb7893fd5e52341918f188f60842c18b61bc48f4a11af8a1e0"
+        },
+        {
+            "key": "pld",
+            "path": "icons-1.23b/0/icon00939.png",
+            "size": 2662,
+            "sha256": "2231e276feafd28a327c206f21a8bbe987bee04267ff5291bb048e2acf791bf3"
+        },
+        {
+            "key": "mnk",
+            "path": "icons-1.23b/0/icon00940.png",
+            "size": 2823,
+            "sha256": "79d59c716ba42b39ff75aaf033487496e2141c9ce6571542ddc902ee0f3bb5fb"
+        },
+        {
+            "key": "war",
+            "path": "icons-1.23b/0/icon00941.png",
+            "size": 2778,
+            "sha256": "bca75e7a796f1e30ac296c439a70006d7235793c2e0a19a5100954b2285bfbde"
+        },
+        {
+            "key": "drg",
+            "path": "icons-1.23b/0/icon00942.png",
+            "size": 2747,
+            "sha256": "fac106055cd73e8e53fd91fd502260f425099a9c3bbd6bf87ae2cc271a13be4c"
+        },
+        {
+            "key": "brd",
+            "path": "icons-1.23b/0/icon00943.png",
+            "size": 2605,
+            "sha256": "fac0a2d2214df1f83f52843da6519e8bc638977c29f22abf76538c677d6a003f"
+        },
+        {
+            "key": "whm",
+            "path": "icons-1.23b/0/icon00944.png",
+            "size": 2557,
+            "sha256": "75cc8e1999f53fe8e1a2ca072bb058ac061e97463bec3b8ea512a6af27eab05b"
+        },
+        {
+            "key": "blm",
+            "path": "icons-1.23b/0/icon00945.png",
+            "size": 2904,
+            "sha256": "d800ad2604233ba7dcc099945c935d0369acf83b40c338132278b8452ba5c928"
+        }
+    ]
+}

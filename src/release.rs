@@ -526,6 +526,8 @@ const PACKAGE_NOTICE_PATHS: &[&str] = &[
     "licenses/Miniz-LICENSE.txt",
 ];
 
+// The Gear Sets icons are optional package files installed from the pinned asset
+// manifest; a build without installed icons omits all of them.
 const CLIENT_EXTENSION_PATHS: &[&str] = &[
     "bahamut-loader.exe",
     "bahamut.dll",
@@ -559,6 +561,33 @@ const CLIENT_EXTENSION_PATHS: &[&str] = &[
     "addons/nolock/nolock.lua",
     "addons/autologin/addon.toml",
     "addons/autologin/autologin.lua",
+    "addons/gearsets/addon.toml",
+    "addons/gearsets/gearsets.lua",
+    "addons/gearsets/icons/gld.png",
+    "addons/gearsets/icons/pgl.png",
+    "addons/gearsets/icons/mrd.png",
+    "addons/gearsets/icons/lnc.png",
+    "addons/gearsets/icons/arc.png",
+    "addons/gearsets/icons/cnj.png",
+    "addons/gearsets/icons/thm.png",
+    "addons/gearsets/icons/crp.png",
+    "addons/gearsets/icons/bsm.png",
+    "addons/gearsets/icons/arm.png",
+    "addons/gearsets/icons/gsm.png",
+    "addons/gearsets/icons/ltw.png",
+    "addons/gearsets/icons/wvr.png",
+    "addons/gearsets/icons/alc.png",
+    "addons/gearsets/icons/cul.png",
+    "addons/gearsets/icons/min.png",
+    "addons/gearsets/icons/btn.png",
+    "addons/gearsets/icons/fsh.png",
+    "addons/gearsets/icons/pld.png",
+    "addons/gearsets/icons/mnk.png",
+    "addons/gearsets/icons/war.png",
+    "addons/gearsets/icons/drg.png",
+    "addons/gearsets/icons/brd.png",
+    "addons/gearsets/icons/whm.png",
+    "addons/gearsets/icons/blm.png",
 ];
 
 const MACOS_APP_CONTENTS: &str = "Bahamut Launcher.app/Contents/";
@@ -1282,6 +1311,7 @@ fn validate_archive_directory(
                 | "addons/targetlines"
                 | "addons/nolock"
                 | "addons/autologin"
+                | "addons/gearsets"
                 | "plugins"
                 | "plugins/dats"
                 | "config"
@@ -1545,6 +1575,8 @@ mod tests {
         "addons/nolock/nolock.lua",
         "addons/autologin/addon.toml",
         "addons/autologin/autologin.lua",
+        "addons/gearsets/addon.toml",
+        "addons/gearsets/gearsets.lua",
         "scripts/default.txt",
         "LICENSE.md",
         "README.md",
@@ -2069,6 +2101,41 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn launcher_inventory_allows_only_the_pinned_gearsets_icon_names() {
+        let icon = file(
+            "addons/gearsets/icons/pld.png",
+            b"png",
+            FileOwnership::Managed,
+        );
+        let metadata = launcher_metadata_with_inventory(&[icon], "1.0.0", Target::WindowsX86_64);
+        validate_metadata(&metadata, None).unwrap();
+        for target in [Target::WindowsX86_64, Target::MacosUniversal] {
+            let prefix = if target == Target::MacosUniversal {
+                "Bahamut Launcher.app/Contents/Resources/"
+            } else {
+                ""
+            };
+            assert!(allowed_launcher_managed_path(
+                &format!("{prefix}addons/gearsets/icons/blm.png"),
+                target
+            ));
+            for rejected in ["xyz.png", "pld.PNG", "pld.png.bak", "sub/pld.png"] {
+                assert!(
+                    !allowed_launcher_managed_path(
+                        &format!("{prefix}addons/gearsets/icons/{rejected}"),
+                        target
+                    ),
+                    "{rejected}"
+                );
+            }
+        }
+        assert!(!allowed_launcher_managed_path(
+            "addons/gearsets/icons/pld.png",
+            Target::LinuxX86_64
+        ));
     }
 
     #[test]
