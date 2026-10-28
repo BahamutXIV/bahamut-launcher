@@ -1,5 +1,6 @@
 #include "addon_host.h"
 
+#include "action_movement.h"
 #include "actor_name.h"
 #include "area_names.h"
 #include "custom_timer.h"
@@ -288,16 +289,20 @@ struct AddonHost::Instance
     std::string                            id;
     AddonHost*                             owner = nullptr;
     std::map<std::string, std::string>     settings;
-    lua_State*                             state          = nullptr;
-    const AddonWindowSink*                 drawSink       = nullptr;
-    bahamut_client::PlayerStateService*    playerState    = nullptr;
-    bahamut_client::TargetDistanceService* targetDistance = nullptr;
-    bahamut_client::CustomTimerService*    customTimer    = nullptr;
-    bahamut_client::EnemyCastService*      enemyCast      = nullptr;
-    const AddonClipboardSink*              clipboardSink  = nullptr;
-    const AddonChatSink*                   chatSink       = nullptr;
-    const AddonUrlSink*                    urlSink        = nullptr;
-    bool                                   faulted        = false;
+    lua_State*                             state                 = nullptr;
+    const AddonWindowSink*                 drawSink              = nullptr;
+    bahamut_client::PlayerStateService*    playerState           = nullptr;
+    bahamut_client::TargetDistanceService* targetDistance        = nullptr;
+    bahamut_client::CustomTimerService*    customTimer           = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast             = nullptr;
+    const AddonClipboardSink*              clipboardSink         = nullptr;
+    const AddonChatSink*                   chatSink              = nullptr;
+    const AddonUrlSink*                    urlSink               = nullptr;
+    bahamut_client::ActionMovementService* actionMovement        = nullptr;
+    std::uint64_t                          actionMovementOwner   = 0;
+    std::uint64_t                          actionMovementSession = 0;
+    bool                                   faulted               = false;
+    bool                                   closing               = false;
 };
 
 std::optional<std::string> ReadAddonManifestId(
@@ -518,6 +523,75 @@ void AddonHost::SetUrlSink(const AddonUrlSink& sink)
 {
     const LuaLock luaLock(luaMutex_);
     urlSink_ = sink;
+}
+
+bool AddonHost::AdmitActionMovementConsumer(
+    bahamut_client::ActionMovementService& service,
+    const std::filesystem::path&           manifestPath,
+    std::uint64_t                          session)
+{
+    if (actionMovementShutdown_ || !manifestPath.is_absolute() || session == 0)
+    {
+        return false;
+    }
+    const auto found = std::find_if(addons_.begin(), addons_.end(), [&](const auto& addon)
+                                    {
+                                        return addon->id == "nolock" && !addon->faulted && !addon->closing && addon->state != nullptr &&
+                                               addon->manifestPath.lexically_normal() == manifestPath.lexically_normal();
+                                    });
+    if (found == addons_.end())
+    {
+        return false;
+    }
+    auto&      addon  = **found;
+    const auto status = service.Status();
+    if (status.boundary != bahamut_client::ActionMovementBoundaryState::Ready || status.session != session)
+    {
+        return false;
+    }
+    if (addon.actionMovement == &service && addon.actionMovementSession == session &&
+        addon.actionMovementOwner != 0 && addon.actionMovementOwner == status.owner)
+    {
+        return true;
+    }
+    const auto owner = service.BindConsumer(session);
+    if (owner == 0)
+    {
+        return false;
+    }
+    // Binding the replacement first makes old-token cleanup harmless on the same service.
+    RevokeActionMovement(addon);
+    addon.actionMovement        = &service;
+    addon.actionMovementOwner   = owner;
+    addon.actionMovementSession = session;
+    return true;
+}
+
+void AddonHost::RevokeActionMovement(Instance& addon)
+{
+    if (addon.actionMovement != nullptr)
+    {
+        (void)addon.actionMovement->RevokeConsumer(addon.actionMovementOwner);
+        addon.actionMovement        = nullptr;
+        addon.actionMovementOwner   = 0;
+        addon.actionMovementSession = 0;
+    }
+}
+
+void AddonHost::ShutdownActionMovement()
+{
+    actionMovementShutdown_ = true;
+    for (const auto& addon : addons_)
+    {
+        RevokeActionMovement(*addon);
+    }
+}
+
+void AddonHost::Fault(Instance& addon)
+{
+    RevokeActionMovement(addon);
+    addon.faulted  = true;
+    addon.drawSink = nullptr;
 }
 
 bool AddonHost::Enable(const std::filesystem::path& manifestPath)
@@ -1337,7 +1411,7 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     if (luaL_loadbuffer(state, script->data(), script->size(), manifest->entry.c_str()) != 0 || lua_pcall(state, 0, 0, 0) != 0)
     {
         lua_pop(state, 1);
-        addon->faulted = true;
+        Fault(*addon);
         return addon;
     }
     Invoke(*addon, "load");
@@ -1346,6 +1420,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
 
 void AddonHost::Close(Instance& addon)
 {
+    addon.closing = true;
+    RevokeActionMovement(addon);
     if (addon.state == nullptr)
     {
         return;
@@ -1377,8 +1453,7 @@ bool AddonHost::Invoke(Instance& addon, const char* callback, int argumentCount)
         return true;
     }
     lua_pop(state, 1);
-    addon.faulted  = true;
-    addon.drawSink = nullptr;
+    Fault(addon);
     return false;
 }
 
@@ -1395,8 +1470,7 @@ bool AddonHost::InvokeCommand(Instance& addon, std::string_view command, bool& h
     if (lua_pcall(addon.state, 1, 1, 0) != 0)
     {
         lua_pop(addon.state, 1);
-        addon.faulted  = true;
-        addon.drawSink = nullptr;
+        Fault(addon);
         return false;
     }
     handled = lua_toboolean(addon.state, -1) != 0;
@@ -1458,8 +1532,7 @@ bool AddonHost::InvokeChat(Instance& addon, std::string_view message)
         return true;
     }
     lua_pop(addon.state, 1);
-    addon.faulted  = true;
-    addon.drawSink = nullptr;
+    Fault(addon);
     return false;
 }
 

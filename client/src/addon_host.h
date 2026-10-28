@@ -23,6 +23,7 @@ class TargetDistanceService;
 class CustomTimerService;
 class EnemyCastService;
 class ActorNameService;
+class ActionMovementService;
 
 } // namespace bahamut_client
 
@@ -90,6 +91,15 @@ public:
     void SetChatSink(const AddonChatSink& sink);
     void SetUrlSink(const AddonUrlSink& sink);
 
+    // Host-only admission selects a healthy loaded instance, not a manifest capability.
+    // The caller qualifies its bytes/session and serializes addon lifecycle operations.
+    bool AdmitActionMovementConsumer(bahamut_client::ActionMovementService& service,
+                                     const std::filesystem::path&           manifestPath,
+                                     std::uint64_t                          session);
+    // Revoke before service release or host destruction, outside the DLL loader lock.
+    // The borrowed service must outlive its admission. This does not retire a hook.
+    void ShutdownActionMovement();
+
     void LoadManifests(const std::vector<std::filesystem::path>& manifests,
                        const std::filesystem::path&              settingsRoot,
                        const std::filesystem::path&              chatLogsRoot);
@@ -154,6 +164,8 @@ private:
         const AddonChatSink*                   chatSink,
         const AddonUrlSink*                    urlSink);
     static void Close(Instance& addon);
+    static void RevokeActionMovement(Instance& addon);
+    static void Fault(Instance& addon);
     static bool Invoke(Instance& addon, const char* callback, int argumentCount = 0);
     static bool InvokeCommand(Instance& addon, std::string_view command, bool& handled);
     static bool InvokeChat(Instance& addon, std::string_view message);
@@ -211,6 +223,7 @@ private:
     std::atomic<bool>                                                 combatParserEnabled_ = false;
     std::mutex                                                        combatQueueMutex_;
     std::vector<CombatEvent>                                          combatQueue_;
-    std::uint64_t                                                     combatDropped_ = 0;
-    bahamut_client::ActorNameService*                                 actorNames_    = nullptr;
+    std::uint64_t                                                     combatDropped_          = 0;
+    bahamut_client::ActorNameService*                                 actorNames_             = nullptr;
+    bool                                                              actionMovementShutdown_ = false;
 };

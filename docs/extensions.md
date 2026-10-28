@@ -635,6 +635,35 @@ is an aggregate diagnostic snapshot.
 The global `bahamut` table exposes the functions below. The Wiki addon also
 receives the bounded URL service.
 
+### NoLock movement policy
+
+The NoLock movement service is unavailable in the retail runtime, and no addon
+API exposes it. Native host admission requires a healthy loaded instance, a
+current verified session and an independently qualified movement boundary.
+Manifest metadata grants no admission. The host revokes policy before reload,
+disable or unload, and on callback faults. Revocation does not retire a native
+hook or establish call quiescence.
+
+Native candidate admission also checks copied evidence for one client clip
+path through the primary movement wrapper and setter. The target preflight
+requires exact executable/version identity and mapped instruction windows;
+it accepts no test-stub identity exception. The call check requires a current
+service session, qualified recovery and synchronous borrowed lifetime, matching
+owner/controller, primary vptr/gate, thread, callers and duration, and an
+actor ID equal to the validated player-state active actor ID.
+These are native-owner inputs; no retail producer currently supplies them.
+A clip class name or matching pointer does not establish gameplay eligibility.
+Any reduction that rounds a positive input to zero needs its own qualified
+native outcome. Missing evidence forwards the original duration once.
+
+The [native admission declaration](../client/src/action_movement_admission.h)
+cites the exact-client static source. Its setter return is `0x0065ED59`; the
+client clip calls the wrapper at `0x008284A9` and returns at `0x008284AE`.
+The byte windows were checked against the executable identity in
+[runtime_contract.h](../client/api/runtime_contract.h) using pefile 2024.8.26
+and Capstone 5.0.7. This is exact-binary validation of the candidate route,
+not a retail recovery classification or movement result.
+
 ### Settings and player state
 
 - `bahamut.settings_get(key, fallback)` returns the stored string or the

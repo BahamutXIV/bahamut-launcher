@@ -7,6 +7,8 @@
 namespace bahamut_client
 {
 
+struct ActionMovementCallContext;
+
 struct ActionMovementPolicy
 {
     bool          enabled       = false;
@@ -66,13 +68,18 @@ public:
     // original call may finish. The service and trampoline must outlive every call.
     void Forward(void* receiver, std::int32_t duration, bool eligible, ActionMovementSetter original) const;
 
+    // Uses only copied entry evidence and the atomic policy; no native getters or locks.
+    void Forward(void* receiver, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementSetter original) const;
+
 private:
     void ClearConsumer();
     void ClearSession();
 
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
     mutable std::mutex          mutex_;
     std::atomic<std::uint32_t>  published_        = 0;
+    std::atomic<std::uint64_t>  publishedSession_ = 0;
     ActionMovementBoundaryState boundary_         = ActionMovementBoundaryState::Unavailable;
     std::uint64_t               sessionSerial_    = 0;
     std::uint64_t               ownerSerial_      = 0;

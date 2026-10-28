@@ -595,6 +595,7 @@ private:
 
     void ReleaseHandles()
     {
+        addonHost_.ShutdownActionMovement();
         nativePluginHost_.Shutdown();
         discordPluginHost_.Shutdown();
         datOverlay_.Shutdown();

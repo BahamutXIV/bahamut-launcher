@@ -1,4 +1,5 @@
 #include "action_movement.h"
+#include "action_movement_admission.h"
 
 #include <limits>
 
@@ -35,6 +36,7 @@ void ActionMovementService::ClearConsumer()
 
 void ActionMovementService::ClearSession()
 {
+    publishedSession_.store(0, std::memory_order_release);
     ClearConsumer();
     session_ = 0;
 }
@@ -62,6 +64,7 @@ std::uint64_t ActionMovementService::BeginSession()
         return 0;
     }
     session_ = ++sessionSerial_;
+    publishedSession_.store(session_, std::memory_order_release);
     return session_;
 }
 
@@ -139,6 +142,20 @@ void ActionMovementService::Forward(void* receiver, std::int32_t duration, bool 
 {
     const std::uint32_t policy = published_.load(std::memory_order_acquire);
     ForwardActionMovement(receiver, duration, eligible, { (policy & 0x100u) != 0, policy & 0xFFu }, original);
+}
+
+void ActionMovementService::Forward(void* receiver, std::int32_t duration, const ActionMovementCallContext& context, ActionMovementSetter original) const
+{
+    // Session loads bracket policy so an obsolete context cannot use a replacement's request.
+    const std::uint64_t session   = publishedSession_.load(std::memory_order_acquire);
+    const std::uint32_t policy    = published_.load(std::memory_order_acquire);
+    const bool          current   = session != 0 && context.session == session &&
+                                    publishedSession_.load(std::memory_order_acquire) == session;
+    const std::int32_t  forwarded = (policy & 0x100u) != 0
+                                        ? ScaleActionMovementDuration(duration, policy & 0xFFu)
+                                        : duration;
+    const bool          admitted  = current && AdmitActionMovementCall(context, receiver, duration, forwarded) == ActionMovementCallAdmission::Admitted;
+    original(receiver, admitted ? forwarded : duration);
 }
 
 } // namespace bahamut_client

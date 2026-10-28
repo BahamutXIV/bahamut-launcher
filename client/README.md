@@ -85,9 +85,24 @@ The native suite covers:
 - DAT opening and resolution for the exact supported client build.
 - D3D9 device, swap-chain `Present`, `Reset`, and input forwarding.
 - Telemetry and the isolated Lua addon lifecycle against the bundled test client.
-- Movement-duration policy, consumer ownership and revocation. MSVC Win32 also
-  exercises synthetic MinHook installation, rollback and cleanup failures.
-  These sources belong only to the test target.
+- Movement-duration policy and native addon consumer admission/revocation.
+  Synthetic Lua fixtures cover faults, reload, disable and explicit host shutdown.
+  The runtime supplies no retail movement admission or Lua movement API.
+  Exact setter/wrapper/producer-call byte fixtures and copied native call evidence
+  test candidate admission, stale-session fallback and zero-result rejection.
+  Synthetic test-client identity remains allowed for ordinary runtime checks
+  and is rejected by the stricter movement target check.
+  A test-only baseline observer records independent wrapper/setter entry facts
+  in fixed storage, forwards the duration unchanged and performs no reads after
+  the original. Caller filtering precedes guarded reads. The first read fault,
+  capacity limit, invalid object, failed clock, producer-thread change or
+  collection reentry stops recording. Rows confer no retail eligibility or
+  paired-call identity. The cold owner must stop and drain calls before reading
+  or retiring observer storage. Native fixtures check x87/MXCSR, LastError,
+  stack/register forwarding and an original that frees the receiver. Its
+  optional `--benchmark` measures fixture calls, not game performance.
+  MSVC Win32 also tests synthetic MinHook installation, rollback and cleanup
+  failures; the movement hook remains exclusive to its test target.
 
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.

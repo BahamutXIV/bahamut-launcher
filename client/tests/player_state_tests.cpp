@@ -117,6 +117,11 @@ bool TestCapturePublishesCopy()
     {
         return false;
     }
+    if (!Expect(service.ActiveActorId() == actorId,
+                "a successful capture should publish the active actor id"))
+    {
+        return false;
+    }
     const auto first = service.Snapshot();
     if (!Expect(first.has_value(), "published snapshot should be readable") || !Expect(first->actorId == actorId && first->zoneId == zoneId, "snapshot should publish the SetMap zone rather than the map state id") || !Expect(first->areaName == "Limsa Lominsa", "snapshot should resolve the zone's English area name") || !Expect(first->x == x && first->y == y && first->z == z && first->rotation == rotation, "snapshot should preserve all copied position fields") || !Expect(first->displayName == "Gridaniaclonea Test", "snapshot should copy the inline display name"))
     {
@@ -202,7 +207,9 @@ bool TestInvalidStateIsNil()
     return Expect(!service.CaptureFromContainer(container.data()),
                   "the documented active-actor sentinel should be rejected") &&
            Expect(!service.Snapshot().has_value(),
-                  "a sentinel actor should leave nil state");
+                  "a sentinel actor should leave nil state") &&
+           Expect(service.ActiveActorId() == 0u,
+                  "a rejected capture should leave no active actor id");
 }
 
 bool TestEnrichedStateIsCopied()
@@ -369,15 +376,33 @@ bool TestObservedClassJobJoinsLocalCapture()
                     service.Snapshot()->actorId == replacementId &&
                     service.Snapshot()->baseClassId == 8u &&
                     service.Snapshot()->jobId == 19u &&
-                    service.Snapshot()->level == 30u,
+                    service.Snapshot()->level == 30u &&
+                    service.ActiveActorId() == replacementId,
                 "actor replacement should join only replacement packets"))
+    {
+        return false;
+    }
+    // An identity change revokes the old id even when the new capture then fails.
+    Write(container, kActorIdOffset, replacementId + 1u);
+    Write(container, kMapLayoutOffset, 0u);
+    if (!Expect(!service.CaptureFromContainer(container.data()) &&
+                    service.ActiveActorId() == 0u,
+                "a failed replacement capture should not keep the old active actor id"))
+    {
+        return false;
+    }
+    Write(container, kMapLayoutOffset, static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(mapLayout.data())));
+    Write(container, kActorIdOffset, replacementId);
+    if (!Expect(service.CaptureFromContainer(container.data()) &&
+                    service.ActiveActorId() == replacementId,
+                "a later valid capture should republish the active actor id"))
     {
         return false;
     }
     Write(container, kActorIdOffset, 0u);
     if (!Expect(!service.CaptureFromContainer(container.data()) &&
-                    !service.Snapshot(),
-                "logout should clear the enriched snapshot"))
+                    !service.Snapshot() && service.ActiveActorId() == 0u,
+                "logout should clear the enriched snapshot and active actor id"))
     {
         return false;
     }
@@ -385,7 +410,8 @@ bool TestObservedClassJobJoinsLocalCapture()
     return Expect(service.CaptureFromContainer(container.data()) &&
                       service.Snapshot()->baseClassId == 0u &&
                       service.Snapshot()->jobId == 0u &&
-                      service.Snapshot()->level == 0u,
+                      service.Snapshot()->level == 0u &&
+                      service.ActiveActorId() == replacementId,
                   "login without new packets must not reuse the old values");
 }
 
@@ -404,7 +430,9 @@ bool TestZoneTransitionClearsSnapshot()
     if (!Expect(service.CaptureFromContainer(container.data()) &&
                     service.Snapshot()->zoneId == 230u &&
                     service.Snapshot()->areaName == "Limsa Lominsa",
-                "SetMap zone should publish independently of map state id"))
+                "SetMap zone should publish independently of map state id") ||
+        !Expect(service.ActiveActorId() == 7u,
+                "a successful capture should publish the active actor id"))
     {
         return false;
     }
@@ -412,7 +440,9 @@ bool TestZoneTransitionClearsSnapshot()
     Write(mapLayout, kPendingMapStateOffset, 106u);
     if (!Expect(!service.CaptureFromContainer(container.data()) &&
                     !service.Snapshot().has_value(),
-                "pending zone transition should clear the old snapshot"))
+                "pending zone transition should clear the old snapshot") ||
+        !Expect(service.ActiveActorId() == 0u,
+                "zone invalidation should revoke the active actor id"))
     {
         return false;
     }
@@ -445,9 +475,25 @@ bool TestZoneTransitionClearsSnapshot()
     }
 
     Write(mapLayout, kZoneOffset, 0u);
-    return Expect(!service.CaptureFromContainer(container.data()) &&
-                      !service.Snapshot().has_value(),
-                  "cleared zone should clear the snapshot");
+    if (!Expect(!service.CaptureFromContainer(container.data()) &&
+                    !service.Snapshot().has_value(),
+                "cleared zone should clear the snapshot") ||
+        !Expect(service.ActiveActorId() == 0u,
+                "a cleared zone should revoke the active actor id"))
+    {
+        return false;
+    }
+
+    Write(mapLayout, kZoneOffset, 230u);
+    if (!Expect(service.CaptureFromContainer(container.data()) &&
+                    service.ActiveActorId() == 7u,
+                "a recaptured zone should republish the active actor id"))
+    {
+        return false;
+    }
+    service.Clear();
+    return Expect(service.ActiveActorId() == 0u,
+                  "Clear should revoke the active actor id");
 }
 
 bool TestRelativePositionIsResolved()
