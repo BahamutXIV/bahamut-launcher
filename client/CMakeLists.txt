@@ -173,6 +173,10 @@ add_library(bahamut SHARED
     ${BAHAMUT_RUNTIME_DEF}
     src/actor_name.cpp
     src/actor_name.h
+    src/autologin.cpp
+    src/autologin.h
+    src/autologin_machine.cpp
+    src/autologin_machine.h
     src/camera_zoom.cpp
     src/camera_zoom.h
     src/addon_host.cpp
@@ -185,6 +189,8 @@ add_library(bahamut SHARED
     src/custom_timer.h
     src/enemy_cast.cpp
     src/enemy_cast.h
+    src/login_reader.cpp
+    src/login_reader.h
     src/player_state.cpp
     src/player_state.h
     src/packet_capture.cpp
@@ -289,7 +295,7 @@ add_library(bahamut-test-target-distance-objects OBJECT src/target_distance.cpp)
 target_include_directories(bahamut-test-target-distance-objects PRIVATE api src)
 target_link_libraries(bahamut-test-target-distance-objects PRIVATE minhook)
 
-add_library(bahamut-test-player-state-objects OBJECT src/player_state.cpp)
+add_library(bahamut-test-player-state-objects OBJECT src/player_state.cpp src/login_reader.cpp)
 target_include_directories(bahamut-test-player-state-objects PRIVATE api src)
 target_link_libraries(bahamut-test-player-state-objects PRIVATE minhook)
 
@@ -406,6 +412,15 @@ add_executable(bahamut-action-movement-observer-tests
 )
 target_include_directories(bahamut-action-movement-observer-tests PRIVATE api src)
 target_link_libraries(bahamut-action-movement-observer-tests PRIVATE minhook)
+
+add_executable(bahamut-autologin-tests
+    src/autologin.h
+    src/autologin_machine.cpp
+    src/autologin_machine.h
+    src/login_reader.h
+    tests/autologin_tests.cpp
+)
+target_include_directories(bahamut-autologin-tests PRIVATE src)
 
 add_executable(bahamut-custom-timer-tests
     $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
@@ -719,6 +734,7 @@ add_test(NAME bahamut-action-movement-lua
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/nolock/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml)
 set_tests_properties(bahamut-action-movement-lua PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-autologin COMMAND bahamut-autologin-tests)
 add_test(NAME bahamut-discord-rpc COMMAND bahamut-discord-rpc-tests)
 if(CMAKE_CROSSCOMPILING_EMULATOR)
     # A cold Wine prefix can take minutes to initialize on the first test.

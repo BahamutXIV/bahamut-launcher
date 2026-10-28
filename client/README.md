@@ -113,6 +113,31 @@ The native suite covers:
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
 
+## Autologin
+
+The [autologin service](src/autologin.h) drives the retail Bootup title and
+character-list actions without sending input. On each frame tick, the
+[login reader](src/login_reader.h) copies the scene, phase and character-list
+state and runs at most one pending request on that thread. After the title
+settles for 4 s, it calls the Start confirmation's accept path. Once the
+character list has been readable for 3 s, it applies the list's slot checks and
+queues the select and confirm requests for the configured slot. The run
+finishes when the client enters the world scene.
+
+A slot is a list position from 1 to 8; the service has no character, account
+or server identity. It stops with Needs user for a slot outside that range, an
+empty slot, a slot requiring a warning or vetoed by the list, an unexpected
+Bootup phase before title Start, a scene other than the world after selection,
+client code that does not match the supported build, or a timeout. If the client
+is already in the world when the run starts, it stays idle. Each game process
+allows one run. Transitions and request results are appended to `autologin.log`
+beside the client module.
+
+The `bahamut-autologin` CTest drives the state machine with a fake clock and
+recorded requests. The offsets, request selectors and function addresses are
+specific to the retail 1.23b client; live behavior beyond the tested slot is
+not established.
+
 ## Limits and related docs
 
 These tests use the bundled stub client. Results do not establish retail client

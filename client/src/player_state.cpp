@@ -1,5 +1,6 @@
 #include "player_state.h"
 #include "fault_guard.h"
+#include "login_reader.h"
 
 #include "area_names.h"
 #include "packet_observer.h"
@@ -399,6 +400,7 @@ bool __fastcall HookedPlayerStateUpdate(void* container, void*)
     {
         result = gOriginalPlayerStateUpdate(container);
     }
+    bahamut_client::CaptureLoginScreen(container);
 
     PlayerStateService* service =
         gPlayerStateService.load(std::memory_order_acquire);
