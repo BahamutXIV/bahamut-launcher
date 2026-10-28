@@ -140,7 +140,7 @@ std::string Hex(const std::array<unsigned char, 32>& bytes)
 
 } // namespace
 
-bool VerifyRuntimeHostIdentity()
+bool VerifyRuntimeHostIdentity(bool allowTestStub)
 {
     wchar_t     path[32768]{};
     const DWORD length = GetModuleFileNameW(nullptr, path, ARRAYSIZE(path));
@@ -148,7 +148,7 @@ bool VerifyRuntimeHostIdentity()
     {
         return false;
     }
-    if (IsTestStub(path))
+    if (allowTestStub && IsTestStub(path))
     {
         return true;
     }

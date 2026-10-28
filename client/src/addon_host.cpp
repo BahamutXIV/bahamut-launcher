@@ -1,5 +1,6 @@
 #include "addon_host.h"
 
+#include "action_movement.h"
 #include "actor_name.h"
 #include "area_names.h"
 #include "custom_timer.h"
@@ -288,16 +289,20 @@ struct AddonHost::Instance
     std::string                            id;
     AddonHost*                             owner = nullptr;
     std::map<std::string, std::string>     settings;
-    lua_State*                             state          = nullptr;
-    const AddonWindowSink*                 drawSink       = nullptr;
-    bahamut_client::PlayerStateService*    playerState    = nullptr;
-    bahamut_client::TargetDistanceService* targetDistance = nullptr;
-    bahamut_client::CustomTimerService*    customTimer    = nullptr;
-    bahamut_client::EnemyCastService*      enemyCast      = nullptr;
-    const AddonClipboardSink*              clipboardSink  = nullptr;
-    const AddonChatSink*                   chatSink       = nullptr;
-    const AddonUrlSink*                    urlSink        = nullptr;
-    bool                                   faulted        = false;
+    lua_State*                             state                 = nullptr;
+    const AddonWindowSink*                 drawSink              = nullptr;
+    bahamut_client::PlayerStateService*    playerState           = nullptr;
+    bahamut_client::TargetDistanceService* targetDistance        = nullptr;
+    bahamut_client::CustomTimerService*    customTimer           = nullptr;
+    bahamut_client::EnemyCastService*      enemyCast             = nullptr;
+    const AddonClipboardSink*              clipboardSink         = nullptr;
+    const AddonChatSink*                   chatSink              = nullptr;
+    const AddonUrlSink*                    urlSink               = nullptr;
+    bahamut_client::ActionMovementService* actionMovement        = nullptr;
+    std::uint64_t                          actionMovementOwner   = 0;
+    std::uint64_t                          actionMovementSession = 0;
+    bool                                   faulted               = false;
+    bool                                   closing               = false;
 };
 
 std::optional<std::string> ReadAddonManifestId(
@@ -518,6 +523,104 @@ void AddonHost::SetUrlSink(const AddonUrlSink& sink)
 {
     const LuaLock luaLock(luaMutex_);
     urlSink_ = sink;
+}
+
+bool AddonHost::AdmitActionMovementConsumer(
+    bahamut_client::ActionMovementService& service,
+    const std::filesystem::path&           manifestPath,
+    std::uint64_t                          session)
+{
+    if (actionMovementShutdown_ || !manifestPath.is_absolute() || session == 0)
+    {
+        return false;
+    }
+    const auto found = std::find_if(addons_.begin(), addons_.end(), [&](const auto& addon)
+                                    {
+                                        return addon->id == "nolock" && !addon->faulted && !addon->closing && addon->state != nullptr &&
+                                               addon->manifestPath.lexically_normal() == manifestPath.lexically_normal();
+                                    });
+    if (found == addons_.end())
+    {
+        return false;
+    }
+    return BindActionMovement(**found, service, session);
+}
+
+bool AddonHost::RegisterActionMovementConsumer(
+    bahamut_client::ActionMovementService& service,
+    const std::filesystem::path&           manifestPath,
+    std::uint64_t                          session)
+{
+    if (actionMovementShutdown_ || !manifestPath.is_absolute() || session == 0)
+    {
+        return false;
+    }
+    actionMovementRegistration_ = ActionMovementRegistration{ &service, manifestPath, session };
+    static_cast<void>(AdmitActionMovementConsumer(service, manifestPath, session));
+    return true;
+}
+
+bool AddonHost::BindActionMovement(Instance& addon, bahamut_client::ActionMovementService& service, std::uint64_t session)
+{
+    const auto status = service.Status();
+    if (status.boundary != bahamut_client::ActionMovementBoundaryState::Ready || status.session != session)
+    {
+        return false;
+    }
+    if (addon.actionMovement == &service && addon.actionMovementSession == session &&
+        addon.actionMovementOwner != 0 && addon.actionMovementOwner == status.owner)
+    {
+        return true;
+    }
+    const auto owner = service.BindConsumer(session);
+    if (owner == 0)
+    {
+        return false;
+    }
+    // Binding the replacement first makes old-token cleanup harmless on the same service.
+    RevokeActionMovement(addon);
+    addon.actionMovement        = &service;
+    addon.actionMovementOwner   = owner;
+    addon.actionMovementSession = session;
+    return true;
+}
+
+void AddonHost::AdmitRegisteredActionMovement(Instance& addon, const std::filesystem::path& manifestPath)
+{
+    if (actionMovementShutdown_ || !actionMovementRegistration_ || addon.id != "nolock" || addon.faulted || addon.closing ||
+        addon.state == nullptr || manifestPath.lexically_normal() != actionMovementRegistration_->manifestPath.lexically_normal())
+    {
+        return;
+    }
+    static_cast<void>(BindActionMovement(addon, *actionMovementRegistration_->service, actionMovementRegistration_->session));
+}
+
+void AddonHost::RevokeActionMovement(Instance& addon)
+{
+    if (addon.actionMovement != nullptr)
+    {
+        (void)addon.actionMovement->RevokeConsumer(addon.actionMovementOwner);
+        addon.actionMovement        = nullptr;
+        addon.actionMovementOwner   = 0;
+        addon.actionMovementSession = 0;
+    }
+}
+
+void AddonHost::ShutdownActionMovement()
+{
+    actionMovementShutdown_ = true;
+    actionMovementRegistration_.reset();
+    for (const auto& addon : addons_)
+    {
+        RevokeActionMovement(*addon);
+    }
+}
+
+void AddonHost::Fault(Instance& addon)
+{
+    RevokeActionMovement(addon);
+    addon.faulted  = true;
+    addon.drawSink = nullptr;
 }
 
 bool AddonHost::Enable(const std::filesystem::path& manifestPath)
@@ -1288,6 +1391,11 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     registerFunction("settings_get", &LuaSettingsGet);
     registerFunction("settings_set", &LuaSettingsSet);
     registerFunction("player_state", &LuaPlayerState);
+    if (addon->id == "nolock")
+    {
+        registerFunction("action_movement_configure", &LuaActionMovementConfigure);
+        registerFunction("action_movement_status", &LuaActionMovementStatus);
+    }
     if (addon->id == "distance")
     {
         registerFunction("target_distance", &LuaTargetDistance);
@@ -1337,8 +1445,13 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
     if (luaL_loadbuffer(state, script->data(), script->size(), manifest->entry.c_str()) != 0 || lua_pcall(state, 0, 0, 0) != 0)
     {
         lua_pop(state, 1);
-        addon->faulted = true;
+        Fault(*addon);
         return addon;
+    }
+    // Admit before the load callback so it can apply policy to the new owner.
+    if (owner != nullptr)
+    {
+        owner->AdmitRegisteredActionMovement(*addon, manifestPath);
     }
     Invoke(*addon, "load");
     return addon;
@@ -1346,6 +1459,8 @@ std::unique_ptr<AddonHost::Instance> AddonHost::LoadOne(
 
 void AddonHost::Close(Instance& addon)
 {
+    addon.closing = true;
+    RevokeActionMovement(addon);
     if (addon.state == nullptr)
     {
         return;
@@ -1377,8 +1492,7 @@ bool AddonHost::Invoke(Instance& addon, const char* callback, int argumentCount)
         return true;
     }
     lua_pop(state, 1);
-    addon.faulted  = true;
-    addon.drawSink = nullptr;
+    Fault(addon);
     return false;
 }
 
@@ -1395,8 +1509,7 @@ bool AddonHost::InvokeCommand(Instance& addon, std::string_view command, bool& h
     if (lua_pcall(addon.state, 1, 1, 0) != 0)
     {
         lua_pop(addon.state, 1);
-        addon.faulted  = true;
-        addon.drawSink = nullptr;
+        Fault(addon);
         return false;
     }
     handled = lua_toboolean(addon.state, -1) != 0;
@@ -1458,8 +1571,7 @@ bool AddonHost::InvokeChat(Instance& addon, std::string_view message)
         return true;
     }
     lua_pop(addon.state, 1);
-    addon.faulted  = true;
-    addon.drawSink = nullptr;
+    Fault(addon);
     return false;
 }
 
@@ -1702,6 +1814,91 @@ int AddonHost::LuaChatLogWrite(lua_State* state)
             addon->chatLogDirectory / toPath(fallbackFilename), time, cleaned);
     }
     lua_pushboolean(state, written);
+    return 1;
+}
+
+const char* AddonHost::ActionMovementUnavailableReason(const Instance& addon, bahamut_client::ActionMovementStatus& status)
+{
+    if (addon.id != "nolock" || addon.faulted || addon.closing || addon.owner == nullptr ||
+        addon.owner->actionMovementShutdown_ || addon.actionMovement == nullptr)
+    {
+        return "not_admitted";
+    }
+    status = addon.actionMovement->Status();
+    using bahamut_client::ActionMovementBoundaryState;
+    switch (status.boundary)
+    {
+        case ActionMovementBoundaryState::Unavailable:
+            return "unavailable";
+        case ActionMovementBoundaryState::TargetMismatch:
+            return "target_mismatch";
+        case ActionMovementBoundaryState::InstallFailed:
+            return "install_failed";
+        case ActionMovementBoundaryState::CleanupFailed:
+            return "cleanup_failed";
+        case ActionMovementBoundaryState::Ready:
+            break;
+    }
+    if (status.session == 0 || status.session != addon.actionMovementSession)
+    {
+        return "session_unavailable";
+    }
+    if (status.owner == 0 || status.owner != addon.actionMovementOwner)
+    {
+        return "not_admitted";
+    }
+    return nullptr;
+}
+
+int AddonHost::LuaActionMovementConfigure(lua_State* state)
+{
+    if (lua_gettop(state) != 2 || lua_type(state, 1) != LUA_TNUMBER || lua_type(state, 2) != LUA_TBOOLEAN)
+    {
+        lua_pushboolean(state, false);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    const auto percent = lua_tonumber(state, 1);
+    if (!std::isfinite(percent) || percent < 0 || percent > 100 || percent != std::floor(percent))
+    {
+        lua_pushboolean(state, false);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    auto*                                addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    bahamut_client::ActionMovementStatus status;
+    const char*                          reason     = addon == nullptr ? "not_admitted" : ActionMovementUnavailableReason(*addon, status);
+    const bool                           configured = reason == nullptr && addon->actionMovement->Configure(
+                                                                               addon->actionMovementOwner, addon->actionMovementSession, static_cast<std::uint32_t>(percent), lua_toboolean(state, 2) != 0);
+    lua_pushboolean(state, configured);
+    lua_pushstring(state, configured ? "ready" : reason == nullptr ? "not_admitted"
+                                                                   : reason);
+    return 2;
+}
+
+int AddonHost::LuaActionMovementStatus(lua_State* state)
+{
+    if (lua_gettop(state) != 0)
+    {
+        lua_pushnil(state);
+        lua_pushliteral(state, "invalid_request");
+        return 2;
+    }
+    auto*                                addon = static_cast<Instance*>(lua_touserdata(state, lua_upvalueindex(1)));
+    bahamut_client::ActionMovementStatus status;
+    const char*                          reason    = addon == nullptr ? "not_admitted" : ActionMovementUnavailableReason(*addon, status);
+    const bool                           available = reason == nullptr;
+    lua_newtable(state);
+    lua_pushboolean(state, available);
+    lua_setfield(state, -2, "available");
+    lua_pushboolean(state, available && status.enabled);
+    lua_setfield(state, -2, "enabled");
+    lua_pushnumber(state, available ? status.requestedPercent : 0);
+    lua_setfield(state, -2, "requested_percent");
+    lua_pushnumber(state, available ? status.effectivePercent : 100);
+    lua_setfield(state, -2, "effective_percent");
+    lua_pushstring(state, available ? "ready" : reason);
+    lua_setfield(state, -2, "reason");
     return 1;
 }
 

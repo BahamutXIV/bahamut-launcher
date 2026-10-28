@@ -23,6 +23,8 @@ class TargetDistanceService;
 class CustomTimerService;
 class EnemyCastService;
 class ActorNameService;
+class ActionMovementService;
+struct ActionMovementStatus;
 
 } // namespace bahamut_client
 
@@ -90,6 +92,21 @@ public:
     void SetChatSink(const AddonChatSink& sink);
     void SetUrlSink(const AddonUrlSink& sink);
 
+    // Admission requires a healthy loaded instance; manifest capabilities grant no admission.
+    // The caller qualifies the native target and service session and serializes addon lifecycle operations.
+    bool AdmitActionMovementConsumer(bahamut_client::ActionMovementService& service,
+                                     const std::filesystem::path&           manifestPath,
+                                     std::uint64_t                          session);
+    // Registers manifestPath for the current service session and admits an already-loaded healthy nolock instance.
+    // Reloads and late loads bind before load callbacks; faulted or closing instances and calls after
+    // ShutdownActionMovement cannot be admitted.
+    bool RegisterActionMovementConsumer(bahamut_client::ActionMovementService& service,
+                                        const std::filesystem::path&           manifestPath,
+                                        std::uint64_t                          session);
+    // Revoke before service release or host destruction, outside the DLL loader lock.
+    // The borrowed service must outlive its admission. This does not retire a hook.
+    void ShutdownActionMovement();
+
     void LoadManifests(const std::vector<std::filesystem::path>& manifests,
                        const std::filesystem::path&              settingsRoot,
                        const std::filesystem::path&              chatLogsRoot);
@@ -140,6 +157,8 @@ private:
     static int LuaCombatMeter(lua_State* state);
     static int LuaTargetlines(lua_State* state);
     static int LuaOpenUrl(lua_State* state);
+    static int LuaActionMovementConfigure(lua_State* state);
+    static int LuaActionMovementStatus(lua_State* state);
 
     static std::unique_ptr<Instance> LoadOne(
         const std::filesystem::path&           manifestPath,
@@ -153,11 +172,16 @@ private:
         const AddonClipboardSink*              clipboardSink,
         const AddonChatSink*                   chatSink,
         const AddonUrlSink*                    urlSink);
-    static void Close(Instance& addon);
-    static bool Invoke(Instance& addon, const char* callback, int argumentCount = 0);
-    static bool InvokeCommand(Instance& addon, std::string_view command, bool& handled);
-    static bool InvokeChat(Instance& addon, std::string_view message);
-    static bool InvokeAreaChanged(Instance& addon, std::uint32_t zoneId, std::string_view areaName, std::string_view regionName);
+    bool               BindActionMovement(Instance& addon, bahamut_client::ActionMovementService& service, std::uint64_t session);
+    void               AdmitRegisteredActionMovement(Instance& addon, const std::filesystem::path& manifestPath);
+    static void        Close(Instance& addon);
+    static void        RevokeActionMovement(Instance& addon);
+    static void        Fault(Instance& addon);
+    static const char* ActionMovementUnavailableReason(const Instance& addon, bahamut_client::ActionMovementStatus& status);
+    static bool        Invoke(Instance& addon, const char* callback, int argumentCount = 0);
+    static bool        InvokeCommand(Instance& addon, std::string_view command, bool& handled);
+    static bool        InvokeChat(Instance& addon, std::string_view message);
+    static bool        InvokeAreaChanged(Instance& addon, std::uint32_t zoneId, std::string_view areaName, std::string_view regionName);
 
     struct CombatEvent
     {
@@ -211,6 +235,16 @@ private:
     std::atomic<bool>                                                 combatParserEnabled_ = false;
     std::mutex                                                        combatQueueMutex_;
     std::vector<CombatEvent>                                          combatQueue_;
-    std::uint64_t                                                     combatDropped_ = 0;
-    bahamut_client::ActorNameService*                                 actorNames_    = nullptr;
+    std::uint64_t                                                     combatDropped_          = 0;
+    bahamut_client::ActorNameService*                                 actorNames_             = nullptr;
+    bool                                                              actionMovementShutdown_ = false;
+
+    struct ActionMovementRegistration
+    {
+        bahamut_client::ActionMovementService* service = nullptr;
+        std::filesystem::path                  manifestPath;
+        std::uint64_t                          session = 0;
+    };
+
+    std::optional<ActionMovementRegistration> actionMovementRegistration_;
 };

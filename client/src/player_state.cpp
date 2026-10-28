@@ -640,6 +640,12 @@ std::optional<PlayerStateSnapshot> PlayerStateService::Snapshot() const
 
 void PlayerStateService::PublishUnchecked(const PlayerStateSnapshot& snapshot)
 {
+    // Every identity or zone invalidation revokes the id; only a fully validated
+    // capture republishes it.
+    if (snapshot.actorId == 0u)
+    {
+        activeActorId_.store(0u, std::memory_order_release);
+    }
     std::uint32_t sequence = sequence_.load(std::memory_order_relaxed);
     for (;;)
     {
@@ -875,6 +881,7 @@ bool PlayerStateService::CaptureFromContainer(const void* container)
         }
     }
     MergeObserved(snapshot, identityChanged);
+    activeActorId_.store(snapshot.actorId, std::memory_order_release);
     PublishUnchecked(snapshot);
     return true;
 }

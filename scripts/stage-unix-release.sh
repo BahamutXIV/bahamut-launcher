@@ -89,6 +89,7 @@ skeleton_dirs=(
     "addons/pos"
     "addons/wiki"
     "addons/targetlines"
+    "addons/nolock"
     "licenses"
     "plugins/dats"
     "config/addons"
@@ -126,7 +127,7 @@ add_copy "$repo_root/src-tauri/ui/assets/licenses/Cinzel-OFL.txt" "$destination/
 add_copy "$repo_root/src-tauri/ui/assets/licenses/JetBrainsMono-OFL.txt" "$destination/licenses/JetBrainsMono-OFL.txt"
 add_copy "$repo_root/src-tauri/ui/assets/licenses/MinGW-w64-runtime-COPYING.txt" "$destination/licenses/MinGW-w64-runtime-COPYING.txt"
 
-addon_names="chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines"
+addon_names="chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines nolock"
 for name in $addon_names; do
     add_copy "$repo_root/addons/$name/addon.toml" "$destination/addons/$name/addon.toml"
     add_copy "$repo_root/addons/$name/$name.lua" "$destination/addons/$name/$name.lua"
@@ -244,6 +245,8 @@ expected_files=(
     'addons/wiki/wiki.lua'
     'addons/targetlines/addon.toml'
     'addons/targetlines/targetlines.lua'
+    'addons/nolock/addon.toml'
+    'addons/nolock/nolock.lua'
     'scripts/default.txt'
 )
 if [ "${#overlay_expected_files[@]}" -gt 0 ]; then
@@ -264,6 +267,7 @@ expected_dirs=(
     "addons/pos/"
     "addons/wiki/"
     "addons/targetlines/"
+    "addons/nolock/"
     "licenses/"
     "config/"
     "config/addons/"

@@ -67,6 +67,13 @@ public:
     bool               Shutdown();
     [[nodiscard]] bool IsInstalled() const;
 
+    // The last validated active actor id (container +0x1783C), or zero. It joins
+    // game-logic and scene actors by id; no address is exposed.
+    [[nodiscard]] std::uint32_t ActiveActorId() const noexcept
+    {
+        return activeActorId_.load(std::memory_order_acquire);
+    }
+
 private:
     void PublishUnchecked(const PlayerStateSnapshot& snapshot);
     void MergeObserved(PlayerStateSnapshot& snapshot, bool identityChanged);
@@ -102,6 +109,7 @@ private:
     std::atomic<std::uint32_t> baseClassId_{ 0 };
     std::atomic<std::uint32_t> jobId_{ 0 };
     std::atomic<std::uint32_t> level_{ 0 };
+    std::atomic<std::uint32_t> activeActorId_{ 0u };
     void*                      hookTarget_ = nullptr;
     bool                       installed_  = false;
 };

@@ -1,3 +1,4 @@
+#include "action_movement_runtime.h"
 #include "actor_name.h"
 #include "addon_host.h"
 #include "camera_zoom.h"
@@ -333,6 +334,7 @@ public:
             ReleaseHandles();
             return 12;
         }
+        InstallActionMovement(manifests, manifestsById);
         bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled() || runtimeCommands_.IsInstalled("targetlines"));
         if (!datOverlay_.Install(PathList(kDatPackageRootsEnvironment),
                                  !HasValue(kTestStubEnvironment)))
@@ -348,6 +350,40 @@ public:
     }
 
 private:
+    // An unverified target leaves movement unchanged; hook failure does not abort startup.
+    // Register the enabled nolock manifest, else the catalog entry that /addon load resolves.
+    void InstallActionMovement(const std::vector<std::filesystem::path>&                     manifests,
+                               const std::unordered_map<std::string, std::filesystem::path>& manifestsById)
+    {
+        if (!actionMovement_.Install(playerState_))
+        {
+            return;
+        }
+        std::filesystem::path nolock;
+        for (const auto& manifest : manifests)
+        {
+            const auto id = ReadAddonManifestId(manifest);
+            if (id && *id == "nolock")
+            {
+                nolock = manifest;
+                break;
+            }
+        }
+        if (nolock.empty())
+        {
+            const auto found = manifestsById.find("nolock");
+            if (found != manifestsById.end())
+            {
+                nolock = found->second;
+            }
+        }
+        if (!nolock.empty())
+        {
+            static_cast<void>(addonHost_.RegisterActionMovementConsumer(
+                actionMovement_.Service(), nolock, actionMovement_.Session()));
+        }
+    }
+
     bool PrepareStartupScript(const std::vector<std::filesystem::path>&               catalog,
                               StartupScriptPlan&                                      plan,
                               std::unordered_map<std::string, std::filesystem::path>& manifestsById)
@@ -595,6 +631,8 @@ private:
 
     void ReleaseHandles()
     {
+        addonHost_.ShutdownActionMovement();
+        static_cast<void>(actionMovement_.Shutdown());
         nativePluginHost_.Shutdown();
         discordPluginHost_.Shutdown();
         datOverlay_.Shutdown();
@@ -629,6 +667,7 @@ private:
     packet_observer::PacketObserver       packetObserver_;
     bahamut_client::ObjectDistanceService objectDistance_;
     bahamut_client::CameraZoomService     cameraZoom_;
+    bahamut_client::ActionMovementRuntime actionMovement_;
     AddonHost                             addonHost_;
     RuntimeCommands                       runtimeCommands_;
     std::filesystem::path                 screenshotPluginPath_;

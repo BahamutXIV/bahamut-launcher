@@ -1,3 +1,3 @@
 #pragma once
 
-bool VerifyRuntimeHostIdentity();
+bool VerifyRuntimeHostIdentity(bool allowTestStub = true);

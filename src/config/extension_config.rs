@@ -115,6 +115,7 @@ impl Default for ExtensionsConfig {
                 ("distance", true),
                 ("enemycast", false),
                 ("fps", true),
+                ("nolock", false),
                 ("packetlogger", true),
                 ("pos", true),
                 ("targethp", true),
@@ -891,6 +892,7 @@ mod tests {
                 ("distance", true),
                 ("enemycast", false),
                 ("fps", true),
+                ("nolock", false),
                 ("packetlogger", true),
                 ("pos", true),
                 ("targethp", true),
@@ -908,10 +910,10 @@ mod tests {
             .unwrap();
         let reparsed = ExtensionsConfig::from_ini_str(&config.to_ini_string()).unwrap();
         assert_eq!(reparsed, config);
-        assert_eq!(reparsed.addons[11].id, "zeta");
-        assert!(reparsed.addons[11].enabled);
-        assert_eq!(reparsed.addons[12].id, "alpha");
-        assert!(!reparsed.addons[12].enabled);
+        assert_eq!(reparsed.addons[12].id, "zeta");
+        assert!(reparsed.addons[12].enabled);
+        assert_eq!(reparsed.addons[13].id, "alpha");
+        assert!(!reparsed.addons[13].enabled);
         assert!(!reparsed.plugin_enabled(SCREENSHOT_PLUGIN_ID));
         assert!(reparsed.plugin_enabled(CAMERA_ZOOM_PLUGIN_ID));
     }
