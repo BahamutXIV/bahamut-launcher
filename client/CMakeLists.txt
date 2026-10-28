@@ -356,6 +356,16 @@ add_executable(bahamut-input-policy-tests
 )
 target_include_directories(bahamut-input-policy-tests PRIVATE src)
 
+add_executable(bahamut-action-movement-tests
+    src/action_movement.cpp
+    src/action_movement.h
+    src/action_movement_hook.cpp
+    src/action_movement_hook.h
+    tests/action_movement_tests.cpp
+)
+target_include_directories(bahamut-action-movement-tests PRIVATE src)
+target_link_libraries(bahamut-action-movement-tests PRIVATE minhook)
+
 add_executable(bahamut-custom-timer-tests
     $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
     src/custom_timer.h
@@ -610,6 +620,8 @@ add_test(
 )
 add_test(NAME bahamut-monitor-selection COMMAND bahamut-monitor-selection-tests)
 add_test(NAME bahamut-input-policy COMMAND bahamut-input-policy-tests)
+add_test(NAME bahamut-action-movement COMMAND bahamut-action-movement-tests)
+set_tests_properties(bahamut-action-movement PROPERTIES TIMEOUT 15)
 add_test(NAME bahamut-discord-rpc COMMAND bahamut-discord-rpc-tests)
 if(CMAKE_CROSSCOMPILING_EMULATOR)
     # A cold Wine prefix can take minutes to initialize on the first test.

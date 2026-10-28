@@ -85,6 +85,9 @@ The native suite covers:
 - DAT opening and resolution for the exact supported client build.
 - D3D9 device, swap-chain `Present`, `Reset`, and input forwarding.
 - Telemetry and the isolated Lua addon lifecycle against the bundled test client.
+- Movement-duration policy, consumer ownership and revocation. MSVC Win32 also
+  exercises synthetic MinHook installation, rollback and cleanup failures.
+  These sources belong only to the test target.
 
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
