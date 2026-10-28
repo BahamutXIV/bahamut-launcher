@@ -10,6 +10,7 @@
 #include <xinput.h>
 
 #include <array>
+#include <atomic>
 #include <cwchar>
 #include <fstream>
 #include <optional>
@@ -48,12 +49,14 @@ ClientPadMailbox                                  gDirectInputMailbox;
 InputReleasePolicy                                gInputReleasePolicy;
 std::array<std::uint32_t, kXInputControllerCount> gControllerPacketNumbers{};
 std::array<bool, kXInputControllerCount>          gControllerConnected{};
-unsigned int                                      gControllerPollFrame   = kDisconnectedControllerPollFrames - 1;
-volatile LONG                                     gOverlayVisible        = 0;
-NativePluginHost*                                 gNativePluginHost      = nullptr;
-AddonHost*                                        gAddonHost             = nullptr;
-HWND                                              gInputWindow           = nullptr;
-volatile LONG                                     gInputWindowActive     = 0;
+unsigned int                                      gControllerPollFrame = kDisconnectedControllerPollFrames - 1;
+volatile LONG                                     gOverlayVisible      = 0;
+NativePluginHost*                                 gNativePluginHost    = nullptr;
+AddonHost*                                        gAddonHost           = nullptr;
+HWND                                              gInputWindow         = nullptr;
+volatile LONG                                     gInputWindowActive   = 0;
+std::atomic<bool>                                 gMenuMouse{ false };
+std::atomic<bool>                                 gMenuKeyboard{ false };
 UINT                                              gActivationMessage     = 0;
 bool                                              gFillModeHotkeyEnabled = false;
 bool                                              gFpsHotkeyEnabled      = false;
@@ -493,12 +496,24 @@ LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM wParam
     {
         const bool shiftMessage   = virtualKey && IsShiftKey(wParam);
         const bool shiftDragInput = mouse && (ImGui::GetIO().KeyShift || (GetKeyState(VK_SHIFT) & 0x8000) != 0);
-        if (shiftMessage || shiftDragInput)
+        // HUD windows need Shift; a menu window takes clicks over it and typing
+        // in its text fields without it. Pointer moves still reach the game.
+        const bool pointerMove  = message == WM_MOUSEMOVE;
+        const bool menuMouse    = mouse && !pointerMove && gMenuMouse.load(std::memory_order_acquire);
+        const bool menuKeyboard = keyboard && gMenuKeyboard.load(std::memory_order_acquire);
+        if ((pointerMove && !shiftDragInput) || message == WM_MOUSELEAVE)
+        {
+            // Keeps ImGui's pointer current so menu hover works without Shift.
+            ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam);
+        }
+        if (shiftMessage || shiftDragInput || menuMouse || menuKeyboard)
         {
             ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam);
             const ImGuiIO& io          = ImGui::GetIO();
-            const bool     interactive = io.KeyShift;
-            const bool     capture     = interactive && ((keyboard && (io.WantCaptureKeyboard || io.WantTextInput)) || (mouse && io.WantCaptureMouse));
+            const bool     interactive = io.KeyShift || menuMouse || menuKeyboard;
+            // A menu text dialog owns the whole keyboard while it is open, so no
+            // key reaches the game's chat or movement in between ImGui frames.
+            const bool capture = menuKeyboard || (interactive && ((keyboard && (io.WantCaptureKeyboard || io.WantTextInput)) || (mouse && io.WantCaptureMouse)));
             if (capture)
             {
                 if (virtualKey && IsKeyDown(message) && wParam < 256)
@@ -653,6 +668,12 @@ void DisableOverlay()
 bool IsOverlayVisible()
 {
     return InterlockedCompareExchange(&gOverlayVisible, 0, 0) != 0;
+}
+
+void SetOverlayMenuInput(bool mouse, bool keyboard)
+{
+    gMenuMouse.store(mouse, std::memory_order_release);
+    gMenuKeyboard.store(keyboard, std::memory_order_release);
 }
 
 void UpdateControllerObservation()

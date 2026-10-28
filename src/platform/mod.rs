@@ -135,6 +135,7 @@ impl ExtensionArtifacts {
             server_utc_patch: contract_patches[0].bytes.clone(),
             lobby_host_patch: contract_patches[1].bytes.clone(),
             launch_argument,
+            server_id: options.server_id.clone(),
         }
     }
 }
@@ -152,6 +153,8 @@ pub struct LaunchOptions {
     pub extension_artifacts: Option<ExtensionArtifacts>,
     /// Linux only: write a matching retail `config.pad` controller selection before launch.
     pub gamepad_setup: bool,
+    /// `ServerProfile::stable_id` passed to client extensions; empty when unknown.
+    pub server_id: String,
 }
 
 #[cfg(any(target_os = "linux", test))]

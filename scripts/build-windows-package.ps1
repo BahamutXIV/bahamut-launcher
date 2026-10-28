@@ -1,7 +1,11 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string] $Configuration = 'Debug'
+    [string] $Configuration = 'Debug',
+
+    # Directory holding the pinned Gear Sets icon PNGs, such as icons-1.23b/0 in the
+    # assets repository. Omit to use any icons already installed in the checkout.
+    [string] $GearsetsIconsSource
 )
 
 $ErrorActionPreference = 'Stop'
@@ -158,6 +162,14 @@ if ($release) {
     $clientBuildRoot = Join-Path $outRoot 'client-debug'
     $cargoProfile = 'debug'
     $helperBinary = $null
+}
+
+if ($GearsetsIconsSource) {
+    $iconsSourcePath = (Resolve-Path -LiteralPath $GearsetsIconsSource).Path
+    & python -I (Join-Path $PSScriptRoot 'gearsets-icons.py') install --source $iconsSourcePath
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Gear Sets icon install failed'
+    }
 }
 
 $destination = [System.IO.Path]::GetFullPath($destination)

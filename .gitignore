@@ -2,6 +2,7 @@
 /tools/icon-gen/target/
 /out/
 /plugins/dats/bahamut-dats-overlay/data/
+/addons/gearsets/icons/
 /.flatpak-builder/
 /.idea/
 /.vscode/

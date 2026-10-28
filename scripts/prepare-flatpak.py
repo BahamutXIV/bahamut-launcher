@@ -174,6 +174,25 @@ def prepare(args: argparse.Namespace) -> None:
         )
         overlay_dat_count = sum(1 for path in (archived_overlay / "data").rglob("*") if path.is_file())
 
+    # Pinned Gear Sets icons are ignored too and travel the same way.
+    gearsets_icons = repo / "addons" / "gearsets" / "icons"
+    gearsets_icon_count = 0
+    if gearsets_icons.exists() or gearsets_icons.is_symlink():
+        for path in (gearsets_icons.parents[1], gearsets_icons.parent, gearsets_icons):
+            if path.is_symlink():
+                raise SystemExit(f"Gear Sets icon path contains a link: {path}")
+        if not gearsets_icons.is_dir():
+            raise SystemExit(f"Gear Sets icons are not a plain directory: {gearsets_icons}")
+        archived_icons = source / "addons" / "gearsets" / "icons"
+        if archived_icons.exists():
+            raise SystemExit(f"source archive already contains Gear Sets icons: {archived_icons}")
+        shutil.copytree(gearsets_icons, archived_icons, symlinks=True)
+        subprocess.run(
+            [sys.executable, "-I", str(source / "scripts" / "gearsets-icons.py"), "verify", "--package", str(archived_icons)],
+            check=True,
+        )
+        gearsets_icon_count = sum(1 for path in archived_icons.iterdir() if path.is_file())
+
     cargo_lock = source / "Cargo.lock"
     rust_toolchain = source / "rust-toolchain.toml"
     stage_script = source / "scripts" / "stage-unix-release.sh"
@@ -218,6 +237,7 @@ def prepare(args: argparse.Namespace) -> None:
             "stage_script_sha256": sha256_file(stage_script),
             "package_marker_sha256": sha256_file(marker),
             "official_overlay_dat_files": overlay_dat_count,
+            "gearsets_icon_files": gearsets_icon_count,
         },
     }
     identity_path = archived_packaging / "build-identity.json"

@@ -406,7 +406,8 @@ bool __fastcall HookedPlayerStateUpdate(void* container, void*)
         gPlayerStateService.load(std::memory_order_acquire);
     if (service != nullptr)
     {
-        static_cast<void>(service->CaptureFromContainer(container));
+        const bool captured = service->CaptureFromContainer(container);
+        service->NotifyGameFrame(container, captured);
     }
 
     return result;
@@ -886,6 +887,12 @@ bool PlayerStateService::CaptureFromContainer(const void* container)
     activeActorId_.store(snapshot.actorId, std::memory_order_release);
     PublishUnchecked(snapshot);
     return true;
+}
+
+void PlayerStateService::SetGameFrameObserver(GameFrameObserver observer, void* context)
+{
+    gameFrameObserver_ = observer;
+    gameFrameContext_  = context;
 }
 
 bool PlayerStateService::InstallHook()

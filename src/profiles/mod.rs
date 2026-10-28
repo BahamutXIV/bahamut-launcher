@@ -1,6 +1,7 @@
 //! Typed server profiles shared by the portable INI owner and runtime routing.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Embedded server-list fallback for fresh INI files.
 pub(crate) const DEFAULT_SERVERS: &str = include_str!("default_servers.toml");
@@ -45,6 +46,21 @@ impl ServerProfile {
     /// Lobby host embedded in the game image; the stock protocol supplies the port.
     pub fn lobby_address(&self) -> &str {
         &self.host
+    }
+
+    /// Stable server identity for per-character records: the first 16 hex
+    /// digits of SHA-256 over the normalized lobby host and port. Profile names
+    /// and auth endpoints do not affect it.
+    pub fn stable_id(&self) -> String {
+        let trimmed = self.host.trim();
+        let host = url::Host::parse(trimmed)
+            .map(|host| host.to_string())
+            .unwrap_or_else(|_| trimmed.to_ascii_lowercase());
+        let digest = Sha256::digest(format!("{host}:{}", self.lobby_port).as_bytes());
+        digest[..8]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     pub fn validate(&self) -> Result<(), ProfileError> {
@@ -127,6 +143,38 @@ mod tests {
         let profile = sample();
         assert_eq!(profile.api_base(), "http://127.0.0.1:8080/api/v1");
         assert_eq!(profile.lobby_address(), "127.0.0.1");
+    }
+
+    #[test]
+    fn stable_id_follows_the_lobby_endpoint_only() {
+        let base = sample().stable_id();
+        assert_eq!(base.len(), 16);
+        assert!(
+            base.bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        );
+
+        let mut profile = sample();
+        profile.display_name = "Renamed".into();
+        profile.auth_port = 443;
+        profile.use_https = true;
+        assert_eq!(profile.stable_id(), base);
+
+        profile = sample();
+        profile.lobby_port = 54995;
+        assert_ne!(profile.stable_id(), base);
+        profile = sample();
+        profile.host = "127.0.0.2".into();
+        assert_ne!(profile.stable_id(), base);
+    }
+
+    #[test]
+    fn stable_id_normalizes_host_case() {
+        let mut upper = sample();
+        upper.host = "Bahamut.Example.TEST".into();
+        let mut lower = sample();
+        lower.host = "bahamut.example.test".into();
+        assert_eq!(upper.stable_id(), lower.stable_id());
     }
 
     #[test]

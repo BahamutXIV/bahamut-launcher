@@ -61,6 +61,28 @@ public:
     bool CaptureFromContainer(const void* container);
     void Observe(const packet_observer::GameMessage& message);
 
+    // Runs on the game thread after each hooked update returns, after this
+    // service's own capture. Set before InstallHook; never changed after.
+    using GameFrameObserver = void (*)(void* context, const void* container);
+    void SetGameFrameObserver(GameFrameObserver observer, void* context);
+
+    void NotifyGameFrame(const void* container, bool captured)
+    {
+        frameCaptured_.store(captured, std::memory_order_relaxed);
+        if (gameFrameObserver_ != nullptr)
+        {
+            gameFrameObserver_(gameFrameContext_, container);
+        }
+    }
+
+    // Game thread, inside a game-frame observer: whether this frame's capture
+    // succeeded. A failed read leaves the previous snapshot published, so
+    // identity copied on this frame needs this check.
+    [[nodiscard]] bool CapturedThisFrame() const
+    {
+        return frameCaptured_.load(std::memory_order_relaxed);
+    }
+
     // MinHook is owned by the render boundary. These methods only create,
     // enable, disable, and remove this hook after that owner is initialized.
     bool               InstallHook();
@@ -110,8 +132,11 @@ private:
     std::atomic<std::uint32_t> jobId_{ 0 };
     std::atomic<std::uint32_t> level_{ 0 };
     std::atomic<std::uint32_t> activeActorId_{ 0u };
-    void*                      hookTarget_ = nullptr;
-    bool                       installed_  = false;
+    void*                      hookTarget_        = nullptr;
+    bool                       installed_         = false;
+    GameFrameObserver          gameFrameObserver_ = nullptr;
+    std::atomic<bool>          frameCaptured_{ false };
+    void*                      gameFrameContext_ = nullptr;
 };
 
 } // namespace bahamut_client

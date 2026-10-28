@@ -150,7 +150,7 @@ tree="$work/root/$top"
 mkdir -p "$tree"
 
 # The expected manifest is independent of what the stage produced.
-addon_ids=(chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines nolock autologin)
+addon_ids=(chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines nolock autologin gearsets)
 license_files=(
     MinHook-LICENSE.txt Dear-ImGui-LICENSE.txt Lua-COPYRIGHT.txt Miniz-LICENSE.txt
     Inter-OFL.txt Cinzel-OFL.txt JetBrainsMono-OFL.txt MinGW-w64-runtime-COPYING.txt
@@ -177,6 +177,17 @@ if [ -d "$overlay_source" ]; then
         esac
         expected_list+=("plugins/dats/bahamut-dats-overlay/$rel")
     done < <(find "$overlay_source" -type f -print0)
+fi
+
+icons_source="$repo_root/addons/gearsets/icons"
+if [ -d "$icons_source" ]; then
+    while IFS= read -r -d '' entry; do
+        rel="${entry#"$icons_source"/}"
+        case "$rel" in
+            *"$newline"*) fail "Gear Sets icon file name contains a newline: $rel" ;;
+        esac
+        expected_list+=("addons/gearsets/icons/$rel")
+    done < <(find "$icons_source" -type f -print0)
 fi
 
 # Only files are copied, so the empty skeleton directories never reach the

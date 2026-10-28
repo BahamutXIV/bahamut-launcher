@@ -55,6 +55,8 @@ $expectedManifest = @(
     'addons/nolock/nolock.lua'
     'addons/autologin/addon.toml'
     'addons/autologin/autologin.lua'
+    'addons/gearsets/addon.toml'
+    'addons/gearsets/gearsets.lua'
     'scripts/default.txt'
 )
 
@@ -74,6 +76,7 @@ $expectedDirectories = @(
     'addons/targetlines/'
     'addons/nolock/'
     'addons/autologin/'
+    'addons/gearsets/'
     'licenses/'
     'config/'
     'config/addons/'
@@ -133,6 +136,36 @@ function Get-OfficialOverlayEntries([string] $Root) {
     return [pscustomobject]@{
         Files = @($files.ToArray() | Sort-Object)
         Directories = @($directories.ToArray() | Sort-Object)
+    }
+}
+
+# The Gear Sets icons are optional: none without the pinned PNGs, otherwise every file.
+function Get-GearsetsIconEntries([string] $Root) {
+    $rootPath = Get-NormalizedPath $Root
+    if (-not (Test-Path -LiteralPath $rootPath)) {
+        return [pscustomobject]@{ Files = @(); Directories = @() }
+    }
+    if (-not (Test-Path -LiteralPath $rootPath -PathType Container) -or
+        ([System.IO.File]::GetAttributes($rootPath) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Gear Sets icon package is not a plain directory: $rootPath"
+    }
+    $files = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($entry in @(Get-ChildItem -LiteralPath $rootPath -Force)) {
+        if (([System.IO.File]::GetAttributes($entry.FullName) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Gear Sets icon package contains a reparse point: $($entry.FullName)"
+        }
+        if ($entry.PSIsContainer) {
+            throw "Gear Sets icon package contains a directory: $($entry.FullName)"
+        }
+        $files.Add('addons/gearsets/icons/' + $entry.Name)
+    }
+    $directories = @()
+    if ($files.Count -ne 0) {
+        $directories = @('addons/gearsets/icons/')
+    }
+    return [pscustomobject]@{
+        Files = @($files.ToArray() | Sort-Object)
+        Directories = $directories
     }
 }
 
@@ -317,6 +350,18 @@ function windows_release_archive_manifest_and_cleanliness {
             New-Item -ItemType Directory -Force -Path $overlayPayload | Out-Null
             Set-Content -LiteralPath (Join-Path $overlayFixture 'overlay.toml') -Value 'synthetic manifest' -Encoding ascii
             Set-Content -LiteralPath (Join-Path $overlayPayload 'CB.DAT') -Value 'synthetic DAT' -Encoding ascii
+            $iconFixture = Join-Path $inputRoot 'synthetic-icons'
+            New-Item -ItemType Directory -Force -Path $iconFixture | Out-Null
+            $emptyIconEntries = Get-GearsetsIconEntries $iconFixture
+            if ($emptyIconEntries.Files.Count -ne 0 -or $emptyIconEntries.Directories.Count -ne 0) {
+                throw 'an empty Gear Sets icon package must contribute no entries'
+            }
+            Set-Content -LiteralPath (Join-Path $iconFixture 'pld.png') -Value 'synthetic icon' -Encoding ascii
+            $iconFixtureEntries = Get-GearsetsIconEntries $iconFixture
+            if ($iconFixtureEntries.Files -notcontains 'addons/gearsets/icons/pld.png' -or
+                $iconFixtureEntries.Directories -notcontains 'addons/gearsets/icons/') {
+                throw 'Gear Sets icon inventory did not include its payload and directory'
+            }
             $overlayFixtureEntries = Get-OfficialOverlayEntries $overlayFixture
             if ($overlayFixtureEntries.Files -notcontains 'plugins/dats/bahamut-dats-overlay/overlay.toml' -or
                 $overlayFixtureEntries.Files -notcontains 'plugins/dats/bahamut-dats-overlay/data/1C/59/00/CB.DAT' -or
@@ -330,8 +375,9 @@ function windows_release_archive_manifest_and_cleanliness {
         }
 
         $officialOverlayEntries = Get-OfficialOverlayEntries (Join-Path $repoPath 'plugins/dats/bahamut-dats-overlay')
-        $packageExpectedFiles = @($expectedManifest) + @($officialOverlayEntries.Files)
-        $packageExpectedDirectories = @($expectedDirectories) + @($officialOverlayEntries.Directories)
+        $gearsetsIconEntries = Get-GearsetsIconEntries (Join-Path $repoPath 'addons/gearsets/icons')
+        $packageExpectedFiles = @($expectedManifest) + @($officialOverlayEntries.Files) + @($gearsetsIconEntries.Files)
+        $packageExpectedDirectories = @($expectedDirectories) + @($officialOverlayEntries.Directories) + @($gearsetsIconEntries.Directories)
 
         & (Join-Path $PSScriptRoot 'stage-windows-release.ps1') `
             -LauncherBinary $LauncherBinary `

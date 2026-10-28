@@ -1,12 +1,17 @@
 #include "action_movement_runtime.h"
 #include "actor_name.h"
 #include "addon_host.h"
+#include "addon_records.h"
 #include "autologin.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
 #include "custom_timer.h"
 #include "dat_overlay.h"
 #include "enemy_cast.h"
+#include "equipment_state.h"
+#include "gearsets_debug_service.h"
+#include "gearsets_native_executor.h"
+#include "gearsets_runtime.h"
 #include "input.h"
 #include "native_plugin_host.h"
 #include "object_distance.h"
@@ -26,6 +31,8 @@
 #include <cstring>
 #include <cwchar>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <shellapi.h>
 #include <string>
 #include <unordered_map>
@@ -60,6 +67,7 @@ constexpr wchar_t kObjectDistanceEnabledEnvironment[] = L"BAHAMUT_RUNTIME_OBJECT
 constexpr wchar_t kCameraZoomEnabledEnvironment[]     = L"BAHAMUT_RUNTIME_CAMERA_ZOOM_ENABLED";
 constexpr wchar_t kStartupScriptEnvironment[]         = L"BAHAMUT_RUNTIME_STARTUP_SCRIPT";
 constexpr wchar_t kLauncherVersionEnvironment[]       = L"BAHAMUT_RUNTIME_LAUNCHER_VERSION";
+constexpr wchar_t kServerIdEnvironment[]              = L"BAHAMUT_RUNTIME_SERVER_ID";
 constexpr wchar_t kDatPackageRootsEnvironment[] =
     L"BAHAMUT_RUNTIME_DAT_PACKAGE_ROOTS";
 constexpr wchar_t     kBorderlessEnvironment[]    = L"BAHAMUT_RUNTIME_BORDERLESS";
@@ -296,6 +304,42 @@ public:
         addonHost_.SetChatSink({ nullptr, &PrintAddonChatText });
         addonHost_.SetUrlSink({ nullptr, &OpenAddonUrl });
         addonHost_.SetRuntimeIdentity(NarrowUtf8(EnvironmentValue(kLauncherVersionEnvironment)), kBahamutRuntimeApiVersion);
+        const auto gearsetsMetadata = [this](bahamut_client::EquipmentSnapshot& snapshot)
+        {
+            if (const auto player = playerState_.Snapshot())
+            {
+                if (player->baseClassId != 0)
+                    snapshot.classId = player->baseClassId;
+                snapshot.jobId = player->jobId;
+                if (player->actorId != 0 && playerState_.CapturedThisFrame())
+                    snapshot.characterId = player->actorId;
+            }
+        };
+        gearsetsRuntime_.SetMetadataProvider(gearsetsMetadata);
+        addonHost_.SetEquipmentStateService(&equipment_);
+        addonHost_.SetGearsetsRuntime(&gearsetsRuntime_);
+        playerState_.SetGameFrameObserver(&bahamut_client::GearsetsRuntime::ObserveGameFrame, &gearsetsRuntime_);
+        const auto gearsetsDebugSwitches = bahamut_client::ReadGearsetsDebugSwitchesFromEnvironment();
+        if (gearsetsDebugSwitches.Any())
+        {
+            gearsetsDebug_ = std::make_unique<bahamut_client::GearsetsDebugService>(&equipment_);
+            gearsetsDebug_->SetMetadataProvider(gearsetsMetadata);
+            static_cast<void>(bahamut_client::InstallGearsetsDebug(gearsetsDebugSwitches, *gearsetsDebug_, equipment_, addonHost_, gearsetsRuntime_));
+        }
+        // The key follows the character copied into the equipment snapshot, so
+        // records and equipment always come from one session.
+        if (const std::string serverId = NarrowUtf8(EnvironmentValue(kServerIdEnvironment)); bahamut_client::IsServerId(serverId))
+        {
+            addonHost_.SetProfileKeyProvider([this, serverId]() -> std::optional<std::string>
+                                             {
+                                                 const auto snapshot = equipment_.Snapshot();
+                                                 if (!snapshot || !snapshot->characterId)
+                                                 {
+                                                     return std::nullopt;
+                                                 }
+                                                 return bahamut_client::ComposeProfileKey(serverId, *snapshot->characterId);
+                                             });
+        }
         if (!settings.empty() && !chatLogs.empty())
         {
             ConfigureOverlayLayout(
@@ -656,32 +700,36 @@ private:
         }
     }
 
-    HANDLE                                telemetryMapping_ = nullptr;
-    BahamutRuntimeSharedState*            sharedState_      = nullptr;
-    BahamutRuntimeTelemetry*              telemetry_        = nullptr;
-    HANDLE                                frameEvent_       = nullptr;
-    bahamut_client::PlayerStateService    playerState_;
-    bahamut_client::ActorNameService      actorNames_{ &playerState_ };
-    bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
-    bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
-    bahamut_client::CustomTimerService    customTimer_;
-    bahamut_client::EnemyCastService      enemyCast_{ &playerState_, &actorNames_ };
-    packet_observer::PacketObserver       packetObserver_;
-    bahamut_client::ObjectDistanceService objectDistance_;
-    bahamut_client::CameraZoomService     cameraZoom_;
-    bahamut_client::ActionMovementRuntime actionMovement_;
-    AddonHost                             addonHost_;
-    RuntimeCommands                       runtimeCommands_;
-    std::filesystem::path                 screenshotPluginPath_;
-    NativePluginConfiguration             screenshotConfiguration_;
-    NativePluginHost                      nativePluginHost_;
-    std::filesystem::path                 discordPluginPath_;
-    NativePluginConfiguration             discordConfiguration_;
-    NativePluginHost                      discordPluginHost_;
-    bool                                  fillModeHotkeyEnabled_ = false;
-    bool                                  fpsHotkeyEnabled_      = false;
-    bool                                  nativePluginFailed_    = false;
-    bahamut_dat_overlay::DatOverlay       datOverlay_;
+    HANDLE                                                telemetryMapping_ = nullptr;
+    BahamutRuntimeSharedState*                            sharedState_      = nullptr;
+    BahamutRuntimeTelemetry*                              telemetry_        = nullptr;
+    HANDLE                                                frameEvent_       = nullptr;
+    bahamut_client::PlayerStateService                    playerState_;
+    bahamut_client::ActorNameService                      actorNames_{ &playerState_ };
+    bahamut_client::TargetDistanceService                 targetDistance_{ &playerState_, &actorNames_ };
+    bahamut_client::TargetlinesService                    targetlines_{ &playerState_, &targetDistance_ };
+    bahamut_client::CustomTimerService                    customTimer_;
+    bahamut_client::EnemyCastService                      enemyCast_{ &playerState_, &actorNames_ };
+    packet_observer::PacketObserver                       packetObserver_;
+    bahamut_client::ObjectDistanceService                 objectDistance_;
+    bahamut_client::CameraZoomService                     cameraZoom_;
+    bahamut_client::ActionMovementRuntime                 actionMovement_;
+    bahamut_client::EquipmentStateService                 equipment_;
+    bahamut_client::GearsetsNativeExecutor                gearsetsExecutor_;
+    bahamut_client::GearsetsRuntime                       gearsetsRuntime_{ &equipment_, gearsetsExecutor_ };
+    std::unique_ptr<bahamut_client::GearsetsDebugService> gearsetsDebug_;
+    AddonHost                                             addonHost_;
+    RuntimeCommands                                       runtimeCommands_;
+    std::filesystem::path                                 screenshotPluginPath_;
+    NativePluginConfiguration                             screenshotConfiguration_;
+    NativePluginHost                                      nativePluginHost_;
+    std::filesystem::path                                 discordPluginPath_;
+    NativePluginConfiguration                             discordConfiguration_;
+    NativePluginHost                                      discordPluginHost_;
+    bool                                                  fillModeHotkeyEnabled_ = false;
+    bool                                                  fpsHotkeyEnabled_      = false;
+    bool                                                  nativePluginFailed_    = false;
+    bahamut_dat_overlay::DatOverlay                       datOverlay_;
 };
 
 RuntimeHost gRuntimeHost;

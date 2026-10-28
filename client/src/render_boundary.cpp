@@ -415,6 +415,13 @@ void ObservePresent(IDirect3DDevice9* device)
             OutputDebugStringA(message);
         }
     }
+    // DrawOverlay replaces the menu input claim in one store; a frame that does
+    // not reach it draws no menu, so the claim ends. Clearing first instead
+    // would let keys reach the game while a menu is still open.
+    if (gTelemetry == nullptr || hideOverlayForCapture)
+    {
+        SetOverlayMenuInput(false, false);
+    }
     if (gTelemetry != nullptr && !hideOverlayForCapture)
     {
         if (SUCCEEDED(device->BeginScene()))
@@ -427,6 +434,7 @@ void ObservePresent(IDirect3DDevice9* device)
         }
         else
         {
+            SetOverlayMenuInput(false, false);
             ++gTelemetry->overlayFailureCount;
         }
     }

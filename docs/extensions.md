@@ -407,6 +407,80 @@ only on the exact supported retail client (see
 [NoLock movement policy](#nolock-movement-policy)); without it, waits stay
 normal. Live acceptance of this build on the retail client is pending.
 
+### Gearsets
+
+Gearsets is disabled by default. `/gs` or `/gearsets` opens and closes the Gear
+Sets window, which starts closed. It lists sets by number with the class or job
+icon, its abbreviation and the set name; a gold star marks every set whose gear
+you are wearing. The window takes clicks and typing without Shift.
+
+- `+` saves the gear you are wearing as a new set named after its number, such
+  as `Set1`. The arrow buttons move the selected set up or down.
+- Equip Set, or a double-click on a set, equips it. Cancel stops unsent
+  requests; a sent request may still finish.
+- Right-click a set for Equip, Update from Current, Rename and Delete. While
+  the Rename dialog is open, every key goes to it and none reaches the game;
+  Escape closes it.
+
+Equip changes one slot at a time through the game's own equip request, main
+hand first, and waits to see each change before the next. A main hand for
+another class changes your class, and the remaining slots are checked again
+afterward. Equip never requests a Job Change, never retries a sent request
+and never undoes one; the game's own restrictions still apply. A one-line
+status under the list shows progress, and the reason if Equip stops early;
+hover over a shortened line for the whole text. The window never changes size
+for it.
+
+Commands take `<set>` as a list number or a case-insensitive set name:
+
+- `/gs list`, `/gs save [name]`, `/gs equip <set>`, `/gs update <set>` and
+  `/gs delete <set>`.
+- `/gs rename <number> <name>` and `/gs move <number> <position>`.
+- `/gs cancel`, `/gs status` for the last equip result, `/gs reload` and
+  `/gs help`.
+
+Each character's sets live in one file,
+`config/addons/gearsets/sets/<server id>-<character id>/sets.lua`, which you
+can edit by hand. Gear Sets reads it as data only and never runs it:
+
+```lua
+return {
+    {
+        name = 'Healing',
+        class = 'CNJ',
+        main = 'WEATHERED_CANE',
+        body = { 'WEATHERED_DALMATICA', copy = '0000004800000123' },
+        hands = 'empty',
+    },
+}
+```
+
+A slot is `'empty'`, an item name, an item number, or a table holding the item
+and the `copy` it must use, 16 hex digits naming one exact item. The slot keys
+are `main`, `off`, `throwing`, `pack`, `pouch`, `head`, `undershirt`, `body`,
+`undergarment`, `legs`, `hands`, `feet`, `waist`, `neck`, `ears`, `wrists`,
+`right_ring` and `left_ring`. Item names come from the Bahamut server's item
+list, for example `WEATHERED_CANE`. Without a `copy`, Equip uses the copy you
+are wearing in that slot, or else the only copy you carry, and stops if you
+carry two. Slots a set leaves out keep what you are wearing. Sets saved in
+game record every slot with its exact copy.
+
+Gear Sets reads the file again when the window opens and before commands that
+read or change sets. If the file cannot be read, the window shows the problem
+and, for a syntax error, its line number. Changes to saved sets are refused
+until the problem is fixed, preserving the file.
+Gear Sets rewrites the whole file when a set changes in game and keeps only its
+own header comment. If the file changed on disk while the window was open, a
+change made in the window is refused and the list reloads.
+
+The file is chosen by the launched server's stable ID and the character's
+database ID. The server ID covers the server profile's lobby host and port, so
+renaming a profile or changing its auth endpoint keeps its sets. Without a
+server ID, or before the game names the character, sets exist only in memory
+for the session. A character holds at most 100 sets. Class and job icons appear
+when the package includes them; otherwise rows show the abbreviation alone.
+See the [native contract](../client/README.md#gearsets).
+
 ### Autologin
 
 Autologin is disabled by default. Enable it in Addons for the next game
@@ -856,6 +930,80 @@ These functions submit content during `draw`:
   with the exact origin `https://bahamut.miraheze.org`. Other schemes, hosts,
   ports, malformed URLs, and invalid UTF-8 return `false` without reaching
   the browser sink.
+
+### Gearsets services
+
+These functions are available only to the addon with ID `gearsets`.
+
+- `bahamut.profile_key()` returns the character profile key, or `nil` without
+  a server ID from the launcher or a current equipment read that identifies
+  the character.
+- `bahamut.equipment_snapshot()` returns `nil` without a current read.
+  Otherwise it returns `complete`, `generation`, a text `session` token,
+  optional `class_id` and `job_id`, and `slots`, an array of `{ slot, state }`
+  rows. `state` is
+  `empty`, `item`, or `unknown`. An `item` row adds `uid`, 16 lowercase hex
+  digits, and the numeric `catalog` ID. `complete` is true only when no slot
+  is `unknown`.
+- `bahamut.equipment_session()` returns an ephemeral session token as text,
+  or `"0"` without a reader. It is not a persistence key. Class/job metadata
+  belongs to the copied equipment snapshot, not a later player-state read.
+- `bahamut.resolve_equipment_items(uids)` accepts up to 18 hexadecimal instance
+  IDs and returns corresponding `available`, `missing`, `ambiguous`, or
+  `unavailable` strings from one copied inventory view. Bag traversal is capped
+  at 1024 positions; larger or unreadable inventory remains unavailable.
+- `bahamut.find_item_copy(item_id)` returns `available` and the instance as 16
+  lowercase hex digits when exactly one copy of that item type is worn or in
+  accessible bag data, or `missing`, `ambiguous`, or `unavailable`. A worn item
+  and its bag entry count as one copy.
+- `bahamut.item_id(name)` returns the item number for an item-list name such
+  as `WEATHERED_CANE`, or `nil`. `bahamut.item_name(id)` is the reverse. The
+  list covers named thrown, pack, weapon, tool, armor and accessory items.
+- `bahamut.record_list(profile)` returns a status string and an array of
+  record names.
+- `bahamut.record_load(name, profile)` returns a status string and the record
+  bytes.
+- `bahamut.record_save(name, text, profile)` returns a status string.
+- `bahamut.record_delete(name, profile)` returns a status string.
+- `bahamut.gearsets_equip(intent)` copies a whole-set intent, `slots` keyed by
+  slot position with `{ state = 'empty' }` or `{ state = 'item', uid }` for
+  every slot, and returns an admission boolean and reason. Admission is not
+  equip success; read the outcome from `bahamut.gearsets_result()`.
+- `bahamut.gearsets_cancel()` stops unsent operations.
+- `bahamut.gearsets_result()` returns `phase`, `reason`, `submissions`,
+  optional stopping `slot`, and a `changed` array of observed slot positions.
+- `bahamut.gearsets_window(view)` is a draw-only boundary. The view contains
+  up to 100 `{ name, abbreviation, current }` rows, the 1-based `selected`
+  row, `status`, `equipping`, `editable`, and `context`, which changes whenever
+  the rows may name other sets so a dialog opened earlier cannot act on the
+  wrong one. An abbreviation of up to three capital letters names the row's
+  icon, `icons/<lowercase abbreviation>.png` in the addon directory. It returns
+  a single `{ kind, row, text }` action. Lua owns the sets and selection; the
+  overlay owns native controls.
+
+Each record function takes the profile key the addon obtained from
+`bahamut.profile_key()` and acts only while that key is still current, so a
+character switch between the check and the call is refused instead of
+reaching the other character's sets. Records are `<name>.lua` files under the
+profile's directory. Names are 1-64 characters from `a-z`, `0-9`, and `-`, and
+cannot be a reserved Windows device name. A record is at most 262144 bytes and
+a profile holds at most 64 records. Status strings are `ok`, `unavailable` (no
+current profile matching the argument), `not_found`, `invalid`, `limit`,
+`too_large`, and `io`.
+Saving writes a temporary file and replaces the record in one operation, and
+any failure leaves the earlier record unchanged.
+
+Two more functions exist only when the client module runs with
+`BAHAMUT_TEST_GEARSETS_EQUIP=1`, described in the
+[debug switches](../client/README.md#debug-switches):
+
+- `bahamut.debug_equip(bag_slot, equip_slot, uid)` returns `true` and a
+  request number, or `false` and a reason. `uid` is optional hex text.
+  Reasons include `disabled`, `busy`, `invalid-slot`, and `invalid-uid`.
+- `bahamut.debug_equip_status()` returns `nil` or the latest request:
+  `id`, `phase`, `reason`, `terminal`, `generation`, `bag_slot`,
+  `equip_slot`, optional `uid` and `catalog`, `invocations`, optional
+  `return_value`, `submit_frame`, `invoke_frame`, and `finish_frame`.
 
 ### Lua restrictions and package trust
 

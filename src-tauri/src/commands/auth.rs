@@ -147,6 +147,7 @@ pub(crate) fn launch_game_inner(
         borderless_monitor: config.preferences.launcher.borderless_monitor.clone(),
         extension_artifacts,
         gamepad_setup: launch_gamepad_setup(cfg!(target_os = "linux"), ControllerConfig::load()),
+        server_id: profile.stable_id(),
     };
 
     let game = platform::launch_game(&game_dir, profile.lobby_address(), &token, &options)
