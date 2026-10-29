@@ -14,6 +14,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <set>
 #include <span>
@@ -1809,14 +1810,35 @@ end
         targetMessage.payload.push_back(27u);
         targetMessage.payload.push_back(0u);
     };
+    const auto finishProperties = [&]
+    {
+        targetMessage.payload.push_back(0x88u);
+        for (const char character : std::string_view("/_init"))
+        {
+            targetMessage.payload.push_back(static_cast<std::uint8_t>(character));
+        }
+        targetMessage.payload[0] = static_cast<std::uint8_t>(targetMessage.payload.size() - 1u);
+    };
     appendHealth(0x4232BCAAu);
     appendHealth(0x7BCDFB69u);
-    targetMessage.payload.push_back(0x88u);
-    for (const char character : std::string_view("/_init"))
+    finishProperties();
+    targetService.Observe(targetMessage);
+    ResetDrawCapture(capture);
+    targetHost.Draw({ &capture, &CaptureWindow, &CaptureRawText });
+    if (capture.rawTexts != 1 || capture.rawAddonId != "distance")
     {
-        targetMessage.payload.push_back(static_cast<std::uint8_t>(character));
+        std::cerr << "target HP showed a target without the battle property\n";
+        return 1;
     }
-    targetMessage.payload[0] = static_cast<std::uint8_t>(targetMessage.payload.size() - 1u);
+    targetMessage.payload = { 0u };
+    // charaWork.property[2], the battle-character property.
+    for (const std::uint8_t byte : std::initializer_list<std::uint8_t>{ 1u, 0x13u, 0x53u, 0x67u, 0x7Bu, 1u })
+    {
+        targetMessage.payload.push_back(byte);
+    }
+    appendHealth(0x4232BCAAu);
+    appendHealth(0x7BCDFB69u);
+    finishProperties();
     targetService.Observe(targetMessage);
     ResetDrawCapture(capture);
     targetHost.Draw({ &capture, &CaptureWindow, &CaptureRawText });
