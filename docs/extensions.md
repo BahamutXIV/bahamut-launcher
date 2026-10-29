@@ -2,7 +2,8 @@
 
 [Back to the documentation index](README.md)
 
-Use Extensions to manage Lua addons, Screenshot, DiscordRPC, and DAT packages.
+Use Extensions to manage Lua addons, Screenshot, DiscordRPC, XHBar, and DAT
+packages.
 Extended Draw Distance and Extended Camera Zoom are in Settings > Graphics.
 Selections apply on the next game launch. In game, `/addon` and `/load`
 change loaded addons and plugins for the current session; see
@@ -10,9 +11,9 @@ change loaded addons and plugins for the current session; see
 
 The x86 Win32 client module hosts Lua addons. Screenshot and DiscordRPC are
 separate DLLs in `plugins/`, Dats-Overlay is managed by the launcher, and the
-two Graphics options use optional client hooks. The runtime's private native
-ABI loads only Screenshot and DiscordRPC. It does not discover arbitrary
-DLLs or provide a public plugin SDK.
+two Graphics options and XHBar use optional client hooks. The runtime's
+private native ABI loads only Screenshot and DiscordRPC. It does not discover
+arbitrary DLLs or provide a public plugin SDK.
 
 The first sections cover player-facing behavior. [Package layout](#package-layout),
 [Lua lifecycle](#lua-lifecycle), and [Host API](#host-api) are the addon author
@@ -76,11 +77,15 @@ These chat commands work in every session where the client module starts:
 | `/load <plugin>` | Loads or re-enables `screenshot` or `discord-rpc`. |
 | `/unload <plugin>` | Disables the plugin. |
 | `/plugins` | Lists both plugins and whether each is loaded. |
+| `/xhbar xbox`, `/xhbar playstation` | Switches XHBar's control labels and saves the choice. |
+| `/xhbar toggle` | Hides or shows the XHBar overlay and saves the choice. |
+| `/xhbar help` | Lists the XHBar commands. |
 
 Any installed addon can be loaded, including one not selected in Extensions.
-Changes last until the game closes; they never rewrite `extensions.ini`, and
-the next launch uses the Extensions selection and the
-[startup script](configuration.md#startup-scripts). DAT packages and the
+Addon and plugin changes last until the game closes; they never rewrite
+`extensions.ini`, and the next launch uses the Extensions selection and the
+[startup script](configuration.md#startup-scripts). XHBar's choices
+persist in its own [settings file](../client/README.md#commands-and-settings). DAT packages and the
 Graphics options are applied at launch and have no in-game command.
 
 Commands take effect immediately, even when chat feedback is unavailable.
@@ -714,10 +719,10 @@ and clear the popup.
 
 ### Chat command dispatch
 
-The runtime reserves `/addon`, `/load`, `/unload`, and `/plugins` for
-[Loading in game](#loading-in-game). Every installed addon's manifest
-`commands` names register their first word, such as `/fps`, when the module
-starts. Names are read from inline tables in a `commands` array or from
+The runtime reserves `/addon`, `/load`, `/unload`, `/plugins`, and
+`/xhbar` for [Loading in game](#loading-in-game). Every installed
+addon's manifest `commands` names register their first word, such as `/fps`,
+when the module starts. Names are read from inline tables in a `commands` array or from
 `[[commands]]` tables. A word must be `/` followed by 1 to 31 lowercase ASCII letters,
 digits, hyphens, or underscores. Reserved words, malformed words, and words
 already registered by an addon whose ID sorts earlier are ignored. A registered word is

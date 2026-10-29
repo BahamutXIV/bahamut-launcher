@@ -189,6 +189,16 @@ add_library(bahamut SHARED
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/xhbar_icon.cpp
+    src/xhbar_icon.h
+    src/xhbar_pad.cpp
+    src/xhbar_pad.h
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    src/xhbar_runtime.cpp
+    src/xhbar_runtime.h
+    src/xhbar_slots.cpp
+    src/xhbar_slots.h
     src/custom_timer.cpp
     src/custom_timer.h
     src/enemy_cast.cpp
@@ -457,6 +467,36 @@ add_executable(bahamut-autologin-tests
     tests/autologin_tests.cpp
 )
 target_include_directories(bahamut-autologin-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-policy-tests
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    tests/xhbar_policy_tests.cpp
+)
+target_include_directories(bahamut-xhbar-policy-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-pad-tests
+    src/xhbar_pad.cpp
+    src/xhbar_pad.h
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    tests/xhbar_pad_tests.cpp
+)
+target_include_directories(bahamut-xhbar-pad-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-icon-tests
+    src/xhbar_icon.cpp
+    src/xhbar_icon.h
+    tests/xhbar_icon_tests.cpp
+)
+target_include_directories(bahamut-xhbar-icon-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-slots-tests
+    src/xhbar_slots.cpp
+    src/xhbar_slots.h
+    tests/xhbar_slots_tests.cpp
+)
+target_include_directories(bahamut-xhbar-slots-tests PRIVATE src)
 
 add_executable(bahamut-custom-timer-tests
     $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
@@ -906,6 +946,10 @@ add_test(NAME bahamut-action-movement-lua
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml)
 set_tests_properties(bahamut-action-movement-lua PROPERTIES TIMEOUT 15)
 add_test(NAME bahamut-autologin COMMAND bahamut-autologin-tests)
+add_test(NAME bahamut-xhbar-policy COMMAND bahamut-xhbar-policy-tests)
+add_test(NAME bahamut-xhbar-pad COMMAND bahamut-xhbar-pad-tests)
+add_test(NAME bahamut-xhbar-icon COMMAND bahamut-xhbar-icon-tests)
+add_test(NAME bahamut-xhbar-slots COMMAND bahamut-xhbar-slots-tests)
 add_test(NAME bahamut-discord-rpc COMMAND bahamut-discord-rpc-tests)
 if(CMAKE_CROSSCOMPILING_EMULATOR)
     # A cold Wine prefix can take minutes to initialize on the first test.

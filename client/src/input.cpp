@@ -3,6 +3,7 @@
 #include "input_policy.h"
 #include "native_plugin_host.h"
 #include "render_boundary.h"
+#include "xhbar_runtime.h"
 
 #include <MinHook.h>
 #include <imgui.h>
@@ -141,7 +142,7 @@ void SetOverlayVisible(bool visible)
     }
 }
 
-unsigned char* SelectedDirectInputRecord(void* device)
+unsigned char* SelectedPadRecord(void* device)
 {
     const auto bytes = static_cast<unsigned char*>(device);
     const auto begin = *reinterpret_cast<unsigned char**>(
@@ -161,26 +162,33 @@ unsigned char* SelectedDirectInputRecord(void* device)
     {
         return nullptr;
     }
-    unsigned char* record = begin + (selected - 1) * kPadRecordSize;
-    return record[1] == 0 ? record : nullptr;
+    return begin + (selected - 1) * kPadRecordSize;
 }
 
 void __fastcall HookedPadUpdate(void* device, void*)
 {
     gOriginalPadUpdate(device);
-    unsigned char* record    = device == nullptr
-                                   ? nullptr
-                                   : SelectedDirectInputRecord(device);
-    const bool     connected = record != nullptr && *reinterpret_cast<void**>(record + kDirectInputDeviceOffset) != nullptr;
-    if (!connected)
+    unsigned char* record = device == nullptr ? nullptr : SelectedPadRecord(device);
+    if (record == nullptr)
     {
         gDirectInputMailbox.Publish({}, false);
+        bahamut_client::xhbar::OnPadUpdate(nullptr, false, false);
         return;
     }
 
     auto* state = reinterpret_cast<ClientPadState*>(
         static_cast<unsigned char*>(device) + kPadStateOffset);
-    gDirectInputMailbox.Publish(*state, true);
+    // Backend 1 (XInput) uses the same state words as DirectInput.
+    const bool directInput = record[1] == 0 && *reinterpret_cast<void**>(record + kDirectInputDeviceOffset) != nullptr;
+    if (directInput)
+    {
+        gDirectInputMailbox.Publish(*state, true);
+    }
+    else
+    {
+        gDirectInputMailbox.Publish({}, false);
+    }
+    bahamut_client::xhbar::OnPadUpdate(state, true, InterlockedCompareExchange(&gInputWindowActive, 0, 0) != 0);
 }
 
 bool IsKeyboardMessage(UINT message)

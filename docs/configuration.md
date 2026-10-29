@@ -44,6 +44,7 @@ marker:
     dats.ini                            <- DAT package enablement and priority order
     addons/layout.ini                   <- shared addon overlay positions
     plugins/screenshot/settings.ini     <- Screenshot-owned settings
+    plugins/xhbar/settings.ini          <- XHBar labels and visibility
     news.toml                           <- announcements rendered on the Home screen
     controller.ini                      <- Linux game controller selection setting
 ```
@@ -463,6 +464,10 @@ enabled = false
 id = camera-zoom
 enabled = false
 
+[plugin.5]
+id = xhbar
+enabled = false
+
 [addons]
 
 [addon.1]
@@ -517,17 +522,22 @@ place. IDs must be unique lowercase ASCII identifiers within that kind.
 
 The shipped defaults enable Screenshot, DiscordRPC, and every packaged addon
 except Autologin, Custom Timer, Enemy Cast, NoLock, and Targetlines. Extended
-Draw Distance and Extended Camera Zoom start Off. New addons without a row
-start disabled. Existing selections are preserved, and rows for missing
-packages are ignored at launch.
+Draw Distance, Extended Camera Zoom, and XHBar start Off. New addons
+without a row start disabled. Existing selections are preserved, and rows for
+missing packages are ignored at launch.
 
 ### Plugins and graphics controls
 
-Supported plugin IDs are `screenshot`, `discord-rpc`, `object-distance`, and
-`camera-zoom`. Other IDs are rejected: this file does not provide a public
-native plugin loader or ABI.
+Supported plugin IDs are `screenshot`, `discord-rpc`, `object-distance`,
+`camera-zoom`, and `xhbar`. Other IDs are rejected: this file does not
+provide a public native plugin loader or ABI.
 
 Screenshot and DiscordRPC appear in Extensions and use packaged DLLs.
+XHBar also appears in Extensions; it is a hook in the
+client runtime, described in the client module's
+[XHBar notes](../client/README.md#xhbar). Its in-game
+`/xhbar` command saves label and visibility choices in
+`config/plugins/xhbar/settings.ini`.
 Extended Draw Distance and Extended Camera Zoom use optional hooks in the
 client runtime and are controlled from Settings > Graphics:
 

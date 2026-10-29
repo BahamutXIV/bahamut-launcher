@@ -139,6 +139,7 @@ pub(super) fn launch_artifacts(
             object_distance_percent: extension_config.object_distance_percent,
             camera_zoom_enabled: extension_config.plugin_enabled("camera-zoom"),
             camera_zoom_limit: extension_config.camera_zoom_limit,
+            xhbar_enabled: extension_config.plugin_enabled("xhbar"),
         }))
     })()
 }

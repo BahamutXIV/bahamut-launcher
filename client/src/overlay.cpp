@@ -6,6 +6,8 @@
 #include "player_state.h"
 #include "render_boundary.h"
 #include "targetlines_probe.h"
+#include "xhbar_icon.h"
+#include "xhbar_runtime.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx9.h>
@@ -26,6 +28,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -1238,6 +1241,303 @@ void RecordFillModeTestResult(IDirect3DDevice9* device)
     }
 }
 
+// Managed-pool icons survive Reset; failed loads cache nullptr.
+std::unordered_map<std::uint32_t, IDirect3DTexture9*> gIconTextures;
+
+void ReleaseIconTextures()
+{
+    for (auto& entry : gIconTextures)
+    {
+        if (entry.second != nullptr)
+        {
+            entry.second->Release();
+        }
+    }
+    gIconTextures.clear();
+}
+
+IDirect3DTexture9* CreateIconTexture(IDirect3DDevice9* device, std::uint32_t icon)
+{
+    const auto relative = bahamut_client::xhbar::IconResourcePath(icon);
+    wchar_t    module[MAX_PATH]{};
+    const auto length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+    if (!relative || length == 0 || length >= MAX_PATH)
+    {
+        return nullptr;
+    }
+    std::ifstream              file(std::filesystem::path(module).parent_path() / *relative, std::ios::binary);
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const auto                 image = bahamut_client::xhbar::ParseIcon(bytes.data(), bytes.size());
+    if (!image)
+    {
+        return nullptr;
+    }
+    D3DFORMAT     format    = D3DFMT_DXT5;
+    std::uint32_t rows      = image->height / 4;
+    std::size_t   rowLength = static_cast<std::size_t>(image->width / 4) * 16u;
+    if (image->format == bahamut_client::xhbar::IconFormat::Dxt1)
+    {
+        format    = D3DFMT_DXT1;
+        rowLength = static_cast<std::size_t>(image->width / 4) * 8u;
+    }
+    else if (image->format == bahamut_client::xhbar::IconFormat::Argb8)
+    {
+        format    = D3DFMT_A8R8G8B8;
+        rows      = image->height;
+        rowLength = static_cast<std::size_t>(image->width) * 4u;
+    }
+    IDirect3DTexture9* texture = nullptr;
+    if (FAILED(device->CreateTexture(image->width, image->height, 1, 0, format, D3DPOOL_MANAGED, &texture, nullptr)))
+    {
+        return nullptr;
+    }
+    D3DLOCKED_RECT locked{};
+    if (FAILED(texture->LockRect(0, &locked, nullptr, 0)))
+    {
+        texture->Release();
+        return nullptr;
+    }
+    for (std::uint32_t row = 0; row < rows; ++row)
+    {
+        std::memcpy(static_cast<unsigned char*>(locked.pBits) + static_cast<std::size_t>(row) * locked.Pitch, image->data + row * rowLength, rowLength);
+    }
+    texture->UnlockRect(0);
+    return texture;
+}
+
+IDirect3DTexture9* IconTexture(IDirect3DDevice9* device, std::uint32_t icon)
+{
+    if (icon == 0 || device == nullptr)
+    {
+        return nullptr;
+    }
+    const auto found = gIconTextures.find(icon);
+    if (found != gIconTextures.end())
+    {
+        return found->second;
+    }
+    IDirect3DTexture9* texture = CreateIconTexture(device, icon);
+    gIconTextures.emplace(icon, texture);
+    return texture;
+}
+
+bool DrawXHBar(IDirect3DDevice9* device)
+{
+    using bahamut_client::xhbar::Side;
+    if (!bahamut_client::xhbar::BarAvailable())
+    {
+        return false;
+    }
+    const Side held = bahamut_client::xhbar::ActiveSide();
+
+    constexpr float         kSlot       = 44.0f;
+    constexpr float         kGap        = 4.0f;
+    constexpr float         kCross      = kSlot * 3.0f + kGap * 2.0f;
+    constexpr float         kCrossGap   = 16.0f;
+    constexpr float         kSideGap    = 28.0f;
+    constexpr float         kPadding    = 12.0f;
+    constexpr float         kHeader     = 24.0f;
+    constexpr float         kSide       = kCross * 2.0f + kCrossGap;
+    constexpr float         kWidth      = kPadding * 2.0f + kSide * 2.0f + kSideGap;
+    constexpr float         kHeight     = kPadding * 2.0f + kHeader + kSlot * 2.0f + kGap;
+    constexpr float         kDimmed     = 0.42f;
+    constexpr std::uint64_t kPressFlash = 220;
+
+    // Cells follow Up, Down, Left, Right, A, B, X, Y; columns 0-2, rows 0/0.5/1.
+    struct Cell
+    {
+        int   cross;
+        float column;
+        float row;
+    };
+
+    static constexpr std::array<Cell, 8> kCells = {
+        Cell{ 0, 1.0f, 0.0f }, Cell{ 0, 1.0f, 1.0f }, Cell{ 0, 0.0f, 0.5f }, Cell{ 0, 2.0f, 0.5f }, Cell{ 1, 1.0f, 1.0f }, Cell{ 1, 2.0f, 0.5f }, Cell{ 1, 0.0f, 0.5f }, Cell{ 1, 1.0f, 0.0f }
+    };
+
+    struct FaceGlyph
+    {
+        const char* letter;
+        int         red;
+        int         green;
+        int         blue;
+    };
+
+    static constexpr std::array<FaceGlyph, 4> kFaces = {
+        FaceGlyph{ "A", 96, 176, 96 }, FaceGlyph{ "B", 204, 82, 82 }, FaceGlyph{ "X", 82, 128, 210 }, FaceGlyph{ "Y", 224, 192, 72 }
+    };
+    static constexpr std::array<FaceGlyph, 4> kShapes = {
+        FaceGlyph{ "", 124, 150, 228 }, FaceGlyph{ "", 226, 92, 100 }, FaceGlyph{ "", 214, 136, 196 }, FaceGlyph{ "", 72, 196, 164 }
+    };
+    const bool                             playStation = bahamut_client::xhbar::Labels() == bahamut_client::xhbar::LabelStyle::PlayStation;
+    static constexpr std::array<ImVec2, 4> kDirections = { ImVec2(0, -1), ImVec2(0, 1), ImVec2(-1, 0), ImVec2(1, 0) };
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y - 96.0f),
+                            ImGuiCond_Always,
+                            ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowSize(ImVec2(kWidth, kHeight), ImGuiCond_Always);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    const bool visible = ImGui::Begin("###bahamut-xhbar", nullptr, flags);
+    ImGui::PopStyleVar(2);
+    if (!visible)
+    {
+        ImGui::End();
+        return false;
+    }
+
+    ImDrawList*  draw   = ImGui::GetWindowDrawList();
+    ImFont*      font   = ImGui::GetFont();
+    const ImVec2 origin = ImGui::GetWindowPos();
+    const auto   color  = [](int red, int green, int blue, float alpha)
+    {
+        return IM_COL32(red, green, blue, static_cast<int>(std::clamp(alpha, 0.0f, 1.0f) * 255.0f));
+    };
+    const auto centeredText = [&](float size, ImVec2 center, ImU32 fill, float alpha, const char* text)
+    {
+        const ImVec2 measured = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text);
+        const ImVec2 position(center.x - measured.x * 0.5f, center.y - measured.y * 0.5f);
+        const ImU32  edge = color(38, 38, 38, alpha);
+        for (const ImVec2 offset : { ImVec2(-1, 0), ImVec2(1, 0), ImVec2(0, -1), ImVec2(0, 1) })
+        {
+            draw->AddText(font, size, ImVec2(position.x + offset.x, position.y + offset.y), edge, text);
+        }
+        draw->AddText(font, size, position, fill, text);
+    };
+
+    const ImVec2 panelMax(origin.x + kWidth, origin.y + kHeight);
+    draw->AddRectFilledMultiColor(origin, panelMax, color(0, 0, 51, 0.5f), color(0, 0, 51, 0.5f), color(0, 0, 51, 0.92f), color(0, 0, 51, 0.92f));
+    draw->AddRect(origin, panelMax, color(184, 188, 198, 1.0f), 5.0f, 0, 1.5f);
+    draw->AddRect(ImVec2(origin.x + 3.0f, origin.y + 3.0f), ImVec2(panelMax.x - 3.0f, panelMax.y - 3.0f), color(92, 96, 107, 1.0f), 3.0f, 0, 1.0f);
+    const float dividerX = origin.x + kPadding + kSide + kSideGap * 0.5f;
+    draw->AddLine(ImVec2(dividerX, origin.y + kPadding + 4.0f), ImVec2(dividerX, panelMax.y - kPadding - 4.0f), color(184, 188, 198, 0.35f), 1.0f);
+
+    const std::uint64_t now = GetTickCount64();
+    for (int sideIndex = 0; sideIndex < 2; ++sideIndex)
+    {
+        const bool        combo  = held == (sideIndex == 0 ? Side::LeftThenRight : Side::RightThenLeft);
+        const bool        active = combo || held == (sideIndex == 0 ? Side::Left : Side::Right);
+        const std::size_t base   = sideIndex == 0 ? (combo ? 24u : 0u) : (combo ? 16u : 8u);
+        const float       alpha  = active || held == Side::None ? 1.0f : kDimmed;
+        const float       sideX  = origin.x + kPadding + static_cast<float>(sideIndex) * (kSide + kSideGap);
+        const float       crossY = origin.y + kPadding + kHeader;
+
+        const ImVec2 tabCenter(sideX + kSide * 0.5f, origin.y + kPadding + kHeader * 0.4f);
+        const ImVec2 tabMin(tabCenter.x - 24.0f, tabCenter.y - 10.0f);
+        const ImVec2 tabMax(tabCenter.x + 24.0f, tabCenter.y + 10.0f);
+        draw->AddRectFilled(tabMin, tabMax, color(26, 26, 68, alpha), 10.0f);
+        draw->AddRect(tabMin, tabMax, active ? color(232, 210, 122, 1.0f) : color(92, 96, 107, alpha), 10.0f, 0, 1.0f);
+        const char* tab = playStation ? (sideIndex == 0 ? (combo ? "L2>R2" : "L2") : (combo ? "R2>L2" : "R2"))
+                                      : (sideIndex == 0 ? (combo ? "LT>RT" : "LT") : (combo ? "RT>LT" : "RT"));
+        centeredText(14.0f, tabCenter, color(243, 243, 243, alpha), alpha, tab);
+
+        for (std::size_t index = 0; index < kCells.size(); ++index)
+        {
+            const Cell        cell   = kCells[index];
+            const std::size_t slot   = base + index;
+            const auto        target = bahamut_client::xhbar::Shortcut(slot);
+            const int         number = target.page == 0 ? 0 : target.button;
+            const ImVec2      slotMin(sideX + static_cast<float>(cell.cross) * (kCross + kCrossGap) + cell.column * (kSlot + kGap), crossY + cell.row * (kSlot + kGap));
+            const ImVec2      slotMax(slotMin.x + kSlot, slotMin.y + kSlot);
+            const ImVec2      center(slotMin.x + kSlot * 0.5f, slotMin.y + kSlot * 0.5f);
+
+            draw->AddRectFilled(slotMin, slotMax, number == 0 ? color(16, 16, 40, alpha * 0.8f) : color(30, 30, 70, alpha), 4.0f);
+            draw->AddRectFilledMultiColor(ImVec2(slotMin.x + 2.0f, slotMin.y + 2.0f),
+                                          ImVec2(slotMax.x - 2.0f, slotMin.y + kSlot * 0.5f),
+                                          color(255, 255, 255, alpha * 0.10f),
+                                          color(255, 255, 255, alpha * 0.10f),
+                                          color(255, 255, 255, 0.0f),
+                                          color(255, 255, 255, 0.0f));
+            draw->AddRect(slotMin, slotMax, number == 0 ? color(70, 74, 86, alpha) : color(141, 147, 163, alpha), 4.0f, 0, 1.0f);
+            const auto         view = bahamut_client::xhbar::SlotDisplay(slot);
+            IDirect3DTexture9* icon = number == 0 ? nullptr : IconTexture(device, view.icon);
+            // Match the native bar's disabled-slot greying.
+            const bool unavailable = view.remaining > 0 || view.incompatible;
+            const int  shade       = unavailable ? 110 : 255;
+            if (icon != nullptr)
+            {
+                draw->AddImageRounded(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(icon)),
+                                      ImVec2(slotMin.x + 3.0f, slotMin.y + 3.0f),
+                                      ImVec2(slotMax.x - 3.0f, slotMax.y - 3.0f),
+                                      ImVec2(0.0f, 0.0f),
+                                      ImVec2(1.0f, 1.0f),
+                                      color(shade, shade, shade, alpha),
+                                      3.0f);
+                char label[4]{};
+                std::snprintf(label, sizeof(label), "%d", number);
+                centeredText(12.0f, ImVec2(slotMin.x + 9.0f, slotMin.y + 9.0f), color(249, 240, 122, alpha), alpha, label);
+            }
+            else if (number != 0)
+            {
+                char label[4]{};
+                std::snprintf(label, sizeof(label), "%d", number);
+                centeredText(20.0f, ImVec2(center.x - 2.0f, center.y - 2.0f), color(249, 240, 122, alpha), alpha, label);
+            }
+
+            if (view.remaining > 0)
+            {
+                draw->AddRectFilled(slotMin, slotMax, color(0, 0, 0, alpha * 0.45f), 4.0f);
+                char seconds[8]{};
+                std::snprintf(seconds, sizeof(seconds), "%d", view.remaining);
+                centeredText(18.0f, center, color(255, 255, 255, alpha), alpha, seconds);
+            }
+
+            if (view.page != 0)
+            {
+                char marker[8]{};
+                std::snprintf(marker, sizeof(marker), "P%d", view.page);
+                centeredText(11.0f, ImVec2(slotMax.x - 10.0f, slotMin.y + 8.0f), color(200, 206, 222, alpha), alpha, marker);
+            }
+
+            const ImVec2 glyph(slotMax.x - 9.0f, slotMax.y - 9.0f);
+            if (cell.cross == 0)
+            {
+                const ImVec2 forward = kDirections[index];
+                const ImVec2 across(-forward.y, forward.x);
+                draw->AddCircleFilled(glyph, 6.5f, color(20, 20, 30, alpha));
+                draw->AddTriangleFilled(ImVec2(glyph.x + forward.x * 4.0f, glyph.y + forward.y * 4.0f),
+                                        ImVec2(glyph.x - forward.x * 2.5f + across.x * 3.5f, glyph.y - forward.y * 2.5f + across.y * 3.5f),
+                                        ImVec2(glyph.x - forward.x * 2.5f - across.x * 3.5f, glyph.y - forward.y * 2.5f - across.y * 3.5f),
+                                        color(220, 222, 228, alpha));
+            }
+            else
+            {
+                const FaceGlyph face = (playStation ? kShapes : kFaces)[index - 4];
+                const ImU32     tint = color(face.red, face.green, face.blue, alpha);
+                draw->AddCircleFilled(glyph, 7.0f, color(20, 20, 30, alpha));
+                draw->AddCircle(glyph, 7.0f, tint, 0, 1.5f);
+                if (!playStation)
+                    centeredText(11.0f, glyph, tint, alpha, face.letter);
+                else if (index == 4)
+                {
+                    draw->AddLine(ImVec2(glyph.x - 3.0f, glyph.y - 3.0f), ImVec2(glyph.x + 3.0f, glyph.y + 3.0f), tint, 1.5f);
+                    draw->AddLine(ImVec2(glyph.x - 3.0f, glyph.y + 3.0f), ImVec2(glyph.x + 3.0f, glyph.y - 3.0f), tint, 1.5f);
+                }
+                else if (index == 5)
+                    draw->AddCircle(glyph, 3.5f, tint, 0, 1.5f);
+                else if (index == 6)
+                    draw->AddRect(ImVec2(glyph.x - 3.0f, glyph.y - 3.0f), ImVec2(glyph.x + 3.0f, glyph.y + 3.0f), tint, 0.0f, 0, 1.5f);
+                else
+                    draw->AddTriangle(ImVec2(glyph.x, glyph.y - 3.5f), ImVec2(glyph.x + 3.5f, glyph.y + 2.5f), ImVec2(glyph.x - 3.5f, glyph.y + 2.5f), tint, 1.5f);
+            }
+
+            const std::uint64_t fired = bahamut_client::xhbar::LastDispatchTick(slot);
+            if (fired != 0 && now - fired < kPressFlash)
+            {
+                const float fade = 1.0f - static_cast<float>(now - fired) / static_cast<float>(kPressFlash);
+                draw->AddRect(ImVec2(slotMin.x - 2.0f, slotMin.y - 2.0f), ImVec2(slotMax.x + 2.0f, slotMax.y + 2.0f), color(232, 210, 122, fade), 5.0f, 0, 2.0f);
+                draw->AddRectFilled(slotMin, slotMax, color(255, 244, 200, fade * 0.18f), 4.0f);
+            }
+        }
+    }
+
+    ImGui::End();
+    return true;
+}
+
 } // namespace
 
 void ConfigureOverlayWindow(HWND window)
@@ -1267,6 +1567,7 @@ void UnbindOverlayDevice(IDirect3DDevice9* device)
 {
     if (gOverlayDevice == device)
     {
+        ReleaseIconTextures();
         gOverlayDevice = nullptr;
         SetOverlayMenuInput(false, false);
     }
@@ -1392,10 +1693,15 @@ void DrawOverlay(IDirect3DDevice9*                   device,
         addonHost->Draw({ nullptr, &DrawAddonWindow, &DrawAddonRawText, &DrawAddonCombatMeter, &DrawAddonTargetlines, &DrawGearsets });
     }
     SetOverlayMenuInput(gMenuMouseFrame, gMenuKeyboardFrame);
+    const bool xhbar = DrawXHBar(device);
     InterlockedExchange(&gOverlayDrawing, 1);
     device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
     ImGui::Render();
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+    if (xhbar)
+    {
+        bahamut_client::xhbar::MarkBarDrawn();
+    }
     if (gSaveLayoutRequested || ImGui::GetIO().WantSaveIniSettings)
     {
         SaveOverlayLayout();
