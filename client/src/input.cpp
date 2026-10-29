@@ -3,6 +3,7 @@
 #include "input_policy.h"
 #include "native_plugin_host.h"
 #include "render_boundary.h"
+#include "xhbar_runtime.h"
 
 #include <MinHook.h>
 #include <imgui.h>
@@ -10,6 +11,7 @@
 #include <xinput.h>
 
 #include <array>
+#include <atomic>
 #include <cwchar>
 #include <fstream>
 #include <optional>
@@ -48,12 +50,15 @@ ClientPadMailbox                                  gDirectInputMailbox;
 InputReleasePolicy                                gInputReleasePolicy;
 std::array<std::uint32_t, kXInputControllerCount> gControllerPacketNumbers{};
 std::array<bool, kXInputControllerCount>          gControllerConnected{};
-unsigned int                                      gControllerPollFrame   = kDisconnectedControllerPollFrames - 1;
-volatile LONG                                     gOverlayVisible        = 0;
-NativePluginHost*                                 gNativePluginHost      = nullptr;
-AddonHost*                                        gAddonHost             = nullptr;
-HWND                                              gInputWindow           = nullptr;
-volatile LONG                                     gInputWindowActive     = 0;
+unsigned int                                      gControllerPollFrame = kDisconnectedControllerPollFrames - 1;
+volatile LONG                                     gOverlayVisible      = 0;
+NativePluginHost*                                 gNativePluginHost    = nullptr;
+AddonHost*                                        gAddonHost           = nullptr;
+HWND                                              gInputWindow         = nullptr;
+volatile LONG                                     gInputWindowActive   = 0;
+std::atomic<bool>                                 gMenuMouse{ false };
+std::atomic<bool>                                 gMenuKeyboard{ false };
+UINT                                              gActivationMessage     = 0;
 bool                                              gFillModeHotkeyEnabled = false;
 bool                                              gFpsHotkeyEnabled      = false;
 
@@ -137,7 +142,7 @@ void SetOverlayVisible(bool visible)
     }
 }
 
-unsigned char* SelectedDirectInputRecord(void* device)
+unsigned char* SelectedPadRecord(void* device)
 {
     const auto bytes = static_cast<unsigned char*>(device);
     const auto begin = *reinterpret_cast<unsigned char**>(
@@ -157,26 +162,33 @@ unsigned char* SelectedDirectInputRecord(void* device)
     {
         return nullptr;
     }
-    unsigned char* record = begin + (selected - 1) * kPadRecordSize;
-    return record[1] == 0 ? record : nullptr;
+    return begin + (selected - 1) * kPadRecordSize;
 }
 
 void __fastcall HookedPadUpdate(void* device, void*)
 {
     gOriginalPadUpdate(device);
-    unsigned char* record    = device == nullptr
-                                   ? nullptr
-                                   : SelectedDirectInputRecord(device);
-    const bool     connected = record != nullptr && *reinterpret_cast<void**>(record + kDirectInputDeviceOffset) != nullptr;
-    if (!connected)
+    unsigned char* record = device == nullptr ? nullptr : SelectedPadRecord(device);
+    if (record == nullptr)
     {
         gDirectInputMailbox.Publish({}, false);
+        bahamut_client::xhbar::OnPadUpdate(nullptr, false, false);
         return;
     }
 
     auto* state = reinterpret_cast<ClientPadState*>(
         static_cast<unsigned char*>(device) + kPadStateOffset);
-    gDirectInputMailbox.Publish(*state, true);
+    // Backend 1 (XInput) uses the same state words as DirectInput.
+    const bool directInput = record[1] == 0 && *reinterpret_cast<void**>(record + kDirectInputDeviceOffset) != nullptr;
+    if (directInput)
+    {
+        gDirectInputMailbox.Publish(*state, true);
+    }
+    else
+    {
+        gDirectInputMailbox.Publish({}, false);
+    }
+    bahamut_client::xhbar::OnPadUpdate(state, true, InterlockedCompareExchange(&gInputWindowActive, 0, 0) != 0);
 }
 
 bool IsKeyboardMessage(UINT message)
@@ -375,6 +387,13 @@ void ClearInputReleaseLocks(HWND window)
 
 LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (window == gInputWindow && message == gActivationMessage && message != 0)
+    {
+        bool consumed = false;
+        gNativePluginHost->OnWindowMessage(
+            window, WM_ACTIVATE, InterlockedCompareExchange(&gInputWindowActive, 0, 0) != 0 ? WA_ACTIVE : WA_INACTIVE, 0, consumed);
+        return 0;
+    }
     if (window == gInputWindow && message == WM_ACTIVATE)
     {
         const bool active = LOWORD(wParam) != WA_INACTIVE;
@@ -485,12 +504,24 @@ LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM wParam
     {
         const bool shiftMessage   = virtualKey && IsShiftKey(wParam);
         const bool shiftDragInput = mouse && (ImGui::GetIO().KeyShift || (GetKeyState(VK_SHIFT) & 0x8000) != 0);
-        if (shiftMessage || shiftDragInput)
+        // HUD windows need Shift; a menu window takes clicks over it and typing
+        // in its text fields without it. Pointer moves still reach the game.
+        const bool pointerMove  = message == WM_MOUSEMOVE;
+        const bool menuMouse    = mouse && !pointerMove && gMenuMouse.load(std::memory_order_acquire);
+        const bool menuKeyboard = keyboard && gMenuKeyboard.load(std::memory_order_acquire);
+        if ((pointerMove && !shiftDragInput) || message == WM_MOUSELEAVE)
+        {
+            // Keeps ImGui's pointer current so menu hover works without Shift.
+            ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam);
+        }
+        if (shiftMessage || shiftDragInput || menuMouse || menuKeyboard)
         {
             ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam);
             const ImGuiIO& io          = ImGui::GetIO();
-            const bool     interactive = io.KeyShift;
-            const bool     capture     = interactive && ((keyboard && (io.WantCaptureKeyboard || io.WantTextInput)) || (mouse && io.WantCaptureMouse));
+            const bool     interactive = io.KeyShift || menuMouse || menuKeyboard;
+            // A menu text dialog owns the whole keyboard while it is open, so no
+            // key reaches the game's chat or movement in between ImGui frames.
+            const bool capture = menuKeyboard || (interactive && ((keyboard && (io.WantCaptureKeyboard || io.WantTextInput)) || (mouse && io.WantCaptureMouse)));
             if (capture)
             {
                 if (virtualKey && IsKeyDown(message) && wParam < 256)
@@ -610,6 +641,7 @@ bool InstallInputBoundary(HWND window, BahamutRuntimeTelemetry* telemetry, Addon
     gTelemetry               = telemetry;
     gAddonHost               = addonHost;
     gNativePluginHost        = nativePluginHost;
+    gActivationMessage       = RegisterWindowMessageW(L"BahamutNativePluginActivation");
     gInputWindow             = window;
     InterlockedExchange(&gInputWindowActive,
                         GetForegroundWindow() == window ? 1 : 0);
@@ -620,6 +652,15 @@ bool InstallInputBoundary(HWND window, BahamutRuntimeTelemetry* telemetry, Addon
             window, WM_ACTIVATE, WA_ACTIVE, 0, consumed);
     }
     return gOriginalWindowProcedure != nullptr;
+}
+
+void RefreshNativePluginActivation()
+{
+    const HWND window = gInputWindow;
+    if (window != nullptr && gActivationMessage != 0)
+    {
+        PostMessageW(window, gActivationMessage, 0, 0);
+    }
 }
 
 void EnableOverlay()
@@ -635,6 +676,12 @@ void DisableOverlay()
 bool IsOverlayVisible()
 {
     return InterlockedCompareExchange(&gOverlayVisible, 0, 0) != 0;
+}
+
+void SetOverlayMenuInput(bool mouse, bool keyboard)
+{
+    gMenuMouse.store(mouse, std::memory_order_release);
+    gMenuKeyboard.store(keyboard, std::memory_order_release);
 }
 
 void UpdateControllerObservation()

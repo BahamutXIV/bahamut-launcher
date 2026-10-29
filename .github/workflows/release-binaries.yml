@@ -128,7 +128,7 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
           cat "$RUNNER_TEMP/commit/$TARGET"
 
-      - name: Resolve the official overlay DAT source
+      - name: Resolve the pinned official overlay and Gear Sets icon sources
         id: overlaydats
         shell: bash
         env:
@@ -138,37 +138,57 @@ jobs:
         run: |
           set -euo pipefail
           manifest=manifests/official-overlay-dats.json
+          icons_manifest=manifests/gearsets-icons.json
           # Older tags without a pin retain their original package contents.
           if [[ "$PUBLISH" != true || "$REPOSITORY" != BahamutXIV/bahamut-launcher || ! -f "$manifest" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Pinned official overlay files are disabled for this build."
+            {
+              echo "enabled=false"
+              echo "icons=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "::notice::Pinned official overlay files and Gear Sets icons are disabled for this build."
             exit 0
           fi
           if [[ -z "${ASSETS_TOKEN:-}" ]]; then
-            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files. See docs/releasing.md."
+            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files and Gear Sets icons. See docs/releasing.md."
             exit 1
+          fi
+          icons=false
+          if [[ -f "$icons_manifest" ]]; then
+            # One checkout serves both pins, so they must name the same commit.
+            for field in repository commit; do
+              if [[ "$(jq -er ".$field" "$icons_manifest")" != "$(jq -er ".$field" "$manifest")" ]]; then
+                echo "::error::$icons_manifest and $manifest must pin the same $field."
+                exit 1
+              fi
+            done
+            icons=true
           fi
           {
             echo "enabled=true"
+            echo "icons=$icons"
             printf 'repository=%s\n' "$(jq -er '.repository' "$manifest")"
             printf 'commit=%s\n' "$(jq -er '.commit' "$manifest")"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check out the official overlay DATs
+      # The icons are Git LFS files, so the checkout keeps its credentials for the
+      # icon fetch below; the checkout is removed once both sets are installed.
+      - name: Check out the pinned official overlay DATs and Gear Sets icons
         if: steps.overlaydats.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.overlaydats.outputs.repository }}
           ref: ${{ steps.overlaydats.outputs.commit }}
           token: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
-          path: .official-overlay-assets
+          path: .pinned-assets
           filter: blob:none
-          sparse-checkout: bahamut-dats-overlay/data/
+          sparse-checkout: |
+            bahamut-dats-overlay/data/
+            ${{ steps.overlaydats.outputs.icons == 'true' && 'icons-1.23b/0/' || '' }}
           sparse-checkout-cone-mode: false
           fetch-depth: 1
-          persist-credentials: false
+          persist-credentials: ${{ steps.overlaydats.outputs.icons == 'true' }}
 
-      - name: Set up Python for the official overlay DATs
+      - name: Set up Python for the pinned assets
         if: steps.overlaydats.outputs.enabled == 'true'
         uses: actions/setup-python@v5
         with:
@@ -179,8 +199,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -I scripts/official-overlay-dats.py install --source .official-overlay-assets
-          rm -rf .official-overlay-assets
+          python -I scripts/official-overlay-dats.py install --source .pinned-assets
+
+      - name: Install the Gear Sets icons
+        if: steps.overlaydats.outputs.icons == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C .pinned-assets lfs pull --include='icons-1.23b/0/*.png'
+          python -I scripts/gearsets-icons.py install --source .pinned-assets/icons-1.23b/0
+
+      - name: Remove the pinned asset checkout
+        if: steps.overlaydats.outputs.enabled == 'true'
+        shell: bash
+        run: rm -rf .pinned-assets
 
       - name: Install Tauri Linux dependencies
         if: runner.os == 'Linux'
@@ -525,7 +557,7 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/commit/$TARGET"
           cat "$RUNNER_TEMP/commit/$TARGET"
 
-      - name: Resolve the official overlay DAT source
+      - name: Resolve the pinned official overlay and Gear Sets icon sources
         id: overlaydats
         shell: bash
         env:
@@ -535,37 +567,57 @@ jobs:
         run: |
           set -euo pipefail
           manifest=manifests/official-overlay-dats.json
+          icons_manifest=manifests/gearsets-icons.json
           # Older tags without a pin retain their original package contents.
           if [[ "$PUBLISH" != true || "$REPOSITORY" != BahamutXIV/bahamut-launcher || ! -f "$manifest" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Pinned official overlay files are disabled for this build."
+            {
+              echo "enabled=false"
+              echo "icons=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "::notice::Pinned official overlay files and Gear Sets icons are disabled for this build."
             exit 0
           fi
           if [[ -z "${ASSETS_TOKEN:-}" ]]; then
-            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files. See docs/releasing.md."
+            echo "::error::BAHAMUT_ASSETS_TOKEN is required for pinned official overlay files and Gear Sets icons. See docs/releasing.md."
             exit 1
+          fi
+          icons=false
+          if [[ -f "$icons_manifest" ]]; then
+            # One checkout serves both pins, so they must name the same commit.
+            for field in repository commit; do
+              if [[ "$(jq -er ".$field" "$icons_manifest")" != "$(jq -er ".$field" "$manifest")" ]]; then
+                echo "::error::$icons_manifest and $manifest must pin the same $field."
+                exit 1
+              fi
+            done
+            icons=true
           fi
           {
             echo "enabled=true"
+            echo "icons=$icons"
             printf 'repository=%s\n' "$(jq -er '.repository' "$manifest")"
             printf 'commit=%s\n' "$(jq -er '.commit' "$manifest")"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check out the official overlay DATs
+      # The icons are Git LFS files, so the checkout keeps its credentials for the
+      # icon fetch below; the checkout is removed once both sets are installed.
+      - name: Check out the pinned official overlay DATs and Gear Sets icons
         if: steps.overlaydats.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.overlaydats.outputs.repository }}
           ref: ${{ steps.overlaydats.outputs.commit }}
           token: ${{ secrets.BAHAMUT_ASSETS_TOKEN }}
-          path: .official-overlay-assets
+          path: .pinned-assets
           filter: blob:none
-          sparse-checkout: bahamut-dats-overlay/data/
+          sparse-checkout: |
+            bahamut-dats-overlay/data/
+            ${{ steps.overlaydats.outputs.icons == 'true' && 'icons-1.23b/0/' || '' }}
           sparse-checkout-cone-mode: false
           fetch-depth: 1
-          persist-credentials: false
+          persist-credentials: ${{ steps.overlaydats.outputs.icons == 'true' }}
 
-      - name: Set up Python for the official overlay DATs
+      - name: Set up Python for the pinned assets
         if: steps.overlaydats.outputs.enabled == 'true'
         uses: actions/setup-python@v5
         with:
@@ -576,8 +628,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -I scripts/official-overlay-dats.py install --source .official-overlay-assets
-          rm -rf .official-overlay-assets
+          python -I scripts/official-overlay-dats.py install --source .pinned-assets
+
+      - name: Install the Gear Sets icons
+        if: steps.overlaydats.outputs.icons == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C .pinned-assets lfs pull --include='icons-1.23b/0/*.png'
+          python -I scripts/gearsets-icons.py install --source .pinned-assets/icons-1.23b/0
+
+      - name: Remove the pinned asset checkout
+        if: steps.overlaydats.outputs.enabled == 'true'
+        shell: bash
+        run: rm -rf .pinned-assets
 
       # The package needs Flatpak 1.15.6 or newer for --device=input; 24.04 ships 1.14.6.
       # The PPA supplies flatpak and a newer flatpak-builder than the distribution.

@@ -32,10 +32,10 @@ int wmain()
                                  "# session overrides\n/bind f11 /fillmode\n/bind f12 /fps\n"
                                  "/load screenshot\n/bind f7 /screenshot\n"
                                  "/addon unload fps\n/addon load distance\n/addon reload fps\n"
-                                 "/unload screenshot\n",
+                                 "/unload screenshot\n/load discord-rpc\n/unload discord-rpc\n",
                                  plan,
                                  error);
-    if (!valid || plan.actions.size() != 8 || plan.actions[0].kind != StartupActionKind::FillModeBind || plan.actions[0].virtualKey != VK_F11 || plan.actions[1].kind != StartupActionKind::FpsBind || plan.actions[1].virtualKey != VK_F12 || plan.actions[2].kind != StartupActionKind::ScreenshotLoad || plan.actions[3].kind != StartupActionKind::ScreenshotBind || plan.actions[3].virtualKey != VK_F7 || plan.actions[3].hideOverlays || plan.actions[4].kind != StartupActionKind::AddonUnload || plan.actions[5].addonId != "distance" || plan.actions[6].kind != StartupActionKind::AddonReload || plan.actions[7].kind != StartupActionKind::ScreenshotUnload)
+    if (!valid || plan.actions.size() != 10 || plan.actions[0].kind != StartupActionKind::FillModeBind || plan.actions[0].virtualKey != VK_F11 || plan.actions[1].kind != StartupActionKind::FpsBind || plan.actions[1].virtualKey != VK_F12 || plan.actions[2].kind != StartupActionKind::PluginLoad || plan.actions[2].addonId != "screenshot" || plan.actions[3].kind != StartupActionKind::ScreenshotBind || plan.actions[3].virtualKey != VK_F7 || plan.actions[3].hideOverlays || plan.actions[4].kind != StartupActionKind::AddonUnload || plan.actions[5].addonId != "distance" || plan.actions[6].kind != StartupActionKind::AddonReload || plan.actions[7].kind != StartupActionKind::PluginUnload || plan.actions[7].addonId != "screenshot" || plan.actions[8].kind != StartupActionKind::PluginLoad || plan.actions[8].addonId != "discord-rpc" || plan.actions[9].kind != StartupActionKind::PluginUnload || plan.actions[9].addonId != "discord-rpc")
     {
         std::cerr << "valid commands did not preserve source order\n";
         return 1;
@@ -43,6 +43,11 @@ int wmain()
     if (ParseText(script, "/bind f12 /fillmode\n", plan, error) || error.line != 1 || error.message.find("expected") == std::string::npos)
     {
         std::cerr << "built-in bindings did not remain fixed\n";
+        return 1;
+    }
+    if (ParseText(script, "\n/load fps\n", plan, error) || error.line != 2 || error.message != "plugin is not available: fps")
+    {
+        std::cerr << "an addon id was accepted as a plugin\n";
         return 1;
     }
     if (ParseText(script, "# comment\n\n/addon load missing\n", plan, error) || error.line != 3 || error.message.find("not installed") == std::string::npos)

@@ -10,7 +10,9 @@
 #include "overlay.h"
 #include "packet_observer.h"
 #include "player_state.h"
+#include "runtime_commands.h"
 #include "targetlines_probe.h"
+#include "xhbar_runtime.h"
 
 #include <MinHook.h>
 #include <d3d9.h>
@@ -414,6 +416,13 @@ void ObservePresent(IDirect3DDevice9* device)
             OutputDebugStringA(message);
         }
     }
+    // DrawOverlay replaces the menu input claim in one store; a frame that does
+    // not reach it draws no menu, so the claim ends. Clearing first instead
+    // would let keys reach the game while a menu is still open.
+    if (gTelemetry == nullptr || hideOverlayForCapture)
+    {
+        SetOverlayMenuInput(false, false);
+    }
     if (gTelemetry != nullptr && !hideOverlayForCapture)
     {
         if (SUCCEEDED(device->BeginScene()))
@@ -426,6 +435,7 @@ void ObservePresent(IDirect3DDevice9* device)
         }
         else
         {
+            SetOverlayMenuInput(false, false);
             ++gTelemetry->overlayFailureCount;
         }
     }
@@ -608,6 +618,10 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
             }
             if (hooksReady)
             {
+                static_cast<void>(bahamut_client::xhbar::InstallRuntime());
+            }
+            if (hooksReady)
+            {
                 hooksReady = ApplyBorderlessWindow(window);
             }
             if (hooksReady)
@@ -712,6 +726,7 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
                            BahamutRuntimeBootstrapDiagnostics*    diagnostics,
                            HANDLE                                 frameEvent,
                            AddonHost*                             addonHost,
+                           RuntimeCommands*                       runtimeCommands,
                            NativePluginHost*                      nativePluginHost,
                            NativePluginHost*                      discordPluginHost,
                            bahamut_client::PlayerStateService*    playerState,
@@ -769,12 +784,18 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
         return false;
     }
     const bool playerStateHookInstalled = playerState != nullptr && playerState->IsInstalled();
-    const bool packetObserverRequired   = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr &&
-                                          (addonHost->IsLoaded("distance") || addonHost->IsLoaded("targethp") ||
-                                           addonHost->IsLoaded("enemycast") || addonHost->IsLoaded("customtimer") ||
-                                           addonHost->IsLoaded("zonename") || addonHost->IsLoaded("packetlogger") ||
-                                           addonHost->IsLoaded("combatparser") || addonHost->TargetlinesEnabled() ||
-                                           bahamut_client::TargetlinesProbeRequested());
+    // Boundaries follow the installed catalog so /addon load can start any
+    // installed addon mid-session.
+    const auto addonAvailable = [&](std::string_view id)
+    {
+        return addonHost->IsLoaded(id) || (runtimeCommands != nullptr && runtimeCommands->IsInstalled(id));
+    };
+    const bool packetObserverRequired = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr &&
+                                        (addonAvailable("distance") || addonAvailable("targethp") ||
+                                         addonAvailable("enemycast") || addonAvailable("customtimer") ||
+                                         addonAvailable("zonename") || addonAvailable("packetlogger") ||
+                                         addonAvailable("combatparser") || addonAvailable("targetlines") ||
+                                         bahamut_client::TargetlinesProbeRequested());
     if (packetObserverRequired && (packetObserver == nullptr || !packetObserver->InstallHook()))
     {
         const bool packetRemoved = packetObserver == nullptr || packetObserver->Shutdown();
@@ -830,10 +851,12 @@ bool InstallRenderBoundary(BahamutRuntimeTelemetry*               telemetry,
         const bool packetRemoved = !packetObserverHookInstalled || packetObserver->Shutdown();
         return cameraRemoved && objectRemoved && packetRemoved;
     };
-    const bool                         commandBoundaryRequired      = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr && addonHost->HasCommandAddons();
-    const bool                         chatBoundaryRequired         = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr && (commandBoundaryRequired || addonHost->IsLoaded("chatlogs"));
+    // The command boundary always carries /addon and /load; chat_print and
+    // their feedback need the chat boundary's receiver.
+    const bool                         commandBoundaryRequired      = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr && runtimeCommands != nullptr;
+    const bool                         chatBoundaryRequired         = !HasTestFault(L"BAHAMUT_RUNTIME_TEST_STUB") && addonHost != nullptr && (commandBoundaryRequired || addonAvailable("chatlogs"));
     const CommandBoundaryInstallResult commandBoundaryResult        = commandBoundaryRequired
-                                                                          ? InstallCommandBoundary(addonHost)
+                                                                          ? InstallCommandBoundary(runtimeCommands, &RuntimeCommands::Dispatch, runtimeCommands->CommandWords())
                                                                           : CommandBoundaryInstallResult::Disabled;
     const bool                         commandBoundaryHookInstalled = commandBoundaryResult == CommandBoundaryInstallResult::Installed;
     if (commandBoundaryRequired && !commandBoundaryHookInstalled)

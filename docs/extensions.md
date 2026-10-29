@@ -2,15 +2,18 @@
 
 [Back to the documentation index](README.md)
 
-Use Extensions to manage Lua addons, Screenshot, DiscordRPC, and DAT packages.
+Use Extensions to manage Lua addons, Screenshot, DiscordRPC, XHBar, and DAT
+packages.
 Extended Draw Distance and Extended Camera Zoom are in Settings > Graphics.
-Selections apply on the next game launch.
+Selections apply on the next game launch. In game, `/addon` and `/load`
+change loaded addons and plugins for the current session; see
+[Loading in game](#loading-in-game).
 
 The x86 Win32 client module hosts Lua addons. Screenshot and DiscordRPC are
 separate DLLs in `plugins/`, Dats-Overlay is managed by the launcher, and the
-two Graphics options use optional client hooks. The runtime's private native
-ABI loads only Screenshot and DiscordRPC. It does not discover arbitrary
-DLLs or provide a public plugin SDK.
+two Graphics options and XHBar use optional client hooks. The runtime's
+private native ABI loads only Screenshot and DiscordRPC. It does not discover
+arbitrary DLLs or provide a public plugin SDK.
 
 The first sections cover player-facing behavior. [Package layout](#package-layout),
 [Lua lifecycle](#lua-lifecycle), and [Host API](#host-api) are the addon author
@@ -60,6 +63,41 @@ On macOS and Linux:
   is extracted or installed. Put custom addons and DAT packages under
   `~/.bahamut-launcher`, not beside the executable. A custom package with a
   shipped package's ID is skipped.
+
+## Loading in game
+
+These chat commands work in every session where the client module starts:
+
+| Command | Effect |
+|---|---|
+| `/addon load <id>` | Loads an installed addon by its manifest `id`. |
+| `/addon unload <id>` | Unloads a loaded addon. |
+| `/addon reload <id>` | Reloads a loaded addon, or loads it if it is not loaded. |
+| `/addon list` | Lists loaded addons in load order; faulted addons are marked. |
+| `/load <plugin>` | Loads or re-enables `screenshot` or `discord-rpc`. |
+| `/unload <plugin>` | Disables the plugin. |
+| `/plugins` | Lists both plugins and whether each is loaded. |
+| `/xhbar xbox`, `/xhbar playstation` | Switches XHBar's control labels and saves the choice. |
+| `/xhbar toggle` | Hides or shows the XHBar overlay and saves the choice. |
+| `/xhbar help` | Lists the XHBar commands. |
+
+Any installed addon can be loaded, including one not selected in Extensions.
+Addon and plugin changes last until the game closes; they never rewrite
+`extensions.ini`, and the next launch uses the Extensions selection and the
+[startup script](configuration.md#startup-scripts). XHBar's choices
+persist in its own [settings file](../client/README.md#commands-and-settings). DAT packages and the
+Graphics options are applied at launch and have no in-game command.
+
+Commands take effect immediately, even when chat feedback is unavailable.
+When available, chat shows results such as `Loaded addon: fps`,
+`Addon is not installed: foo`, or `fps is an addon; use /addon load fps`.
+Other `/addon` and `/load` forms print usage.
+
+Unloading an addon closes its Lua state and stops its overlay and commands.
+Native services an addon uses stay installed and pass through: the addon's
+behavior ends, but the host does not remove client hooks during play.
+Unloading a plugin disables it without unloading its DLL; DiscordRPC clears
+the activity and Screenshot stops reacting to its key.
 
 ## Packaged addons
 
@@ -359,6 +397,117 @@ are outside its coverage. It uses the shared overlay visibility control
 and has no slash commands or adjustable visual settings. See the
 [native Targetlines contract](../client/README.md#targetlines) for projection and testing limits.
 
+### NoLock
+
+NoLock (`nolock`) is disabled by default. Enable it in
+Extensions before the next game launch. For admitted local-player calls, it
+retains 50% of the wait after an action before your character can move again.
+Disable it in Extensions for normal waits on the next launch. The percentage
+is fixed, and the addon has no commands of its own.
+
+It affects only that movement wait for the local player. It does not shorten
+casts, recasts or animations, and it does not change server timing. The
+effect needs the native NoLock movement service, which the runtime provides
+only on the exact supported retail client (see
+[NoLock movement policy](#nolock-movement-policy)); without it, waits stay
+normal. Live acceptance of this build on the retail client is pending.
+
+### Gearsets
+
+Gearsets is disabled by default. `/gs` or `/gearsets` opens and closes the Gear
+Sets window, which starts closed. It lists sets by number with the class or job
+icon, its abbreviation and the set name; a gold star marks every set whose gear
+you are wearing. The window takes clicks and typing without Shift.
+
+- `+` saves the gear you are wearing as a new set named after its number, such
+  as `Set1`. The arrow buttons move the selected set up or down.
+- Equip Set, or a double-click on a set, equips it. Cancel stops unsent
+  requests; a sent request may still finish.
+- Right-click a set for Equip, Update from Current, Rename and Delete. While
+  the Rename dialog is open, every key goes to it and none reaches the game;
+  Escape closes it.
+
+Equip changes one slot at a time through the game's own equip request, main
+hand first, and waits to see each change before the next. A main hand for
+another class changes your class, and the remaining slots are checked again
+afterward. Equip never requests a Job Change, never retries a sent request
+and never undoes one; the game's own restrictions still apply. A one-line
+status under the list shows progress, and the reason if Equip stops early;
+hover over a shortened line for the whole text. The window never changes size
+for it.
+
+Commands take `<set>` as a list number or a case-insensitive set name:
+
+- `/gs list`, `/gs save [name]`, `/gs equip <set>`, `/gs update <set>` and
+  `/gs delete <set>`.
+- `/gs rename <number> <name>` and `/gs move <number> <position>`.
+- `/gs cancel`, `/gs status` for the last equip result, `/gs reload` and
+  `/gs help`.
+
+Each character's sets live in one file,
+`config/addons/gearsets/sets/<server id>-<character id>/sets.lua`, which you
+can edit by hand. Gear Sets reads it as data only and never runs it:
+
+```lua
+return {
+    {
+        name = 'Healing',
+        class = 'CNJ',
+        main = 'WEATHERED_CANE',
+        body = { 'WEATHERED_DALMATICA', copy = '0000004800000123' },
+        hands = 'empty',
+    },
+}
+```
+
+A slot is `'empty'`, an item name, an item number, or a table holding the item
+and the `copy` it must use, 16 hex digits naming one exact item. The slot keys
+are `main`, `off`, `throwing`, `pack`, `pouch`, `head`, `undershirt`, `body`,
+`undergarment`, `legs`, `hands`, `feet`, `waist`, `neck`, `ears`, `wrists`,
+`right_ring` and `left_ring`. Item names come from the Bahamut server's item
+list, for example `WEATHERED_CANE`. Without a `copy`, Equip uses the copy you
+are wearing in that slot, or else the only copy you carry, and stops if you
+carry two. Slots a set leaves out keep what you are wearing. Sets saved in
+game record every slot with its exact copy.
+
+Gear Sets reads the file again when the window opens and before commands that
+read or change sets. If the file cannot be read, the window shows the problem
+and, for a syntax error, its line number. Changes to saved sets are refused
+until the problem is fixed, preserving the file.
+Gear Sets rewrites the whole file when a set changes in game and keeps only its
+own header comment. If the file changed on disk while the window was open, a
+change made in the window is refused and the list reloads.
+
+The file is chosen by the launched server's stable ID and the character's
+database ID. The server ID covers the server profile's lobby host and port, so
+renaming a profile or changing its auth endpoint keeps its sets. Without a
+server ID, or before the game names the character, sets exist only in memory
+for the session. A character holds at most 100 sets. Class and job icons appear
+when the package includes them; otherwise rows show the abbreviation alone.
+See the [native contract](../client/README.md#gearsets).
+
+### Autologin
+
+Autologin is disabled by default. Enable it in Addons for the next game
+launch. It enters the character in the configured character-list slot using
+the client's title and character-list actions. The title screen advances without
+its Start confirmation, and the list may log in before its highlight visibly
+moves. It acts about 4 seconds after the title screen appears and about 3 seconds
+after the character list opens. It finishes when the game reaches the world. If
+the addon starts while the game is already in the world, it does nothing.
+
+The `slot` key in `config/addons/autologin/settings.ini` selects the
+character-list position. It defaults to 1 and accepts 1 through 8. A value
+outside that range, an empty slot, or a slot the list would warn about or
+refuse stops the run and leaves selection to the player. The slot is a
+list position, so deleting or reordering characters changes which character
+it selects.
+
+Input and window focus do not affect the run. It runs once per game
+launch; disabling or reloading the addon stops it, and reloading does not
+start another run. It does not store passwords or log in to the launcher.
+It has no commands or window.
+
 ## DiscordRPC presence
 
 DiscordRPC is a launcher plugin configured in `extensions.ini`. A bounded
@@ -385,9 +534,10 @@ client memory API.
 ## Extended Draw Distance
 
 Extended Draw Distance multiplies the supported 1.23b client's final object
-distance result by 1.25x, 1.5x, 1.75x, or 2x. Off leaves it unchanged. Settings
-> Graphics provides one stepped bar with Off and these multipliers. The
-selection is saved in `config/extensions.ini` and applies on the next launch.
+distance result by 1.25x, 1.5x, 1.75x, or 2x. Off, the shipped default, leaves
+it unchanged. Settings > Graphics provides one stepped bar with Off and these
+multipliers. The selection is saved in `config/extensions.ini` and applies on
+the next launch.
 
 The native hook validates the retail function signature before installation.
 It changes the object cutoff, not scenery LOD selection or server visibility.
@@ -395,9 +545,10 @@ It changes the object cutoff, not scenery LOD selection or server visibility.
 ## Extended Camera Zoom
 
 Extended Camera Zoom raises the supported 1.23b client's camera distance
-setter ceiling from 10 to a value from 11 through 15. Settings > Graphics
-provides one stepped bar with Off and these ceilings. The selection is saved
-in `config/extensions.ini` and applies on the next launch.
+setter ceiling from 10 to a value from 11 through 15. Off, the shipped default,
+keeps the client's ceiling. Settings > Graphics provides one stepped bar with
+Off and these ceilings. The selection is saved in `config/extensions.ini` and
+applies on the next launch.
 
 The hook validates the setter signature. Distances at or below 10 and
 nonfinite inputs pass to the original setter. Larger finite inputs are capped
@@ -453,17 +604,19 @@ commands = []
 - `kind`: must be `addon`
 - `entry`: one `.lua` file beside the manifest; paths and nested entries are
   rejected
-- `api_version`, `minimum_runtime_version`, `supported_client_builds`,
-  `capabilities`, and `commands`: metadata in the current host; they do not
-  grant services or register arbitrary commands
+- `api_version`, `minimum_runtime_version`, `supported_client_builds`, and
+  `capabilities`: metadata in the current host; they do not grant services
 - Each optional command record: nonempty `name`, `usage`, and `description`
-  strings, with `name` beginning with `/`
+  strings, with `name` beginning with `/`. The first word of each `name`
+  registers that chat command; see
+  [Chat command dispatch](#chat-command-dispatch).
 
 The launcher passes enabled manifests to the module in `[addon.N]` row order
 from `config/extensions.ini`. It also passes the installed manifest catalog,
 so startup commands can load a package not selected for automatic loading.
-Startup commands can append packages; unload and reload operations can change
-the active order for that session. Packages cannot enable or reorder themselves.
+Startup and in-game commands can append packages; unload and reload
+operations can change the active order for that session. Packages cannot
+enable or reorder themselves.
 See [Configuration](configuration.md#portable-launcher-tree) for startup
 scripts and paths in each layout.
 
@@ -566,30 +719,110 @@ and clear the popup.
 
 ### Chat command dispatch
 
-The runtime recognizes the ASCII addon commands `/fps`, `/pos`, `/distance`,
-`/targethp`, `/enemycast`, `/customtimer`, `/wiki`, `/packetlogger`, and
-`/combatparser`. Addons handle their own arguments.
+The runtime reserves `/addon`, `/load`, `/unload`, `/plugins`, and
+`/xhbar` for [Loading in game](#loading-in-game). Every installed
+addon's manifest `commands` names register their first word, such as `/fps`,
+when the module starts. Names are read from inline tables in a `commands` array or from
+`[[commands]]` tables. A word must be `/` followed by 1 to 31 lowercase ASCII letters,
+digits, hyphens, or underscores. Reserved words, malformed words, and words
+already registered by an addon whose ID sorts earlier are ignored. A registered word is
+dispatched only while an addon that handles it is loaded.
 
 The host reads a bounded token vector from the retail parser. Malformed,
 unsupported, overlong, or unreadable inputs pass to retail. Recognition occurs
 only at the top-level retail lookup call; nested token lookups always pass
 through.
 
-The host calls each loaded addon's optional `command(command_name)` once in
-load order until one returns `true`. A `true` result supplies the retail
-unknown-command sentinel, which the validated retail path consumes without
-sending the command as chat. A missing callback, `false`, or callback error
-preserves the retail lookup path.
+The host joins the tokens with single spaces, up to 512 bytes, and calls each
+loaded addon's optional `command(command_name)` once in load order until one
+returns `true`. Addons validate their own arguments and return `false` for
+forms they do not support. A `true` result supplies the retail unknown-command
+sentinel, which the validated retail path consumes without sending the
+command as chat. A missing callback, `false`, or callback error preserves the
+retail lookup path.
 
-The command boundary is installed when any addon with a supported command is
-loaded. Loading `chatlogs` also installs the existing retail chat insertion
-boundary. The optional `BAHAMUT_TEST_COMMAND_BOUNDARY_RESULT_FILE` output is
-an aggregate diagnostic snapshot.
+The command boundary and the retail chat insertion boundary are installed in
+every session. Packet observation is installed when any installed addon
+consumes it. The optional `BAHAMUT_TEST_COMMAND_BOUNDARY_RESULT_FILE` output
+is an aggregate diagnostic snapshot.
 
 ## Host API
 
 The global `bahamut` table exposes the functions below. The Wiki addon also
 receives the bounded URL service.
+
+### NoLock movement policy
+
+The runtime provides the NoLock movement service after verifying the exact
+retail executable and mapped movement bytes and installing the wrapper hook.
+If installation fails, the host registers no movement consumer and the status
+reason is `not_admitted`; a target mismatch leaves the image unchanged. The
+addon ships disabled by default. Admission requires a healthy loaded `nolock`
+instance and the current service session. Reloads and late loads receive fresh
+admission before their load callbacks; faulted or closing instances and loads
+after shutdown cannot be admitted. Manifest metadata grants no admission.
+These APIs are exposed only in the `nolock` Lua state:
+
+- `bahamut.action_movement_configure(retain_percent, enabled)` accepts exactly
+  a numeric integer from 0 through 100 and a boolean. It returns `accepted,
+  reason`. Invalid types, fractions, nonfinite values, bounds or argument counts
+  return `false, 'invalid_request'` without changing policy. Unavailable or stale
+  admission also rejects the request. Owner and session tokens stay native.
+- `bahamut.action_movement_status()` returns a copied table with `available`,
+  `enabled`, `requested_percent`, `effective_percent` and `reason`. Unavailable
+  instances report disabled policy, requested 0 and effective 100, without
+  exposing another consumer's policy. Extra arguments return `nil,
+  'invalid_request'`.
+
+Reasons are `ready`, `not_admitted`, `session_unavailable`, `unavailable`,
+`target_mismatch`, `install_failed` and `cleanup_failed`. A copied status is
+observational; a later configuration can fail if admission has changed. The
+host revokes policy before reload, disable or unload, and on callback faults.
+Lua cannot rearm a closing or faulted instance. Revocation does not retire a
+native hook. Runtime shutdown disables it but keeps the hook, trampoline and
+detour resident for the process lifetime because call quiescence cannot be
+established.
+
+The addon has no commands, chat output or saved preference; see
+[NoLock](#nolock). Changes in Extensions apply on the next launch. In game,
+`/addon load nolock` and `/addon unload nolock` load and unload it for the
+current session. The load callback calls
+`bahamut.action_movement_configure(50, true)`. Startup-loaded instances receive
+admission after their load callback and apply the policy on update. Each
+update repeats the call
+when the service is available but not enabled at 50%. Reload revokes the old
+instance and admits its replacement before the load callback runs. `/nolock`
+passes to retail.
+
+An unavailable service reports effective 100%. On older hosts, the addon does
+nothing if the configure or status functions are missing.
+Version metadata does not substitute for these checks. The policy applies
+only to admitted post-action movement waits; it does not alter
+recast, casting, animation or server timing. Offline fixtures do not establish
+retail movement behavior.
+
+The target preflight requires exact executable/version identity and the
+mapped instruction windows; it accepts no test-stub identity exception. The
+hook covers only the primary movement wrapper and admits only a call returning
+to `0x008284AE`. Before the original call the runtime copies the actor, owner,
+controller, vtable, gate target, gate word, timer flag and actor ID with
+fault-guarded reads. Scaling requires a verified target, a current service
+session and complete reads. The owner's actor reference and the controller's
+first word must equal the actor pointer. The vtable and gate target must match
+the primary values, the gate bit and timer flag must be clear, and the actor
+ID must be nonzero, distinct from `0xC0000000` and equal to the validated
+player-state active actor ID. Missing or stale evidence, or a positive duration
+that scales to zero or less, preserves the original duration. Every call
+forwards exactly once. Calls admitted before shutdown may finish with a reduced
+duration; calls entering after shutdown begins forward unchanged. A clip class
+name or matching pointer alone does not establish gameplay eligibility.
+
+The [native admission declaration](../client/src/action_movement_admission.h)
+cites the exact-client static source. The client clip calls the wrapper at
+`0x008284A9` and returns at `0x008284AE`. The byte windows were checked against
+the executable identity in [runtime_contract.h](../client/api/runtime_contract.h)
+using pefile 2024.8.26 and Capstone 5.0.7. This is exact-binary validation of
+the route; offline fixtures do not establish live retail movement behavior.
 
 ### Settings and player state
 
@@ -606,9 +839,12 @@ receives the bounded URL service.
   and actor ID. Range is `nil` when targeting yourself or if the position is
   unavailable. All three values are `nil` if no target is selected.
 - `bahamut.target_hp()` is available only to the packaged `targethp` addon.
-  It returns current HP, maximum HP, resolved name, and actor ID. Both HP
-  values are `nil` until a complete health update is available; all four are
-  `nil` if no target is selected.
+  It returns current HP, maximum HP, resolved name, actor ID, and whether the
+  target is a battle character. Both HP values are `nil` until a complete
+  health update is available. The battle flag is the target's latest
+  `charaWork.property[2]` value: true for players and battle NPCs, false for
+  populace NPCs or when no value has been seen. All five are `nil` if no
+  target is selected.
 - `bahamut.combat_events()` is available only to the packaged `combatparser`
   addon. It drains up to 256 validated records with `source_id`, `amount`,
   `kind`, `source_name`, `source_class_id`, and `source_job_id` fields. Class
@@ -636,6 +872,10 @@ saved in `config/addons/<id>/settings.ini`.
   `casting = false` denotes an idle row.
   `completed` also becomes true when the estimate expires, as described in
   [Enemy Cast](#enemy-cast).
+- `bahamut.autologin_start(slot)` is available only to addon ID
+  `autologin`. It requests a run for a slot from 1 to 8 and returns the
+  current `phase`, `slot`, and `reason`. See [Autologin](#autologin) for the
+  once-per-launch limit.
 
 These functions expose copied state, not client memory or raw packets. Like
 other addon ID restrictions, they do not authenticate replacement packages.
@@ -699,6 +939,80 @@ These functions submit content during `draw`:
   ports, malformed URLs, and invalid UTF-8 return `false` without reaching
   the browser sink.
 
+### Gearsets services
+
+These functions are available only to the addon with ID `gearsets`.
+
+- `bahamut.profile_key()` returns the character profile key, or `nil` without
+  a server ID from the launcher or a current equipment read that identifies
+  the character.
+- `bahamut.equipment_snapshot()` returns `nil` without a current read.
+  Otherwise it returns `complete`, `generation`, a text `session` token,
+  optional `class_id` and `job_id`, and `slots`, an array of `{ slot, state }`
+  rows. `state` is
+  `empty`, `item`, or `unknown`. An `item` row adds `uid`, 16 lowercase hex
+  digits, and the numeric `catalog` ID. `complete` is true only when no slot
+  is `unknown`.
+- `bahamut.equipment_session()` returns an ephemeral session token as text,
+  or `"0"` without a reader. It is not a persistence key. Class/job metadata
+  belongs to the copied equipment snapshot, not a later player-state read.
+- `bahamut.resolve_equipment_items(uids)` accepts up to 18 hexadecimal instance
+  IDs and returns corresponding `available`, `missing`, `ambiguous`, or
+  `unavailable` strings from one copied inventory view. Bag traversal is capped
+  at 1024 positions; larger or unreadable inventory remains unavailable.
+- `bahamut.find_item_copy(item_id)` returns `available` and the instance as 16
+  lowercase hex digits when exactly one copy of that item type is worn or in
+  accessible bag data, or `missing`, `ambiguous`, or `unavailable`. A worn item
+  and its bag entry count as one copy.
+- `bahamut.item_id(name)` returns the item number for an item-list name such
+  as `WEATHERED_CANE`, or `nil`. `bahamut.item_name(id)` is the reverse. The
+  list covers named thrown, pack, weapon, tool, armor and accessory items.
+- `bahamut.record_list(profile)` returns a status string and an array of
+  record names.
+- `bahamut.record_load(name, profile)` returns a status string and the record
+  bytes.
+- `bahamut.record_save(name, text, profile)` returns a status string.
+- `bahamut.record_delete(name, profile)` returns a status string.
+- `bahamut.gearsets_equip(intent)` copies a whole-set intent, `slots` keyed by
+  slot position with `{ state = 'empty' }` or `{ state = 'item', uid }` for
+  every slot, and returns an admission boolean and reason. Admission is not
+  equip success; read the outcome from `bahamut.gearsets_result()`.
+- `bahamut.gearsets_cancel()` stops unsent operations.
+- `bahamut.gearsets_result()` returns `phase`, `reason`, `submissions`,
+  optional stopping `slot`, and a `changed` array of observed slot positions.
+- `bahamut.gearsets_window(view)` is a draw-only boundary. The view contains
+  up to 100 `{ name, abbreviation, current }` rows, the 1-based `selected`
+  row, `status`, `equipping`, `editable`, and `context`, which changes whenever
+  the rows may name other sets so a dialog opened earlier cannot act on the
+  wrong one. An abbreviation of up to three capital letters names the row's
+  icon, `icons/<lowercase abbreviation>.png` in the addon directory. It returns
+  a single `{ kind, row, text }` action. Lua owns the sets and selection; the
+  overlay owns native controls.
+
+Each record function takes the profile key the addon obtained from
+`bahamut.profile_key()` and acts only while that key is still current, so a
+character switch between the check and the call is refused instead of
+reaching the other character's sets. Records are `<name>.lua` files under the
+profile's directory. Names are 1-64 characters from `a-z`, `0-9`, and `-`, and
+cannot be a reserved Windows device name. A record is at most 262144 bytes and
+a profile holds at most 64 records. Status strings are `ok`, `unavailable` (no
+current profile matching the argument), `not_found`, `invalid`, `limit`,
+`too_large`, and `io`.
+Saving writes a temporary file and replaces the record in one operation, and
+any failure leaves the earlier record unchanged.
+
+Two more functions exist only when the client module runs with
+`BAHAMUT_TEST_GEARSETS_EQUIP=1`, described in the
+[debug switches](../client/README.md#debug-switches):
+
+- `bahamut.debug_equip(bag_slot, equip_slot, uid)` returns `true` and a
+  request number, or `false` and a reason. `uid` is optional hex text.
+  Reasons include `disabled`, `busy`, `invalid-slot`, and `invalid-uid`.
+- `bahamut.debug_equip_status()` returns `nil` or the latest request:
+  `id`, `phase`, `reason`, `terminal`, `generation`, `bag_slot`,
+  `equip_slot`, optional `uid` and `catalog`, `invocations`, optional
+  `return_value`, `submit_frame`, `invoke_frame`, and `finish_frame`.
+
 ### Lua restrictions and package trust
 
 The host opens only Lua's base, table, string, and math libraries. It removes
@@ -716,6 +1030,5 @@ The API does not provide target or party adapters, chat modification, general
 event subscriptions, callback budgets, raw input logging, arbitrary hooks,
 packet mutation, or a public native plugin ABI.
 
-The retail chat hook recognizes only the command patterns implemented in
-`client/src/command_boundary.cpp`. Manifest metadata cannot add patterns or
-make unsupported host services available.
+Manifest command names register chat command words only. They cannot make
+unsupported host services available.

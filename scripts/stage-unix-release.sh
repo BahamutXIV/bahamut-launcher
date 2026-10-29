@@ -89,6 +89,9 @@ skeleton_dirs=(
     "addons/pos"
     "addons/wiki"
     "addons/targetlines"
+    "addons/nolock"
+    "addons/autologin"
+    "addons/gearsets"
     "licenses"
     "plugins/dats"
     "config/addons"
@@ -126,7 +129,7 @@ add_copy "$repo_root/src-tauri/ui/assets/licenses/Cinzel-OFL.txt" "$destination/
 add_copy "$repo_root/src-tauri/ui/assets/licenses/JetBrainsMono-OFL.txt" "$destination/licenses/JetBrainsMono-OFL.txt"
 add_copy "$repo_root/src-tauri/ui/assets/licenses/MinGW-w64-runtime-COPYING.txt" "$destination/licenses/MinGW-w64-runtime-COPYING.txt"
 
-addon_names="chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines"
+addon_names="chatlogs zonename packetlogger combatparser customtimer distance enemycast targethp fps pos wiki targetlines nolock autologin gearsets"
 for name in $addon_names; do
     add_copy "$repo_root/addons/$name/addon.toml" "$destination/addons/$name/addon.toml"
     add_copy "$repo_root/addons/$name/$name.lua" "$destination/addons/$name/$name.lua"
@@ -196,6 +199,40 @@ if [ "${#overlay_expected_files[@]}" -gt 1 ]; then
     python3 -I "$script_dir/official-overlay-dats.py" verify --package "$overlay_dest"
 fi
 
+# Gear Sets icons: optional, present only when the pinned PNGs were installed.
+icons_source="$repo_root/addons/gearsets/icons"
+icons_dest="$destination/addons/gearsets/icons"
+icons_expected_files=()
+
+if [ -L "$icons_source" ]; then
+    echo "stage-unix-release.sh: Gear Sets icon package is a symlink: $icons_source" >&2
+    exit 1
+fi
+if [ -e "$icons_source" ] && [ ! -d "$icons_source" ]; then
+    echo "stage-unix-release.sh: Gear Sets icon package is not a directory: $icons_source" >&2
+    exit 1
+fi
+if [ -d "$icons_source" ]; then
+    while IFS= read -r -d '' entry; do
+        if [ -L "$entry" ]; then
+            echo "stage-unix-release.sh: Gear Sets icon package contains a symlink: $entry" >&2
+            exit 1
+        fi
+        if [ ! -f "$entry" ]; then
+            echo "stage-unix-release.sh: Gear Sets icon package entry is not a regular file: $entry" >&2
+            exit 1
+        fi
+        relative="${entry#"$icons_source"/}"
+        mkdir -p "$icons_dest"
+        cp "$entry" "$icons_dest/$relative"
+        icons_expected_files+=("addons/gearsets/icons/$relative")
+    done < <(find "$icons_source" -mindepth 1 -print0)
+fi
+
+if [ "${#icons_expected_files[@]}" -gt 0 ]; then
+    python3 -I "$script_dir/gearsets-icons.py" verify --package "$icons_dest"
+fi
+
 # Reject a symlink anywhere in the finished staged tree, not just the overlay.
 staged_symlinks="$(find "$destination" -type l)"
 if [ -n "$staged_symlinks" ]; then
@@ -244,10 +281,19 @@ expected_files=(
     'addons/wiki/wiki.lua'
     'addons/targetlines/addon.toml'
     'addons/targetlines/targetlines.lua'
+    'addons/nolock/addon.toml'
+    'addons/nolock/nolock.lua'
+    'addons/autologin/addon.toml'
+    'addons/autologin/autologin.lua'
+    'addons/gearsets/addon.toml'
+    'addons/gearsets/gearsets.lua'
     'scripts/default.txt'
 )
 if [ "${#overlay_expected_files[@]}" -gt 0 ]; then
     expected_files+=("${overlay_expected_files[@]}")
+fi
+if [ "${#icons_expected_files[@]}" -gt 0 ]; then
+    expected_files+=("${icons_expected_files[@]}")
 fi
 
 expected_dirs=(
@@ -264,6 +310,9 @@ expected_dirs=(
     "addons/pos/"
     "addons/wiki/"
     "addons/targetlines/"
+    "addons/nolock/"
+    "addons/autologin/"
+    "addons/gearsets/"
     "licenses/"
     "config/"
     "config/addons/"
@@ -280,6 +329,9 @@ expected_dirs=(
 )
 if [ "${#overlay_expected_dirs[@]}" -gt 0 ]; then
     expected_dirs+=("${overlay_expected_dirs[@]}")
+fi
+if [ "${#icons_expected_files[@]}" -gt 0 ]; then
+    expected_dirs+=("addons/gearsets/icons/")
 fi
 
 assert_exact_manifest() {

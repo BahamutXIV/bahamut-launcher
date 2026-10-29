@@ -1,5 +1,6 @@
 #include "player_state.h"
 #include "fault_guard.h"
+#include "login_reader.h"
 
 #include "area_names.h"
 #include "packet_observer.h"
@@ -399,12 +400,14 @@ bool __fastcall HookedPlayerStateUpdate(void* container, void*)
     {
         result = gOriginalPlayerStateUpdate(container);
     }
+    bahamut_client::CaptureLoginScreen(container);
 
     PlayerStateService* service =
         gPlayerStateService.load(std::memory_order_acquire);
     if (service != nullptr)
     {
-        static_cast<void>(service->CaptureFromContainer(container));
+        const bool captured = service->CaptureFromContainer(container);
+        service->NotifyGameFrame(container, captured);
     }
 
     return result;
@@ -640,6 +643,12 @@ std::optional<PlayerStateSnapshot> PlayerStateService::Snapshot() const
 
 void PlayerStateService::PublishUnchecked(const PlayerStateSnapshot& snapshot)
 {
+    // Every identity or zone invalidation revokes the id; only a fully validated
+    // capture republishes it.
+    if (snapshot.actorId == 0u)
+    {
+        activeActorId_.store(0u, std::memory_order_release);
+    }
     std::uint32_t sequence = sequence_.load(std::memory_order_relaxed);
     for (;;)
     {
@@ -875,8 +884,15 @@ bool PlayerStateService::CaptureFromContainer(const void* container)
         }
     }
     MergeObserved(snapshot, identityChanged);
+    activeActorId_.store(snapshot.actorId, std::memory_order_release);
     PublishUnchecked(snapshot);
     return true;
+}
+
+void PlayerStateService::SetGameFrameObserver(GameFrameObserver observer, void* context)
+{
+    gameFrameObserver_ = observer;
+    gameFrameContext_  = context;
 }
 
 bool PlayerStateService::InstallHook()

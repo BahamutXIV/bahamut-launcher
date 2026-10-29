@@ -1,7 +1,6 @@
 #include "command_boundary.h"
 #include "fault_guard.h"
 
-#include "addon_host.h"
 #include "retail_identity.h"
 #include "runtime_contract.h"
 
@@ -13,6 +12,7 @@
 #include <fstream>
 #include <intrin.h>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -112,7 +112,7 @@ bool ReadBoundedInput(const unsigned char* input, char* output, std::size_t capa
     }
 }
 
-bool ReadAsciiCommandBoundary(const unsigned char* input, unsigned char& boundary)
+bool ReadAsciiCommandBoundary(const unsigned char* input, const std::vector<std::string>& words, unsigned char& boundary)
 {
     if (input == nullptr)
     {
@@ -125,14 +125,20 @@ bool ReadAsciiCommandBoundary(const unsigned char* input, unsigned char& boundar
         return false;
     }
     const std::string_view text(storage.data(), length);
-    for (const std::string_view command : {
-             "/pos", "/fps", "/wiki", "/distance", "/enemycast", "/targethp", "/customtimer", "/packetlogger", "/combatparser" })
+    // A word that is a prefix of another, such as /load and /loadout, must
+    // not hide the longer one, so only a match ending at a word boundary counts.
+    for (const std::string_view command : words)
     {
-        if (text.starts_with(command))
+        if (!text.starts_with(command))
         {
-            boundary = text.size() == command.size()
-                           ? '\0'
-                           : static_cast<unsigned char>(text[command.size()]);
+            continue;
+        }
+        const unsigned char next = text.size() == command.size()
+                                       ? '\0'
+                                       : static_cast<unsigned char>(text[command.size()]);
+        if (next == '\0' || IsAsciiSpace(next))
+        {
+            boundary = next;
             return true;
         }
     }
@@ -157,11 +163,11 @@ const unsigned char* ReadTokenText(const void* token)
     }
 }
 
-bool MatchesAddonCommandToken(const void* token)
+bool MatchesAddonCommandToken(const void* token, const std::vector<std::string>& words)
 {
     const auto*   text          = ReadTokenText(token);
     unsigned char asciiBoundary = 0;
-    return ReadAsciiCommandBoundary(text, asciiBoundary) && (asciiBoundary == '\0' || IsAsciiSpace(asciiBoundary));
+    return ReadAsciiCommandBoundary(text, words, asciiBoundary) && (asciiBoundary == '\0' || IsAsciiSpace(asciiBoundary));
 }
 
 bool ReadCallerTokenRange(const void*  returnAddressSlot,
@@ -224,111 +230,6 @@ bool ReadCanonicalAddonCommand(const void* token, const void* tokenRangeBegin, c
         {
             return false;
         }
-    }
-    if ((tokens[0] == "/fps" || tokens[0] == "/distance" || tokens[0] == "/targethp") &&
-        count == 3 && (tokens[1] == "color" || tokens[1] == "size"))
-    {
-        canonical.assign(tokens[0]);
-        canonical.push_back(' ');
-        canonical.append(tokens[1]);
-        canonical.push_back(' ');
-        canonical.append(tokens[2]);
-        return true;
-    }
-    if (tokens[0] == "/fps")
-    {
-        if (count == 1)
-        {
-            canonical = "/fps";
-            return true;
-        }
-        if (count == 2 && tokens[1] == "help")
-        {
-            canonical = "/fps help";
-            return true;
-        }
-        if (count == 2 && tokens[1] == "lock")
-        {
-            canonical = "/fps lock";
-            return true;
-        }
-        return false;
-    }
-    if (tokens[0] == "/pos")
-    {
-        if (count == 1)
-        {
-            canonical = "/pos";
-            return true;
-        }
-        if (count == 2 && (tokens[1] == "help" || tokens[1] == "lock"))
-        {
-            canonical = tokens[1] == "help" ? "/pos help" : "/pos lock";
-            return true;
-        }
-        return false;
-    }
-    for (const std::string_view command : {
-             "/distance", "/enemycast", "/targethp", "/customtimer" })
-    {
-        if (tokens[0] == command)
-        {
-            if (count == 2 && (tokens[1] == "lock" ||
-                               (tokens[1] == "help" &&
-                                (command == "/distance" || command == "/targethp"))))
-            {
-                canonical.assign(command);
-                canonical += tokens[1] == "lock" ? " lock" : " help";
-                return true;
-            }
-            return false;
-        }
-    }
-    if (tokens[0] == "/packetlogger")
-    {
-        if (count == 1)
-        {
-            canonical = "/packetlogger";
-            return true;
-        }
-        if (count == 2 && (tokens[1] == "start" || tokens[1] == "stop" || tokens[1] == "split" ||
-                           tokens[1] == "status"))
-        {
-            canonical = "/packetlogger ";
-            canonical += tokens[1];
-            return true;
-        }
-        return false;
-    }
-    if (tokens[0] == "/combatparser")
-    {
-        if (count == 1)
-        {
-            canonical = "/combatparser";
-            return true;
-        }
-        if (count == 2 && (tokens[1] == "mode" || tokens[1] == "reset" || tokens[1] == "lock" ||
-                           tokens[1] == "help"))
-        {
-            canonical = "/combatparser ";
-            canonical += tokens[1];
-            return true;
-        }
-        return false;
-    }
-    if (tokens[0] != "/wiki")
-    {
-        return false;
-    }
-    if (count == 1)
-    {
-        canonical = "/wiki";
-        return true;
-    }
-    if (count == 2 && tokens[1] == "help")
-    {
-        canonical = "/wiki help";
-        return true;
     }
     canonical.assign(tokens[0].data(), tokens[0].size());
     for (std::size_t index = 1; index != count; ++index)
@@ -484,15 +385,9 @@ int __fastcall HookedLookup(void* parser, void*, const void* token, void* auxili
     return gInstalledBoundary->HandleLookup(nullptr, parser, token, auxiliaryOutput, topLevelCall, tokenRangeBegin, tokenRangeEnd);
 }
 
-bool DispatchToAddonHost(void* context, std::string_view command)
+CommandBoundary& ProductionBoundary(void* context, CommandDispatchFunction dispatch, std::vector<std::string> words)
 {
-    auto* host = static_cast<AddonHost*>(context);
-    return host != nullptr && host->DispatchCommand(command);
-}
-
-CommandBoundary& ProductionBoundary(AddonHost* addonHost)
-{
-    static CommandBoundary boundary(addonHost);
+    static CommandBoundary boundary(context, dispatch, std::move(words));
     return boundary;
 }
 
@@ -553,22 +448,16 @@ bool CommandBoundaryLookupSignatureMatches(const void* address)
                    kLookupSignature.size());
 }
 
-CommandBoundary::CommandBoundary(AddonHost* addonHost)
-: context_(addonHost)
-, addonHost_(addonHost)
-, dispatch_(&DispatchToAddonHost)
-{
-}
-
-CommandBoundary::CommandBoundary(void* context, CommandDispatchFunction dispatch)
+CommandBoundary::CommandBoundary(void* context, CommandDispatchFunction dispatch, std::vector<std::string> words)
 : context_(context)
 , dispatch_(dispatch)
+, words_(std::move(words))
 {
 }
 
-bool CommandBoundary::RecognizesAddonCommand(const void* token)
+bool CommandBoundary::RecognizesCommand(const void* token) const
 {
-    return MatchesAddonCommandToken(token);
+    return MatchesAddonCommandToken(token, words_);
 }
 
 void CommandBoundary::RecordEvent(volatile LONG* counter)
@@ -630,7 +519,7 @@ int CommandBoundary::HandleLookupCore(
     InterlockedExchange(&lastLookupThreadId_,
                         static_cast<LONG>(GetCurrentThreadId()));
 
-    const bool recognized = MatchesAddonCommandToken(token);
+    const bool recognized = MatchesAddonCommandToken(token, words_);
     if (!topLevelCall || !recognized || dispatch_ == nullptr)
     {
         const int result = forward(forwardContext, parser, token, auxiliaryOutput);
@@ -685,10 +574,7 @@ CommandBoundaryInstallResult CommandBoundary::Install()
                    ? CommandBoundaryInstallResult::Installed
                    : CommandBoundaryInstallResult::RollbackFailed;
     }
-    if (addonHost_ == nullptr || (!addonHost_->IsLoaded("pos") && !addonHost_->IsLoaded("fps") && !addonHost_->IsLoaded("wiki") &&
-                                  !addonHost_->IsLoaded("distance") && !addonHost_->IsLoaded("enemycast") &&
-                                  !addonHost_->IsLoaded("targethp") && !addonHost_->IsLoaded("customtimer") &&
-                                  !addonHost_->IsLoaded("combatparser")))
+    if (dispatch_ == nullptr || words_.empty())
     {
         return CommandBoundaryInstallResult::Disabled;
     }
@@ -786,9 +672,11 @@ void CommandBoundary::ResetDiagnostics()
     InterlockedExchange(&sequence_, 0);
 }
 
-CommandBoundaryInstallResult InstallCommandBoundary(AddonHost* addonHost)
+CommandBoundaryInstallResult InstallCommandBoundary(void*                    context,
+                                                    CommandDispatchFunction  dispatch,
+                                                    std::vector<std::string> words)
 {
-    return ProductionBoundary(addonHost).Install();
+    return ProductionBoundary(context, dispatch, std::move(words)).Install();
 }
 
 bool ShutdownCommandBoundary()

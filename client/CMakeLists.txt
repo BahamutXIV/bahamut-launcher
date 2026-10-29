@@ -158,23 +158,70 @@ else()
 endif()
 
 add_library(bahamut SHARED
+    src/action_movement.cpp
+    src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
+    src/action_movement_hook.cpp
+    src/action_movement_hook.h
+    src/action_movement_runtime.cpp
+    src/action_movement_runtime.h
+    src/action_movement_target.cpp
+    src/action_movement.h
+    src/native_state.h
     api/native_plugin_api.h
     api/runtime_api.h
     ${BAHAMUT_RUNTIME_DEF}
     src/actor_name.cpp
     src/actor_name.h
+    src/autologin.cpp
+    src/autologin.h
+    src/autologin_machine.cpp
+    src/autologin_machine.h
     src/camera_zoom.cpp
     src/camera_zoom.h
     src/addon_host.cpp
     src/addon_host.h
+    src/gearsets_transaction.cpp
+    src/gearsets_transaction.h
+    src/addon_records.cpp
+    src/addon_records.h
     src/chat_boundary.cpp
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/xhbar_icon.cpp
+    src/xhbar_icon.h
+    src/xhbar_pad.cpp
+    src/xhbar_pad.h
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    src/xhbar_runtime.cpp
+    src/xhbar_runtime.h
+    src/xhbar_slots.cpp
+    src/xhbar_slots.h
     src/custom_timer.cpp
     src/custom_timer.h
     src/enemy_cast.cpp
     src/enemy_cast.h
+    src/login_reader.cpp
+    src/login_reader.h
+    src/equipment_state.cpp
+    src/equipment_state.h
+    src/gearsets_debug.cpp
+    src/gearsets_debug.h
+    src/gearsets_debug_service.cpp
+    src/gearsets_debug_service.h
+    src/gearsets_equip_request.cpp
+    src/gearsets_equip_request.h
+    src/gearsets_native_executor.cpp
+    src/gearsets_native_executor.h
+    src/gearsets_native_lookup.cpp
+    src/gearsets_native_lookup.h
+    src/gearsets_runtime.cpp
+    src/gearsets_runtime.h
+    src/item_names.cpp
+    src/item_names.h
+    src/item_names.inc
     src/player_state.cpp
     src/player_state.h
     src/packet_capture.cpp
@@ -215,6 +262,8 @@ add_library(bahamut SHARED
     src/dat_overlay.h
     src/retail_identity.cpp
     src/retail_identity.h
+    src/runtime_commands.cpp
+    src/runtime_commands.h
     src/startup_script.cpp
     src/startup_script.h
 )
@@ -277,7 +326,7 @@ add_library(bahamut-test-target-distance-objects OBJECT src/target_distance.cpp)
 target_include_directories(bahamut-test-target-distance-objects PRIVATE api src)
 target_link_libraries(bahamut-test-target-distance-objects PRIVATE minhook)
 
-add_library(bahamut-test-player-state-objects OBJECT src/player_state.cpp)
+add_library(bahamut-test-player-state-objects OBJECT src/player_state.cpp src/login_reader.cpp)
 target_include_directories(bahamut-test-player-state-objects PRIVATE api src)
 target_link_libraries(bahamut-test-player-state-objects PRIVATE minhook)
 
@@ -291,9 +340,30 @@ target_link_libraries(bahamut-test-enemy-cast-objects PRIVATE minhook)
 add_library(bahamut-test-packet-capture-objects OBJECT src/packet_capture.cpp)
 target_include_directories(bahamut-test-packet-capture-objects PRIVATE src)
 
-add_library(bahamut-test-addon-host-objects OBJECT src/addon_host.cpp)
+add_library(bahamut-test-action-movement-objects OBJECT
+    src/action_movement.cpp
+    src/action_movement_admission.cpp
+)
+target_include_directories(bahamut-test-action-movement-objects PRIVATE api src)
+
+add_library(bahamut-test-addon-host-objects OBJECT src/addon_host.cpp src/item_names.cpp)
 target_include_directories(bahamut-test-addon-host-objects PRIVATE api src vendor/minhook/include)
 target_link_libraries(bahamut-test-addon-host-objects PRIVATE lua51 minhook)
+
+add_library(bahamut-test-addon-records-objects OBJECT src/addon_records.cpp)
+target_include_directories(bahamut-test-addon-records-objects PRIVATE src)
+
+add_library(bahamut-test-equipment-state-objects OBJECT src/equipment_state.cpp)
+target_include_directories(bahamut-test-equipment-state-objects PRIVATE src)
+
+add_library(bahamut-test-gearsets-debug-objects OBJECT src/gearsets_debug.cpp)
+target_include_directories(bahamut-test-gearsets-debug-objects PRIVATE api src)
+
+add_library(bahamut-test-gearsets-transaction-objects OBJECT src/gearsets_transaction.cpp)
+target_include_directories(bahamut-test-gearsets-transaction-objects PRIVATE src)
+
+add_library(bahamut-test-gearsets-runtime-objects OBJECT src/gearsets_runtime.cpp)
+target_include_directories(bahamut-test-gearsets-runtime-objects PRIVATE src)
 
 add_library(bahamut-test-world-projection-objects OBJECT src/world_projection.cpp)
 target_include_directories(bahamut-test-world-projection-objects PRIVATE src)
@@ -354,6 +424,80 @@ add_executable(bahamut-input-policy-tests
 )
 target_include_directories(bahamut-input-policy-tests PRIVATE src)
 
+add_executable(bahamut-action-movement-tests
+    src/action_movement.cpp
+    src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
+    src/action_movement.h
+    src/action_movement_hook.cpp
+    src/action_movement_hook.h
+    src/action_movement_runtime.cpp
+    src/action_movement_runtime.h
+    src/action_movement_target.cpp
+    src/retail_identity.cpp
+    tests/action_movement_tests.cpp
+)
+target_include_directories(bahamut-action-movement-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-action-movement-tests PRIVATE bcrypt minhook)
+
+add_executable(bahamut-action-movement-admission-tests
+    src/action_movement.cpp
+    src/action_movement_admission.cpp
+    src/action_movement_capture.cpp
+    src/action_movement_target.cpp
+    src/retail_identity.cpp
+    tests/action_movement_admission_tests.cpp
+)
+target_include_directories(bahamut-action-movement-admission-tests PRIVATE api src)
+target_link_libraries(bahamut-action-movement-admission-tests PRIVATE bcrypt)
+bahamut_unicode_entry(bahamut-action-movement-admission-tests)
+
+add_executable(bahamut-action-movement-observer-tests
+    src/action_movement_observer.cpp
+    tests/action_movement_observer_tests.cpp
+)
+target_include_directories(bahamut-action-movement-observer-tests PRIVATE api src)
+target_link_libraries(bahamut-action-movement-observer-tests PRIVATE minhook)
+
+add_executable(bahamut-autologin-tests
+    src/autologin.h
+    src/autologin_machine.cpp
+    src/autologin_machine.h
+    src/login_reader.h
+    tests/autologin_tests.cpp
+)
+target_include_directories(bahamut-autologin-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-policy-tests
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    tests/xhbar_policy_tests.cpp
+)
+target_include_directories(bahamut-xhbar-policy-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-pad-tests
+    src/xhbar_pad.cpp
+    src/xhbar_pad.h
+    src/xhbar_policy.cpp
+    src/xhbar_policy.h
+    tests/xhbar_pad_tests.cpp
+)
+target_include_directories(bahamut-xhbar-pad-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-icon-tests
+    src/xhbar_icon.cpp
+    src/xhbar_icon.h
+    tests/xhbar_icon_tests.cpp
+)
+target_include_directories(bahamut-xhbar-icon-tests PRIVATE src)
+
+add_executable(bahamut-xhbar-slots-tests
+    src/xhbar_slots.cpp
+    src/xhbar_slots.h
+    tests/xhbar_slots_tests.cpp
+)
+target_include_directories(bahamut-xhbar-slots-tests PRIVATE src)
+
 add_executable(bahamut-custom-timer-tests
     $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
     src/custom_timer.h
@@ -378,6 +522,8 @@ target_include_directories(bahamut-enemy-cast-tests PRIVATE
 target_link_libraries(bahamut-enemy-cast-tests PRIVATE minhook)
 
 add_executable(bahamut-addon-host-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    src/action_movement.h
     $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
     $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
     src/actor_name.h
@@ -391,6 +537,16 @@ add_executable(bahamut-addon-host-tests
     $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
     src/packet_capture.h
     src/packet_capture_policy.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    src/gearsets_transaction.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    src/gearsets_runtime.h
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    src/addon_records.h
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    src/equipment_state.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    src/gearsets_debug.h
     src/player_state.h
     src/target_distance.h
     tests/addon_host_tests.cpp
@@ -403,12 +559,201 @@ target_include_directories(bahamut-addon-host-tests PRIVATE
 target_link_libraries(bahamut-addon-host-tests PRIVATE lua51 minhook)
 bahamut_unicode_entry(bahamut-addon-host-tests)
 
-add_executable(bahamut-command-boundary-tests
+add_executable(bahamut-runtime-commands-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    src/action_movement.h
     $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
     $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
     src/actor_name.h
     $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
     src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    src/gearsets_transaction.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    src/gearsets_runtime.h
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    src/addon_records.h
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    src/equipment_state.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    src/gearsets_debug.h
+    src/player_state.h
+    src/runtime_commands.cpp
+    src/runtime_commands.h
+    src/target_distance.h
+    tests/runtime_commands_tests.cpp
+)
+target_include_directories(bahamut-runtime-commands-tests PRIVATE
+    api
+    src
+    vendor/minhook/include
+)
+target_link_libraries(bahamut-runtime-commands-tests PRIVATE lua51 minhook)
+bahamut_unicode_entry(bahamut-runtime-commands-tests)
+
+add_executable(bahamut-action-movement-addon-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    src/action_movement.h
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    tests/action_movement_addon_tests.cpp
+)
+target_include_directories(bahamut-action-movement-addon-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-action-movement-addon-tests PRIVATE lua51 minhook)
+bahamut_unicode_entry(bahamut-action-movement-addon-tests)
+
+add_executable(bahamut-action-movement-lua-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/chat_boundary.cpp
+    src/command_boundary.cpp
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/retail_identity.cpp
+    src/runtime_commands.cpp
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    tests/action_movement_lua_tests.cpp
+)
+target_include_directories(bahamut-action-movement-lua-tests PRIVATE api src vendor/minhook/include)
+target_link_libraries(bahamut-action-movement-lua-tests PRIVATE bcrypt lua51 minhook)
+bahamut_unicode_entry(bahamut-action-movement-lua-tests)
+add_executable(bahamut-equipment-state-tests
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    src/equipment_state.h
+    tests/equipment_memory_fixture.h
+    tests/equipment_state_tests.cpp
+)
+target_include_directories(bahamut-equipment-state-tests PRIVATE src tests)
+
+add_executable(bahamut-gearsets-debug-tests
+    src/equipment_state.cpp
+    src/equipment_state.h
+    src/gearsets_debug.cpp
+    src/gearsets_debug.h
+    src/gearsets_debug_service.cpp
+    src/gearsets_debug_service.h
+    tests/equipment_memory_fixture.h
+    tests/gearsets_debug_tests.cpp
+)
+target_include_directories(bahamut-gearsets-debug-tests PRIVATE api src tests)
+bahamut_unicode_entry(bahamut-gearsets-debug-tests)
+
+add_executable(bahamut-gearsets-native-tests
+    src/equipment_state.cpp
+    src/equipment_state.h
+    src/gearsets_equip_request.cpp
+    src/gearsets_equip_request.h
+    src/gearsets_native_executor.cpp
+    src/gearsets_native_executor.h
+    src/gearsets_native_lookup.cpp
+    src/gearsets_native_lookup.h
+    src/gearsets_runtime.cpp
+    src/gearsets_runtime.h
+    src/gearsets_transaction.cpp
+    src/gearsets_transaction.h
+    tests/equipment_memory_fixture.h
+    tests/gearsets_native_tests.cpp
+)
+target_include_directories(bahamut-gearsets-native-tests PRIVATE src tests)
+
+add_executable(bahamut-gearsets-request-tests
+    src/gearsets_equip_request.cpp
+    src/gearsets_equip_request.h
+    tests/gearsets_equip_request_tests.cpp
+)
+target_include_directories(bahamut-gearsets-request-tests PRIVATE src)
+
+add_executable(bahamut-addon-records-tests
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    src/addon_records.h
+    tests/addon_records_tests.cpp
+)
+target_include_directories(bahamut-addon-records-tests PRIVATE src)
+bahamut_unicode_entry(bahamut-addon-records-tests)
+
+add_executable(bahamut-gearsets-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    src/action_movement.h
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    src/actor_name.h
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-custom-timer-objects>
+    src/custom_timer.h
+    $<TARGET_OBJECTS:bahamut-test-enemy-cast-objects>
+    src/enemy_cast.h
+    $<TARGET_OBJECTS:bahamut-test-player-state-objects>
+    $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
+    src/packet_capture.h
+    src/packet_capture_policy.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    src/gearsets_transaction.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    src/gearsets_runtime.h
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    src/addon_records.h
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    src/equipment_state.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    src/gearsets_debug.h
+    src/gearsets_debug_service.cpp
+    src/gearsets_debug_service.h
+    src/player_state.h
+    src/target_distance.h
+    tests/gearsets_addon_tests.cpp
+    tests/equipment_memory_fixture.h
+    tests/gearsets_transaction_tests.cpp
+)
+target_include_directories(bahamut-gearsets-tests PRIVATE
+    api
+    src
+    vendor/minhook/include
+)
+target_link_libraries(bahamut-gearsets-tests PRIVATE lua51 minhook)
+bahamut_unicode_entry(bahamut-gearsets-tests)
+
+add_executable(bahamut-command-boundary-tests
+    $<TARGET_OBJECTS:bahamut-test-action-movement-objects>
+    src/action_movement.h
+    $<TARGET_OBJECTS:bahamut-test-actor-name-objects>
+    $<TARGET_OBJECTS:bahamut-test-target-distance-objects>
+    src/actor_name.h
+    $<TARGET_OBJECTS:bahamut-test-addon-host-objects>
+    src/addon_host.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-transaction-objects>
+    src/gearsets_transaction.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-runtime-objects>
+    src/gearsets_runtime.h
+    $<TARGET_OBJECTS:bahamut-test-addon-records-objects>
+    src/addon_records.h
     src/chat_boundary.cpp
     src/chat_boundary.h
     src/command_boundary.cpp
@@ -421,6 +766,10 @@ add_executable(bahamut-command-boundary-tests
     $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
     src/packet_capture.h
     src/packet_capture_policy.h
+    $<TARGET_OBJECTS:bahamut-test-equipment-state-objects>
+    src/equipment_state.h
+    $<TARGET_OBJECTS:bahamut-test-gearsets-debug-objects>
+    src/gearsets_debug.h
     src/player_state.h
     src/retail_identity.cpp
     src/retail_identity.h
@@ -580,6 +929,27 @@ add_test(
 )
 add_test(NAME bahamut-monitor-selection COMMAND bahamut-monitor-selection-tests)
 add_test(NAME bahamut-input-policy COMMAND bahamut-input-policy-tests)
+add_test(NAME bahamut-action-movement-admission
+    COMMAND bahamut-action-movement-admission-tests ${CMAKE_CURRENT_BINARY_DIR}/action-movement-admission-fixtures/$<CONFIG>)
+set_tests_properties(bahamut-action-movement-admission PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-action-movement-observer COMMAND bahamut-action-movement-observer-tests)
+set_tests_properties(bahamut-action-movement-observer PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-action-movement COMMAND bahamut-action-movement-tests)
+set_tests_properties(bahamut-action-movement PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-action-movement-addon
+    COMMAND bahamut-action-movement-addon-tests ${CMAKE_CURRENT_BINARY_DIR}/action-movement-addon-fixtures)
+set_tests_properties(bahamut-action-movement-addon PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-action-movement-lua
+    COMMAND bahamut-action-movement-lua-tests
+        ${CMAKE_CURRENT_BINARY_DIR}/action-movement-lua-fixtures
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/nolock/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml)
+set_tests_properties(bahamut-action-movement-lua PROPERTIES TIMEOUT 15)
+add_test(NAME bahamut-autologin COMMAND bahamut-autologin-tests)
+add_test(NAME bahamut-xhbar-policy COMMAND bahamut-xhbar-policy-tests)
+add_test(NAME bahamut-xhbar-pad COMMAND bahamut-xhbar-pad-tests)
+add_test(NAME bahamut-xhbar-icon COMMAND bahamut-xhbar-icon-tests)
+add_test(NAME bahamut-xhbar-slots COMMAND bahamut-xhbar-slots-tests)
 add_test(NAME bahamut-discord-rpc COMMAND bahamut-discord-rpc-tests)
 if(CMAKE_CROSSCOMPILING_EMULATOR)
     # A cold Wine prefix can take minutes to initialize on the first test.
@@ -610,10 +980,34 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/customtimer/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/combatparser/addon.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/../addons/targetlines/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/autologin/addon.toml
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-settings
         ${CMAKE_CURRENT_BINARY_DIR}/addon-host-test-chat-logs
 )
+add_test(NAME bahamut-equipment-state COMMAND bahamut-equipment-state-tests)
+add_test(NAME bahamut-gearsets-debug COMMAND bahamut-gearsets-debug-tests ${CMAKE_CURRENT_BINARY_DIR}/gearsets-debug-test)
+add_test(NAME bahamut-gearsets-native COMMAND bahamut-gearsets-native-tests)
+add_test(NAME bahamut-gearsets-request COMMAND bahamut-gearsets-request-tests)
+add_test(NAME bahamut-addon-records COMMAND bahamut-addon-records-tests ${CMAKE_CURRENT_BINARY_DIR}/addon-records-test)
+add_test(
+    NAME bahamut-gearsets
+    COMMAND bahamut-gearsets-tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/gearsets/gearsets.lua
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gearsets
+        ${CMAKE_CURRENT_BINARY_DIR}/gearsets-test
+)
 add_test(NAME bahamut-command-boundary COMMAND bahamut-command-boundary-tests)
+add_test(
+    NAME bahamut-runtime-commands
+    COMMAND bahamut-runtime-commands-tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/fps/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/../addons/pos/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/command-words/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/load-fault/addon.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/command-table/addon.toml
+        ${CMAKE_CURRENT_BINARY_DIR}/runtime-commands-test-settings
+        ${CMAKE_CURRENT_BINARY_DIR}/runtime-commands-test-chat-logs
+)
 add_test(NAME bahamut-custom-timer COMMAND bahamut-custom-timer-tests)
 add_test(NAME bahamut-enemy-cast COMMAND bahamut-enemy-cast-tests)
 add_test(NAME bahamut-player-state COMMAND bahamut-player-state-tests)

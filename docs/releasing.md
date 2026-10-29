@@ -130,6 +130,18 @@ uses its runtime identity.
    [`manifests/official-overlay-dats.json`](../manifests/official-overlay-dats.json),
    with Contents: Read-only. Published releases require it. To change the
    pinned files, update the commit and file entries in the manifest.
+   The Gear Sets class icons are pinned the same way in
+   [`manifests/gearsets-icons.json`](../manifests/gearsets-icons.json). Both
+   manifests must name the same repository and commit because one checkout
+   serves them. The release jobs fetch the icons through Git LFS and install
+   them under `addons/gearsets/icons/`. Builds without installed icons show
+   text abbreviations instead.
+   To install them for a local Windows package, run
+   `.\scripts\build-windows-package.ps1 -GearsetsIconsSource <directory>`,
+   where the directory holds the pinned `iconNNNNN.png` files, such as
+   `icons-1.23b/0` in an assets checkout with its LFS files fetched. The
+   installer verifies every pinned size and SHA-256, and the installed
+   PNGs are ignored by Git.
 
 `RELEASE_PAT` can bypass required checks to push to `main`. Use a short expiry
 and rotate the token.
@@ -200,7 +212,7 @@ Flatpak build leg.
 
 | Download | Contents and requirements |
 |---|---|
-| Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the official DAT overlay, and update helper. |
+| Windows x86_64 ZIP | Win32 loader, native runtime, Screenshot and DiscordRPC plugins and addons maintained in this repository, the official DAT overlay, the pinned Gear Sets icons, and update helper. |
 | Linux x86_64 tar.gz | One top-level `bahamut-launcher/` folder containing the executable and the Windows payload without the update helper. The Win32 loader, runtime, and plugins use llvm-mingw, with the MinGW-w64 runtime notice added. Also includes `.bahamut-launcher-package`, `install.sh`, `install-dependencies.sh`, a `Makefile`, the desktop entry under `share/applications/`, and hicolor icons under `share/icons/`. Built on `ubuntu-22.04`; requires glibc 2.35 or newer, WebKitGTK 4.1, and GTK 3. First game launch downloads the [Linux Wine engine](configuration.md#linux-wine-engine). |
 | macOS universal ZIP | One `Bahamut Launcher.app` for Apple Silicon and Intel. The launcher is at `Contents/MacOS/bahamut-launcher`. `Contents/Resources` holds the Windows payload without the update helper, plus the MinGW-w64 runtime notice and `icon.icns`. `Info.plist` is at `Contents/Info.plist`. First game launch downloads managed Sikarugir Wine; Apple Silicon requires Rosetta 2 to run it. |
 | Linux Flatpak ZIP | One top-level `bahamut-launcher-flatpak/` folder containing `README.md`, the `.flatpak` bundle, its `.flatpak.sha256` sidecar, and its `.flatpak.identity.json` build identity. The bundle installs app ID `io.github.BahamutXIV.Launcher.Tester` on branch `s0` and needs `org.gnome.Platform//50` from Flathub. See [Flatpak](flatpak.md). |
@@ -304,7 +316,8 @@ provisioning. Private signing material belongs in neither this repository nor
 CI.
 
 The official DAT overlay is part of the signed launcher inventory. Updates
-replace its managed files and preserve custom overlay packages.
+replace its managed files and preserve custom overlay packages. The Gear Sets
+icons, when a release includes them, are managed files of the same inventory.
 
 Launcher updates and signed managed replacement currently cover Windows only.
 Linux package files, whether extracted or installed, and macOS bundle files

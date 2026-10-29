@@ -44,6 +44,7 @@ marker:
     dats.ini                            <- DAT package enablement and priority order
     addons/layout.ini                   <- shared addon overlay positions
     plugins/screenshot/settings.ini     <- Screenshot-owned settings
+    plugins/xhbar/settings.ini          <- XHBar labels and visibility
     news.toml                           <- announcements rendered on the Home screen
     controller.ini                      <- Linux game controller selection setting
 ```
@@ -457,11 +458,15 @@ enabled = true
 
 [plugin.3]
 id = object-distance
-enabled = true
+enabled = false
 
 [plugin.4]
 id = camera-zoom
-enabled = true
+enabled = false
+
+[plugin.5]
+id = xhbar
+enabled = false
 
 [addons]
 
@@ -471,33 +476,41 @@ enabled = true
 
 [addon.2]
 id = combatparser
-enabled = false
+enabled = true
 
 [addon.3]
+id = customtimer
+enabled = false
+
+[addon.4]
 id = distance
 enabled = true
 
-[addon.4]
-id = fps
-enabled = true
-
 [addon.5]
-id = packetlogger
+id = enemycast
 enabled = false
 
 [addon.6]
-id = pos
+id = fps
 enabled = true
 
 [addon.7]
-id = targethp
+id = packetlogger
 enabled = true
 
 [addon.8]
-id = wiki
+id = pos
 enabled = true
 
 [addon.9]
+id = targethp
+enabled = true
+
+[addon.10]
+id = wiki
+enabled = true
+
+[addon.11]
 id = zonename
 enabled = true
 ```
@@ -507,18 +520,24 @@ Each numbered row records an installed or previously installed package.
 load order within each package kind; toggling a package leaves its row in
 place. IDs must be unique lowercase ASCII identifiers within that kind.
 
-The shipped defaults enable every packaged plugin and addon except Custom
-Timer, Enemy Cast, and Targetlines. New addons without a row start disabled.
-Existing selections are preserved, and rows for missing packages are ignored
-at launch.
+The shipped defaults enable Screenshot, DiscordRPC, and every packaged addon
+except Autologin, Custom Timer, Enemy Cast, NoLock, and Targetlines. Extended
+Draw Distance, Extended Camera Zoom, and XHBar start Off. New addons
+without a row start disabled. Existing selections are preserved, and rows for
+missing packages are ignored at launch.
 
 ### Plugins and graphics controls
 
-Supported plugin IDs are `screenshot`, `discord-rpc`, `object-distance`, and
-`camera-zoom`. Other IDs are rejected: this file does not provide a public
-native plugin loader or ABI.
+Supported plugin IDs are `screenshot`, `discord-rpc`, `object-distance`,
+`camera-zoom`, and `xhbar`. Other IDs are rejected: this file does not
+provide a public native plugin loader or ABI.
 
 Screenshot and DiscordRPC appear in Extensions and use packaged DLLs.
+XHBar also appears in Extensions; it is a hook in the
+client runtime, described in the client module's
+[XHBar notes](../client/README.md#xhbar). Its in-game
+`/xhbar` command saves label and visibility choices in
+`config/plugins/xhbar/settings.ini`.
 Extended Draw Distance and Extended Camera Zoom use optional hooks in the
 client runtime and are controlled from Settings > Graphics:
 
@@ -755,8 +774,8 @@ that session and never rewrite persistent configuration.
 Blank lines and lines whose first non-whitespace character is `#` are ignored.
 Supported forms are:
 
-- `/load screenshot`
-- `/unload screenshot`
+- `/load <plugin>` and `/unload <plugin>`, where `<plugin>` is `screenshot`
+  or `discord-rpc`
 - `/bind <key> /screenshot [hide]`
 - The fixed `/bind f11 /fillmode` and `/bind f12 /fps` overrides
 - `/addon load <id>`
@@ -769,11 +788,11 @@ including one not selected for automatic loading. A missing script is treated
 as empty. Unknown packages or malformed commands stop launch before the
 game's primary thread resumes and report the physical line number.
 
-Other plugin command forms are reserved and rejected because there is no
-native plugin package loader. `/screenshot` and `/fillmode` work only as
-startup binding targets, not as retail chat commands. `/fps` uses the same
-addon command from F12 and retail chat. The startup interface is separate from
-addon commands typed in game chat.
+Other plugin names are rejected because there is no native plugin package
+loader. `/screenshot` and `/fillmode` work only as startup binding targets,
+not as retail chat commands. `/fps` uses the same addon command from F12 and
+retail chat. The same `/addon` and `/load` commands also work in game chat;
+see [Loading in game](extensions.md#loading-in-game).
 
 ### Addon discovery and settings
 

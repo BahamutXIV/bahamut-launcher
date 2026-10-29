@@ -21,6 +21,7 @@ pub const SCREENSHOT_PLUGIN_ID: &str = "screenshot";
 pub const DISCORD_RPC_PLUGIN_ID: &str = "discord-rpc";
 pub const OBJECT_DISTANCE_PLUGIN_ID: &str = "object-distance";
 pub const CAMERA_ZOOM_PLUGIN_ID: &str = "camera-zoom";
+pub const XHBAR_PLUGIN_ID: &str = "xhbar";
 pub const OFFICIAL_DAT_OVERLAY_PACKAGE_ID: &str = "bahamut-dats-overlay";
 
 type IniSections = BTreeMap<String, BTreeMap<String, String>>;
@@ -101,11 +102,15 @@ impl Default for ExtensionsConfig {
                 },
                 ExtensionPreference {
                     id: OBJECT_DISTANCE_PLUGIN_ID.into(),
-                    enabled: true,
+                    enabled: false,
                 },
                 ExtensionPreference {
                     id: CAMERA_ZOOM_PLUGIN_ID.into(),
-                    enabled: true,
+                    enabled: false,
+                },
+                ExtensionPreference {
+                    id: XHBAR_PLUGIN_ID.into(),
+                    enabled: false,
                 },
             ],
             addons: [
@@ -115,6 +120,7 @@ impl Default for ExtensionsConfig {
                 ("distance", true),
                 ("enemycast", false),
                 ("fps", true),
+                ("nolock", false),
                 ("packetlogger", true),
                 ("pos", true),
                 ("targethp", true),
@@ -265,6 +271,7 @@ impl ExtensionsConfig {
             && id != DISCORD_RPC_PLUGIN_ID
             && id != OBJECT_DISTANCE_PLUGIN_ID
             && id != CAMERA_ZOOM_PLUGIN_ID
+            && id != XHBAR_PLUGIN_ID
         {
             return Err(ExtensionConfigError::UnsupportedPlugin(id.into()));
         }
@@ -290,6 +297,7 @@ impl ExtensionsConfig {
                 && plugin.id != DISCORD_RPC_PLUGIN_ID
                 && plugin.id != OBJECT_DISTANCE_PLUGIN_ID
                 && plugin.id != CAMERA_ZOOM_PLUGIN_ID
+                && plugin.id != XHBAR_PLUGIN_ID
         }) {
             return Err(ExtensionConfigError::UnsupportedPlugin(plugin.id.clone()));
         }
@@ -865,7 +873,20 @@ mod tests {
     #[test]
     fn extension_defaults_and_order_round_trip() {
         let mut config = ExtensionsConfig::default();
-        assert!(config.plugins.iter().all(|plugin| plugin.enabled));
+        assert_eq!(
+            config
+                .plugins
+                .iter()
+                .map(|plugin| (plugin.id.as_str(), plugin.enabled))
+                .collect::<Vec<_>>(),
+            [
+                ("screenshot", true),
+                ("discord-rpc", true),
+                ("object-distance", false),
+                ("camera-zoom", false),
+                ("xhbar", false),
+            ]
+        );
         assert_eq!(
             config
                 .addons
@@ -879,6 +900,7 @@ mod tests {
                 ("distance", true),
                 ("enemycast", false),
                 ("fps", true),
+                ("nolock", false),
                 ("packetlogger", true),
                 ("pos", true),
                 ("targethp", true),
@@ -896,10 +918,10 @@ mod tests {
             .unwrap();
         let reparsed = ExtensionsConfig::from_ini_str(&config.to_ini_string()).unwrap();
         assert_eq!(reparsed, config);
-        assert_eq!(reparsed.addons[11].id, "zeta");
-        assert!(reparsed.addons[11].enabled);
-        assert_eq!(reparsed.addons[12].id, "alpha");
-        assert!(!reparsed.addons[12].enabled);
+        assert_eq!(reparsed.addons[12].id, "zeta");
+        assert!(reparsed.addons[12].enabled);
+        assert_eq!(reparsed.addons[13].id, "alpha");
+        assert!(!reparsed.addons[13].enabled);
         assert!(!reparsed.plugin_enabled(SCREENSHOT_PLUGIN_ID));
         assert!(reparsed.plugin_enabled(CAMERA_ZOOM_PLUGIN_ID));
     }
@@ -936,8 +958,10 @@ mod tests {
     #[test]
     fn graphics_choice_updates_enablement_and_value_together() {
         let mut config = ExtensionsConfig::default();
-        assert_eq!(config.object_distance_selection(), Some(200));
-        assert_eq!(config.camera_zoom_selection(), Some(15));
+        assert_eq!(config.object_distance_selection(), None);
+        assert_eq!(config.camera_zoom_selection(), None);
+        assert_eq!(config.object_distance_percent, 200);
+        assert_eq!(config.camera_zoom_limit, 15);
         config.set_object_distance_selection(Some(150)).unwrap();
         config.set_camera_zoom_selection(Some(12)).unwrap();
         assert_eq!(config.object_distance_selection(), Some(150));

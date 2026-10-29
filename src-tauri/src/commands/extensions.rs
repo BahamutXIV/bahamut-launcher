@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bahamut_launcher::config::extension_config::{
     DISCORD_RPC_PLUGIN_ID, DatsConfig, ExtensionsConfig, OFFICIAL_DAT_OVERLAY_PACKAGE_ID,
-    SCREENSHOT_PLUGIN_ID,
+    SCREENSHOT_PLUGIN_ID, XHBAR_PLUGIN_ID,
 };
 
 #[cfg(unix)]
@@ -39,6 +39,7 @@ pub(crate) fn extension_inventory_view_with_overlays(
         plugins: vec![
             screenshot_plugin_view(config.plugin_enabled(SCREENSHOT_PLUGIN_ID)),
             discord_rpc_plugin_view(config.plugin_enabled(DISCORD_RPC_PLUGIN_ID)),
+            xhbar_plugin_view(config.plugin_enabled(XHBAR_PLUGIN_ID)),
         ],
         overlays: overlay_views(dat_packages, dat_config),
     }
@@ -158,6 +159,23 @@ fn discord_rpc_plugin_view(enabled: bool) -> ExtensionItemView {
     }
 }
 
+fn xhbar_plugin_view(enabled: bool) -> ExtensionItemView {
+    ExtensionItemView {
+        id: "xhbar".into(),
+        name: "XHBar".into(),
+        author: "Aeshur".into(),
+        version: "1.0".into(),
+        description: "Gamepad cross hotbar that replaces the action bar.".into(),
+        homepage: None,
+        commands: Vec::new(),
+        capabilities: Vec::new(),
+        compatibility: "Supported client build".into(),
+        status: status_label(enabled),
+        trust: "First-party native",
+        enabled,
+    }
+}
+
 fn screenshot_plugin_view(enabled: bool) -> ExtensionItemView {
     ExtensionItemView {
         id: "screenshot".into(),
@@ -212,6 +230,11 @@ pub(crate) fn set_screenshot_enabled(enabled: bool) -> Result<ExtensionInventory
 #[tauri::command]
 pub(crate) fn set_discord_rpc_enabled(enabled: bool) -> Result<ExtensionInventoryView, String> {
     set_plugin_enabled(DISCORD_RPC_PLUGIN_ID, enabled)
+}
+
+#[tauri::command]
+pub(crate) fn set_xhbar_enabled(enabled: bool) -> Result<ExtensionInventoryView, String> {
+    set_plugin_enabled(XHBAR_PLUGIN_ID, enabled)
 }
 
 #[tauri::command]

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -65,6 +66,24 @@ packet_observer::GameMessage MakeTarget(std::uint32_t targetId)
     return message;
 }
 
+// A 0x0137 bundle with only charaWork.property[2], ending in a "/_init" target
+// marker: 0x82 + length when final, 0x60 + length when more bundles follow.
+packet_observer::GameMessage MakeBattleProperty(std::uint32_t actorId, bool enabled, bool more)
+{
+    packet_observer::GameMessage message;
+    message.direction = packet_observer::Direction::Incoming;
+    message.opcode    = 0x0137u;
+    message.sourceId  = actorId;
+    message.payload   = { 0u, 1u, 0x13u, 0x53u, 0x67u, 0x7Bu, static_cast<std::uint8_t>(enabled ? 1u : 0u) };
+    message.payload.push_back(static_cast<std::uint8_t>((more ? 0x60u : 0x82u) + 6u));
+    for (const char character : std::string_view("/_init"))
+    {
+        message.payload.push_back(static_cast<std::uint8_t>(character));
+    }
+    message.payload[0] = static_cast<std::uint8_t>(message.payload.size() - 1u);
+    return message;
+}
+
 bool ExpectDistance(bahamut_client::TargetDistanceService& service,
                     std::uint32_t                          actorId,
                     float                                  expected)
@@ -105,6 +124,8 @@ int main()
 
     targetDistance.Observe(MakeActorPosition(kNpcActorId, 3.0F, 20.0F, 4.0F));
     targetDistance.Observe(MakeActorPosition(kFriendActorId, -5.0F, 20.0F, 12.0F));
+    targetDistance.Observe(MakeBattleProperty(kNpcActorId, true, true));
+    targetDistance.Observe(MakeBattleProperty(kFriendActorId, false, false));
     if (targetDistance.Snapshot())
     {
         std::cerr << "target appeared before player state was available\n";
@@ -127,6 +148,11 @@ int main()
         std::cerr << "pre-snapshot NPC position was not retained\n";
         return 1;
     }
+    if (!targetDistance.Snapshot()->battle)
+    {
+        std::cerr << "pre-snapshot battle property was not retained\n";
+        return 1;
+    }
     if (!ExpectPosition(targetDistance,
                         kLocalActorId,
                         kNpcActorId,
@@ -142,6 +168,19 @@ int main()
     if (!ExpectDistance(targetDistance, kFriendActorId, 13.0F))
     {
         std::cerr << "pre-snapshot friendly actor position was not retained\n";
+        return 1;
+    }
+    if (targetDistance.Snapshot()->battle)
+    {
+        std::cerr << "disabled battle property marked a battle character\n";
+        return 1;
+    }
+    targetDistance.Observe(MakeBattleProperty(kFriendActorId, true, false));
+    const bool friendEnabled = targetDistance.Snapshot()->battle;
+    targetDistance.Observe(MakeBattleProperty(kFriendActorId, false, false));
+    if (!friendEnabled || targetDistance.Snapshot()->battle)
+    {
+        std::cerr << "battle property did not follow a true-to-false update\n";
         return 1;
     }
 
@@ -250,6 +289,20 @@ int main()
         return 1;
     }
 
+    // Zone-in commits its keep list with 0x0007 after the spawn init bundles.
+    targetDistance.Observe(MakeBattleProperty(kNpcActorId, true, false));
+    auto keepListCommit      = packet_observer::GameMessage{};
+    keepListCommit.direction = packet_observer::Direction::Incoming;
+    keepListCommit.opcode    = 0x0007u;
+    keepListCommit.sourceId  = kLocalActorId;
+    targetDistance.Observe(keepListCommit);
+    targetDistance.Observe(MakeTarget(kNpcActorId));
+    if (const auto kept = targetDistance.Snapshot(); !kept || !kept->battle)
+    {
+        std::cerr << "keep-list commit dropped the battle property\n";
+        return 1;
+    }
+
     auto setMap      = packet_observer::GameMessage{};
     setMap.direction = packet_observer::Direction::Incoming;
     setMap.opcode    = 0x0005u;
@@ -282,6 +335,11 @@ int main()
     if (!ExpectDistance(targetDistance, kNpcActorId, 10.0F))
     {
         std::cerr << "repeated SetMap cleared a position from its pending zone\n";
+        return 1;
+    }
+    if (!targetDistance.Snapshot()->battle)
+    {
+        std::cerr << "seamless SetMap dropped the battle property\n";
         return 1;
     }
 
@@ -339,11 +397,48 @@ int main()
         return 1;
     }
 
+    // From empty, the extra actor below is the first insertion over the cap.
+    targetDistance.Clear();
+    for (std::uint32_t filler = 0x40000000u; filler < 0x40000000u + 2047u; ++filler)
+    {
+        targetDistance.Observe(MakeBattleProperty(filler, true, false));
+    }
+    targetDistance.Observe(MakeBattleProperty(kNpcActorId, true, false));
+    targetDistance.Observe(MakeBattleProperty(0x50000000u, true, false));
+    targetDistance.Observe(MakeTarget(kNpcActorId));
+    if (const auto recent = targetDistance.Snapshot(); !recent || !recent->battle)
+    {
+        std::cerr << "battle cache eviction dropped a recent actor\n";
+        return 1;
+    }
+
+    targetDistance.Observe(MakeBattleProperty(kLocalActorId, true, false));
+    auto localSpawn      = packet_observer::GameMessage{};
+    localSpawn.direction = packet_observer::Direction::Incoming;
+    localSpawn.opcode    = 0x00CAu;
+    localSpawn.sourceId  = kLocalActorId;
+    localSpawn.payload.resize(8u);
+    targetDistance.Observe(localSpawn);
+    targetDistance.Observe(MakeTarget(kLocalActorId));
+    if (const auto self = targetDistance.Snapshot(); !self || self->battle)
+    {
+        std::cerr << "local AddActor retained the battle property\n";
+        return 1;
+    }
+
     targetDistance.Observe(MakeTarget(kNpcActorId));
     auto despawn      = packet_observer::GameMessage{};
     despawn.direction = packet_observer::Direction::Incoming;
     despawn.opcode    = 0x00CBu;
     despawn.sourceId  = kNpcActorId;
+    targetDistance.Observe(MakeBattleProperty(kNpcActorId, true, false));
+    targetDistance.Observe(despawn);
+    targetDistance.Observe(MakeTarget(kNpcActorId));
+    if (const auto respawned = targetDistance.Snapshot(); !respawned || respawned->battle)
+    {
+        std::cerr << "despawn retained the battle property\n";
+        return 1;
+    }
     targetDistance.Observe(despawn);
     if (targetDistance.Snapshot())
     {

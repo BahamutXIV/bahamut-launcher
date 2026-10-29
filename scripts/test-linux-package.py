@@ -23,7 +23,7 @@ LINUX = REPO / "packaging" / "linux"
 TOP = "bahamut-launcher"
 LABEL = "bahamut-launcher-test-linux-x86_64"
 PE_NAMES = ["bahamut-loader.exe", "bahamut.dll", "screenshot.dll", "discord-rpc.dll"]
-ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "customtimer", "distance", "enemycast", "targethp", "fps", "pos", "wiki", "targetlines"]
+ADDONS = ["chatlogs", "zonename", "packetlogger", "combatparser", "customtimer", "distance", "enemycast", "targethp", "fps", "pos", "wiki", "targetlines", "nolock", "autologin", "gearsets"]
 LICENSES = [
     "MinHook-LICENSE.txt",
     "Dear-ImGui-LICENSE.txt",
@@ -72,6 +72,8 @@ def expected_manifest():
         files |= {f"addons/{addon}/addon.toml", f"addons/{addon}/{addon}.lua"}
     overlay = REPO / "plugins" / "dats" / "bahamut-dats-overlay"
     files |= {p.relative_to(REPO).as_posix() for p in overlay.rglob("*") if p.is_file()}
+    icons = REPO / "addons" / "gearsets" / "icons"
+    files |= {p.relative_to(REPO).as_posix() for p in icons.rglob("*") if p.is_file()}
     files |= {f"share/icons/hicolor/{size}/apps/bahamut-launcher.png" for size in ICON_SIZES}
     return files
 
@@ -1307,6 +1309,9 @@ for rel in __FIXED__; do
     printf 'synthetic %s' "$rel" > "$destination/$rel"
 done
 cp -R "$repo/plugins/dats/bahamut-dats-overlay" "$destination/plugins/dats/"
+if [ -d "$repo/addons/gearsets/icons" ]; then
+    cp -R "$repo/addons/gearsets/icons" "$destination/addons/gearsets/"
+fi
 """
 
     def setUp(self):
@@ -1367,6 +1372,25 @@ cp -R "$repo/plugins/dats/bahamut-dats-overlay" "$destination/plugins/dats/"
         self.assertNotIn(f"{TOP}/config", {m.name.rstrip("/") for m in members})
         self.assertEqual(packaged, (LINUX / "README.md").read_bytes())
         self.assertNotEqual(packaged, b"synthetic README.md")
+
+    def test_optional_gearsets_icons_are_packaged_when_installed(self):
+        icons = self.repo / "addons" / "gearsets" / "icons"
+        icons.mkdir(parents=True)
+        (icons / "pld.png").write_bytes(b"synthetic icon")
+        result = self.package()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with tarfile.open(self.output / f"{LABEL}.tar.gz") as archive:
+            names = {m.name for m in archive.getmembers() if m.isfile()}
+        self.assertIn(f"{TOP}/addons/gearsets/icons/pld.png", names)
+
+    def test_gearsets_icons_missing_from_the_stage_are_rejected(self):
+        icons = self.repo / "addons" / "gearsets" / "icons"
+        icons.mkdir(parents=True)
+        (icons / "pld.png").write_bytes(b"synthetic icon")
+        self.write_stage_stub('rm -r "$destination/addons/gearsets/icons"')
+        result = self.package()
+        self.assert_refused(result, "missing:")
+        self.assertIn("addons/gearsets/icons/pld.png", result.stderr)
 
     def test_extra_staged_file_is_rejected(self):
         self.write_stage_stub('printf x > "$destination/unexpected-extra.bin"')

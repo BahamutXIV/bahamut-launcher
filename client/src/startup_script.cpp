@@ -46,6 +46,11 @@ unsigned int ScreenshotKey(std::string_view token)
     return 0;
 }
 
+bool IsPluginName(std::string_view name)
+{
+    return std::find(kRuntimePluginNames.begin(), kRuntimePluginNames.end(), name) != kRuntimePluginNames.end();
+}
+
 bool IsInstalled(std::string_view                id,
                  const std::vector<std::string>& installedAddonIds)
 {
@@ -95,17 +100,15 @@ bool ParseStartupScript(const std::filesystem::path&    path,
             parts.push_back(std::move(part));
         }
 
-        if (parts.size() == 2 && parts[0] == "/load" && parts[1] == "screenshot")
+        if (parts.size() == 2 && (parts[0] == "/load" || parts[0] == "/unload"))
         {
-            StartupAction action{ StartupActionKind::ScreenshotLoad };
-            action.line = lineNumber;
-            plan.actions.push_back(std::move(action));
-            continue;
-        }
-        if (parts.size() == 2 && parts[0] == "/unload" && parts[1] == "screenshot")
-        {
-            StartupAction action{ StartupActionKind::ScreenshotUnload };
-            action.line = lineNumber;
+            if (!IsPluginName(parts[1]))
+            {
+                return Fail(error, lineNumber, "plugin is not available: " + parts[1]);
+            }
+            StartupAction action{ parts[0] == "/load" ? StartupActionKind::PluginLoad : StartupActionKind::PluginUnload };
+            action.addonId = parts[1];
+            action.line    = lineNumber;
             plan.actions.push_back(std::move(action));
             continue;
         }
@@ -166,7 +169,7 @@ bool ParseStartupScript(const std::filesystem::path&    path,
             plan.actions.push_back(std::move(action));
             continue;
         }
-        return Fail(error, lineNumber, "expected /load screenshot, /unload screenshot, /bind, or /addon");
+        return Fail(error, lineNumber, "expected /load <plugin>, /unload <plugin>, /bind, or /addon");
     }
     if (!file.good() && !file.eof())
     {

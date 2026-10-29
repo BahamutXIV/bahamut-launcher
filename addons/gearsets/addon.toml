@@ -1,0 +1,16 @@
+manifest_schema_version = 1
+id = "gearsets"
+kind = "addon"
+name = "gearsets"
+author = "Aeshur"
+version = "1.0.0"
+description = "Saves your equipped gear as sets you can switch between."
+entry = "gearsets.lua"
+api_version = "0.1"
+minimum_runtime_version = "0.1.0"
+supported_client_builds = ["2012.09.19.0001"]
+capabilities = ["equipment.read", "records.write", "ui.draw", "chat.print"]
+commands = [
+    { name = "/gearsets", usage = "/gearsets [command]", description = "Open or close Gear Sets, or run a command. /gearsets help lists them." },
+    { name = "/gs", usage = "/gs [command]", description = "Short form of /gearsets." },
+]

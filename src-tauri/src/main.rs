@@ -38,7 +38,7 @@ use commands::{
     set_borderless_monitor, set_camera_zoom_selection, set_close_on_game_start,
     set_dat_package_enabled, set_discord_rpc_enabled, set_game_settings,
     set_native_resolution_override, set_object_distance_selection, set_screenshot_enabled,
-    set_selected_server, start_game_repair, validate_session,
+    set_selected_server, set_xhbar_enabled, start_game_repair, validate_session,
 };
 use shell_config::{load_dats_config, load_extensions_config, load_screenshot_config};
 use state::{BackupIpcState, ContentIpcState, GameIpcState};
@@ -311,6 +311,7 @@ fn main() {
             reorder_dat_package,
             set_screenshot_enabled,
             set_discord_rpc_enabled,
+            set_xhbar_enabled,
             set_object_distance_selection,
             set_camera_zoom_selection,
             get_game_settings,

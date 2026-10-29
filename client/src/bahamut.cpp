@@ -1,10 +1,17 @@
+#include "action_movement_runtime.h"
 #include "actor_name.h"
 #include "addon_host.h"
+#include "addon_records.h"
+#include "autologin.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
 #include "custom_timer.h"
 #include "dat_overlay.h"
 #include "enemy_cast.h"
+#include "equipment_state.h"
+#include "gearsets_debug_service.h"
+#include "gearsets_native_executor.h"
+#include "gearsets_runtime.h"
 #include "input.h"
 #include "native_plugin_host.h"
 #include "object_distance.h"
@@ -14,15 +21,19 @@
 #include "render_boundary.h"
 #include "retail_identity.h"
 #include "runtime_api.h"
+#include "runtime_commands.h"
 #include "startup_script.h"
 #include "target_distance.h"
 #include "targetlines.h"
 #include "targetlines_probe.h"
+#include "xhbar_runtime.h"
 
 #include <algorithm>
 #include <cstring>
 #include <cwchar>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <shellapi.h>
 #include <string>
 #include <unordered_map>
@@ -57,6 +68,7 @@ constexpr wchar_t kObjectDistanceEnabledEnvironment[] = L"BAHAMUT_RUNTIME_OBJECT
 constexpr wchar_t kCameraZoomEnabledEnvironment[]     = L"BAHAMUT_RUNTIME_CAMERA_ZOOM_ENABLED";
 constexpr wchar_t kStartupScriptEnvironment[]         = L"BAHAMUT_RUNTIME_STARTUP_SCRIPT";
 constexpr wchar_t kLauncherVersionEnvironment[]       = L"BAHAMUT_RUNTIME_LAUNCHER_VERSION";
+constexpr wchar_t kServerIdEnvironment[]              = L"BAHAMUT_RUNTIME_SERVER_ID";
 constexpr wchar_t kDatPackageRootsEnvironment[] =
     L"BAHAMUT_RUNTIME_DAT_PACKAGE_ROOTS";
 constexpr wchar_t     kBorderlessEnvironment[]    = L"BAHAMUT_RUNTIME_BORDERLESS";
@@ -287,11 +299,48 @@ public:
         addonHost_.SetTargetDistanceService(&targetDistance_);
         addonHost_.SetCustomTimerService(&customTimer_);
         addonHost_.SetEnemyCastService(&enemyCast_);
+        addonHost_.SetAutologinService(&bahamut_client::ProductionAutologinService());
         addonHost_.SetActorNameService(&actorNames_);
         addonHost_.SetClipboardSink({ nullptr, &SetAddonClipboardText });
         addonHost_.SetChatSink({ nullptr, &PrintAddonChatText });
         addonHost_.SetUrlSink({ nullptr, &OpenAddonUrl });
         addonHost_.SetRuntimeIdentity(NarrowUtf8(EnvironmentValue(kLauncherVersionEnvironment)), kBahamutRuntimeApiVersion);
+        const auto gearsetsMetadata = [this](bahamut_client::EquipmentSnapshot& snapshot)
+        {
+            if (const auto player = playerState_.Snapshot())
+            {
+                if (player->baseClassId != 0)
+                    snapshot.classId = player->baseClassId;
+                snapshot.jobId = player->jobId;
+                if (player->actorId != 0 && playerState_.CapturedThisFrame())
+                    snapshot.characterId = player->actorId;
+            }
+        };
+        gearsetsRuntime_.SetMetadataProvider(gearsetsMetadata);
+        addonHost_.SetEquipmentStateService(&equipment_);
+        addonHost_.SetGearsetsRuntime(&gearsetsRuntime_);
+        playerState_.SetGameFrameObserver(&bahamut_client::GearsetsRuntime::ObserveGameFrame, &gearsetsRuntime_);
+        const auto gearsetsDebugSwitches = bahamut_client::ReadGearsetsDebugSwitchesFromEnvironment();
+        if (gearsetsDebugSwitches.Any())
+        {
+            gearsetsDebug_ = std::make_unique<bahamut_client::GearsetsDebugService>(&equipment_);
+            gearsetsDebug_->SetMetadataProvider(gearsetsMetadata);
+            static_cast<void>(bahamut_client::InstallGearsetsDebug(gearsetsDebugSwitches, *gearsetsDebug_, equipment_, addonHost_, gearsetsRuntime_));
+        }
+        // The key follows the character copied into the equipment snapshot, so
+        // records and equipment always come from one session.
+        if (const std::string serverId = NarrowUtf8(EnvironmentValue(kServerIdEnvironment)); bahamut_client::IsServerId(serverId))
+        {
+            addonHost_.SetProfileKeyProvider([this, serverId]() -> std::optional<std::string>
+                                             {
+                                                 const auto snapshot = equipment_.Snapshot();
+                                                 if (!snapshot || !snapshot->characterId)
+                                                 {
+                                                     return std::nullopt;
+                                                 }
+                                                 return bahamut_client::ComposeProfileKey(serverId, *snapshot->characterId);
+                                             });
+        }
         if (!settings.empty() && !chatLogs.empty())
         {
             ConfigureOverlayLayout(
@@ -305,6 +354,21 @@ public:
             return nativePluginFailed_ ? 15 : 13;
         }
         ConfigureBuiltInHotkeys(fillModeHotkeyEnabled_, fpsHotkeyEnabled_);
+        if (!settings.empty())
+        {
+            std::filesystem::path addonSettings = std::filesystem::path(settings).lexically_normal();
+            if (addonSettings.filename().empty())
+                addonSettings = addonSettings.parent_path();
+            bahamut_client::xhbar::ConfigureSettings(addonSettings.parent_path() / L"plugins" / L"xhbar" / L"settings.ini");
+        }
+        runtimeCommands_.Configure(&addonHost_,
+                                   manifestsById,
+                                   {
+                                       { "screenshot", this, &LoadScreenshotCommand, &UnloadScreenshotCommand, &ScreenshotLoaded },
+                                       { "discord-rpc", this, &LoadDiscordCommand, &UnloadDiscordCommand, &DiscordLoaded },
+                                   },
+                                   { nullptr, &PrintAddonChatText },
+                                   { nullptr, &SetXHBarLabels, &ToggleXHBar });
         packetObserver_.SetSink([this](const packet_observer::GameMessage& message)
                                 {
                                     playerState_.Observe(message);
@@ -320,12 +384,13 @@ public:
                                      {
                                          addonHost_.QueuePacketFrame(frame);
                                      });
-        if (!InstallRenderBoundary(telemetry_, &sharedState_->bootstrap, frameEvent_, &addonHost_, &nativePluginHost_, &discordPluginHost_, &playerState_, &packetObserver_, &objectDistance_, EnvironmentValue(kObjectDistanceEnabledEnvironment) == L"true", &cameraZoom_, EnvironmentValue(kCameraZoomEnabledEnvironment) == L"true", EnvironmentValue(kBorderlessEnvironment) == L"true"))
+        if (!InstallRenderBoundary(telemetry_, &sharedState_->bootstrap, frameEvent_, &addonHost_, &runtimeCommands_, &nativePluginHost_, &discordPluginHost_, &playerState_, &packetObserver_, &objectDistance_, EnvironmentValue(kObjectDistanceEnabledEnvironment) == L"true", &cameraZoom_, EnvironmentValue(kCameraZoomEnabledEnvironment) == L"true", EnvironmentValue(kBorderlessEnvironment) == L"true"))
         {
             ReleaseHandles();
             return 12;
         }
-        bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled());
+        InstallActionMovement(manifests, manifestsById);
+        bahamut_client::StartTargetlinesRenderer(&targetDistance_, &targetlines_, addonHost_.TargetlinesEnabled() || runtimeCommands_.IsInstalled("targetlines"));
         if (!datOverlay_.Install(PathList(kDatPackageRootsEnvironment),
                                  !HasValue(kTestStubEnvironment)))
         {
@@ -340,6 +405,40 @@ public:
     }
 
 private:
+    // An unverified target leaves movement unchanged; hook failure does not abort startup.
+    // Register the enabled nolock manifest, else the catalog entry that /addon load resolves.
+    void InstallActionMovement(const std::vector<std::filesystem::path>&                     manifests,
+                               const std::unordered_map<std::string, std::filesystem::path>& manifestsById)
+    {
+        if (!actionMovement_.Install(playerState_))
+        {
+            return;
+        }
+        std::filesystem::path nolock;
+        for (const auto& manifest : manifests)
+        {
+            const auto id = ReadAddonManifestId(manifest);
+            if (id && *id == "nolock")
+            {
+                nolock = manifest;
+                break;
+            }
+        }
+        if (nolock.empty())
+        {
+            const auto found = manifestsById.find("nolock");
+            if (found != manifestsById.end())
+            {
+                nolock = found->second;
+            }
+        }
+        if (!nolock.empty())
+        {
+            static_cast<void>(addonHost_.RegisterActionMovementConsumer(
+                actionMovement_.Service(), nolock, actionMovement_.Session()));
+        }
+    }
+
     bool PrepareStartupScript(const std::vector<std::filesystem::path>&               catalog,
                               StartupScriptPlan&                                      plan,
                               std::unordered_map<std::string, std::filesystem::path>& manifestsById)
@@ -386,22 +485,19 @@ private:
     {
         switch (action.kind)
         {
-            case StartupActionKind::ScreenshotLoad:
-                screenshotConfiguration_.enabled = true;
-                if (!LoadScreenshotPlugin())
+            case StartupActionKind::PluginLoad:
+            case StartupActionKind::PluginUnload:
+            {
+                const bool screenshot = action.addonId == "screenshot";
+                const bool applied    = action.kind == StartupActionKind::PluginLoad
+                                            ? LoadPlugin(screenshot)
+                                            : UnloadPlugin(screenshot);
+                if (!applied)
                 {
-                    RecordPluginError("screenshot", nativePluginHost_.LastError());
-                    return false;
+                    RecordPluginError(action.addonId.c_str(), PluginHost(screenshot).LastError());
                 }
-                return true;
-            case StartupActionKind::ScreenshotUnload:
-                screenshotConfiguration_.enabled = false;
-                if (!nativePluginHost_.SetEnabled(false))
-                {
-                    RecordPluginError("screenshot", nativePluginHost_.LastError());
-                    return false;
-                }
-                return true;
+                return applied;
+            }
             case StartupActionKind::ScreenshotBind:
                 screenshotConfiguration_.hotkey       = action.virtualKey;
                 screenshotConfiguration_.hideOverlays = action.hideOverlays;
@@ -476,6 +572,94 @@ private:
              message.size());
     }
 
+    NativePluginHost& PluginHost(bool screenshot)
+    {
+        return screenshot ? nativePluginHost_ : discordPluginHost_;
+    }
+
+    bool LoadPlugin(bool screenshot)
+    {
+        if (screenshot)
+        {
+            screenshotConfiguration_.enabled = true;
+            return LoadScreenshotPlugin();
+        }
+        discordConfiguration_.enabled = true;
+        return discordPluginHost_.Load(discordPluginPath_, "discord-rpc", discordConfiguration_);
+    }
+
+    // Unload disables the plugin and keeps its DLL mapped, so no plugin code
+    // is released while a worker or callback could still reference it.
+    bool UnloadPlugin(bool screenshot)
+    {
+        (screenshot ? screenshotConfiguration_ : discordConfiguration_).enabled = false;
+        return PluginHost(screenshot).SetEnabled(false);
+    }
+
+    bool PluginLoaded(bool screenshot)
+    {
+        return PluginHost(screenshot).IsLoaded() &&
+               (screenshot ? screenshotConfiguration_ : discordConfiguration_).enabled;
+    }
+
+    static bool ReportPluginResult(bool applied, const NativePluginHost& plugin, std::string& error)
+    {
+        if (!applied)
+        {
+            error = plugin.LastError();
+        }
+        return applied;
+    }
+
+    static bool SetXHBarLabels(void*, std::string_view name)
+    {
+        const auto style = bahamut_client::xhbar::ParseLabelStyle(name);
+        return style && bahamut_client::xhbar::SaveLabels(*style);
+    }
+
+    static bool ToggleXHBar(void*, bool& visible)
+    {
+        return bahamut_client::xhbar::ToggleVisible(visible);
+    }
+
+    static bool LoadScreenshotCommand(void* context, std::string& error)
+    {
+        auto&      host    = *static_cast<RuntimeHost*>(context);
+        const bool applied = host.LoadPlugin(true);
+        RefreshNativePluginActivation();
+        return ReportPluginResult(applied, host.nativePluginHost_, error);
+    }
+
+    static bool UnloadScreenshotCommand(void* context, std::string& error)
+    {
+        auto&      host    = *static_cast<RuntimeHost*>(context);
+        const bool applied = host.UnloadPlugin(true);
+        RefreshNativePluginActivation();
+        return ReportPluginResult(applied, host.nativePluginHost_, error);
+    }
+
+    static bool ScreenshotLoaded(void* context)
+    {
+        return static_cast<RuntimeHost*>(context)->PluginLoaded(true);
+    }
+
+    static bool LoadDiscordCommand(void* context, std::string& error)
+    {
+        auto& host = *static_cast<RuntimeHost*>(context);
+        return ReportPluginResult(host.LoadPlugin(false), host.discordPluginHost_, error);
+    }
+
+    static bool UnloadDiscordCommand(void* context, std::string& error)
+    {
+        auto& host = *static_cast<RuntimeHost*>(context);
+        return ReportPluginResult(host.UnloadPlugin(false), host.discordPluginHost_, error);
+    }
+
+    static bool DiscordLoaded(void* context)
+    {
+        return static_cast<RuntimeHost*>(context)->PluginLoaded(false);
+    }
+
     bool LoadScreenshotPlugin()
     {
         if (nativePluginHost_.IsLoaded())
@@ -513,6 +697,8 @@ private:
 
     void ReleaseHandles()
     {
+        addonHost_.ShutdownActionMovement();
+        static_cast<void>(actionMovement_.Shutdown());
         nativePluginHost_.Shutdown();
         discordPluginHost_.Shutdown();
         datOverlay_.Shutdown();
@@ -534,30 +720,36 @@ private:
         }
     }
 
-    HANDLE                                telemetryMapping_ = nullptr;
-    BahamutRuntimeSharedState*            sharedState_      = nullptr;
-    BahamutRuntimeTelemetry*              telemetry_        = nullptr;
-    HANDLE                                frameEvent_       = nullptr;
-    bahamut_client::PlayerStateService    playerState_;
-    bahamut_client::ActorNameService      actorNames_{ &playerState_ };
-    bahamut_client::TargetDistanceService targetDistance_{ &playerState_, &actorNames_ };
-    bahamut_client::TargetlinesService    targetlines_{ &playerState_, &targetDistance_ };
-    bahamut_client::CustomTimerService    customTimer_;
-    bahamut_client::EnemyCastService      enemyCast_{ &playerState_, &actorNames_ };
-    packet_observer::PacketObserver       packetObserver_;
-    bahamut_client::ObjectDistanceService objectDistance_;
-    bahamut_client::CameraZoomService     cameraZoom_;
-    AddonHost                             addonHost_;
-    std::filesystem::path                 screenshotPluginPath_;
-    NativePluginConfiguration             screenshotConfiguration_;
-    NativePluginHost                      nativePluginHost_;
-    std::filesystem::path                 discordPluginPath_;
-    NativePluginConfiguration             discordConfiguration_;
-    NativePluginHost                      discordPluginHost_;
-    bool                                  fillModeHotkeyEnabled_ = false;
-    bool                                  fpsHotkeyEnabled_      = false;
-    bool                                  nativePluginFailed_    = false;
-    bahamut_dat_overlay::DatOverlay       datOverlay_;
+    HANDLE                                                telemetryMapping_ = nullptr;
+    BahamutRuntimeSharedState*                            sharedState_      = nullptr;
+    BahamutRuntimeTelemetry*                              telemetry_        = nullptr;
+    HANDLE                                                frameEvent_       = nullptr;
+    bahamut_client::PlayerStateService                    playerState_;
+    bahamut_client::ActorNameService                      actorNames_{ &playerState_ };
+    bahamut_client::TargetDistanceService                 targetDistance_{ &playerState_, &actorNames_ };
+    bahamut_client::TargetlinesService                    targetlines_{ &playerState_, &targetDistance_ };
+    bahamut_client::CustomTimerService                    customTimer_;
+    bahamut_client::EnemyCastService                      enemyCast_{ &playerState_, &actorNames_ };
+    packet_observer::PacketObserver                       packetObserver_;
+    bahamut_client::ObjectDistanceService                 objectDistance_;
+    bahamut_client::CameraZoomService                     cameraZoom_;
+    bahamut_client::ActionMovementRuntime                 actionMovement_;
+    bahamut_client::EquipmentStateService                 equipment_;
+    bahamut_client::GearsetsNativeExecutor                gearsetsExecutor_;
+    bahamut_client::GearsetsRuntime                       gearsetsRuntime_{ &equipment_, gearsetsExecutor_ };
+    std::unique_ptr<bahamut_client::GearsetsDebugService> gearsetsDebug_;
+    AddonHost                                             addonHost_;
+    RuntimeCommands                                       runtimeCommands_;
+    std::filesystem::path                                 screenshotPluginPath_;
+    NativePluginConfiguration                             screenshotConfiguration_;
+    NativePluginHost                                      nativePluginHost_;
+    std::filesystem::path                                 discordPluginPath_;
+    NativePluginConfiguration                             discordConfiguration_;
+    NativePluginHost                                      discordPluginHost_;
+    bool                                                  fillModeHotkeyEnabled_ = false;
+    bool                                                  fpsHotkeyEnabled_      = false;
+    bool                                                  nativePluginFailed_    = false;
+    bahamut_dat_overlay::DatOverlay                       datOverlay_;
 };
 
 RuntimeHost gRuntimeHost;

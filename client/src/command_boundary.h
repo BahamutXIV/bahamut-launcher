@@ -3,9 +3,9 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
-
-class AddonHost;
+#include <vector>
 
 inline constexpr std::uintptr_t kTextCommandLookupRva               = 0x0016D3C0u;
 inline constexpr std::uintptr_t kTopLevelTextCommandLookupReturnRva = 0x0016E6A4u;
@@ -43,13 +43,13 @@ struct CommandBoundarySnapshot
 class CommandBoundary
 {
 public:
-    explicit CommandBoundary(AddonHost* addonHost);
-    CommandBoundary(void* context, CommandDispatchFunction dispatch);
+    // Claims top-level commands whose first token is one of `words`.
+    CommandBoundary(void* context, CommandDispatchFunction dispatch, std::vector<std::string> words);
 
     CommandBoundary(const CommandBoundary&)            = delete;
     CommandBoundary& operator=(const CommandBoundary&) = delete;
 
-    static bool RecognizesAddonCommand(const void* token);
+    bool RecognizesCommand(const void* token) const;
 
     int HandleLookup(CommandLookupFunction original, void* parser, const void* token, void* auxiliaryOutput, bool topLevelCall = true, const void* tokenRangeBegin = nullptr, const void* tokenRangeEnd = nullptr);
     int HandleLookupForTest(CommandLookupProbeFunction original, void* parser, const void* token, void* auxiliaryOutput, bool topLevelCall = true, const void* tokenRangeBegin = nullptr, const void* tokenRangeEnd = nullptr);
@@ -65,12 +65,12 @@ private:
     void RecordDiagnosticSnapshot() const;
     int  HandleLookupCore(int (*forward)(void* context, void* parser, const void* token, void* auxiliaryOutput), void* forwardContext, void* parser, const void* token, void* auxiliaryOutput, bool topLevelCall, const void* tokenRangeBegin, const void* tokenRangeEnd);
 
-    void*                   context_        = nullptr;
-    AddonHost*              addonHost_      = nullptr;
-    CommandDispatchFunction dispatch_       = nullptr;
-    void*                   lookupTarget_   = nullptr;
-    CommandLookupFunction   originalLookup_ = nullptr;
-    bool                    installed_      = false;
+    void*                    context_  = nullptr;
+    CommandDispatchFunction  dispatch_ = nullptr;
+    std::vector<std::string> words_;
+    void*                    lookupTarget_   = nullptr;
+    CommandLookupFunction    originalLookup_ = nullptr;
+    bool                     installed_      = false;
 
     volatile LONG lookupEntries_         = 0;
     volatile LONG lookupRecognized_      = 0;
@@ -85,5 +85,5 @@ private:
 };
 
 bool                         CommandBoundaryLookupSignatureMatches(const void* address);
-CommandBoundaryInstallResult InstallCommandBoundary(AddonHost* addonHost);
+CommandBoundaryInstallResult InstallCommandBoundary(void* context, CommandDispatchFunction dispatch, std::vector<std::string> words);
 bool                         ShutdownCommandBoundary();

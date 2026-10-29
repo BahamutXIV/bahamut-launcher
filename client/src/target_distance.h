@@ -38,6 +38,7 @@ struct TargetDistanceSnapshot
     std::string                  name;
     std::optional<std::uint16_t> currentHp;
     std::optional<std::uint16_t> maxHp;
+    bool                         battle = false;
 };
 
 class TargetDistanceService
@@ -60,8 +61,15 @@ private:
         std::uint16_t maximum = 0;
     };
 
+    struct Battle
+    {
+        bool          enabled  = false;
+        std::uint64_t sequence = 0;
+    };
+
     void SyncPlayer(const PlayerStateSnapshot& player);
     void ClearActive();
+    void StoreBattle(std::uint32_t actorId, bool enabled);
     void StorePosition(std::unordered_map<std::uint32_t, Position>& positions,
                        std::uint32_t                                actorId,
                        const Position&                              position);
@@ -72,12 +80,17 @@ private:
     std::unordered_map<std::uint32_t, Position> positions_;
     std::unordered_map<std::uint32_t, Position> pendingPositions_;
     std::unordered_map<std::uint32_t, Health>   health_;
-    std::uint32_t                               localActorId_            = 0;
-    std::uint32_t                               zoneId_                  = 0;
-    std::uint32_t                               targetActorId_           = 0;
-    std::uint32_t                               pendingZoneId_           = 0;
-    bool                                        hasSynchronizedPlayer_   = false;
-    bool                                        pendingPositionsAllowed_ = true;
+    // Spawn init sends the battle property once, before the zone-in keep-list
+    // 0x0007, and seamless SetMap crossings keep nearby actors, so only that
+    // actor's AddActor or RemoveActor and Clear reset it.
+    std::unordered_map<std::uint32_t, Battle> battle_;
+    std::uint64_t                             battleSequence_          = 0;
+    std::uint32_t                             localActorId_            = 0;
+    std::uint32_t                             zoneId_                  = 0;
+    std::uint32_t                             targetActorId_           = 0;
+    std::uint32_t                             pendingZoneId_           = 0;
+    bool                                      hasSynchronizedPlayer_   = false;
+    bool                                      pendingPositionsAllowed_ = true;
 };
 
 } // namespace bahamut_client

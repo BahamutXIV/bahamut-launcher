@@ -514,6 +514,7 @@ mod tests {
             object_distance_percent: 200,
             camera_zoom_enabled: false,
             camera_zoom_limit: 15,
+            xhbar_enabled: false,
         };
         (temp, prefix, game_dir, artifacts)
     }

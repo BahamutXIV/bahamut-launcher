@@ -204,6 +204,26 @@ pub(super) fn valid_package_id(id: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn nolock_manifest_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("addons/nolock/addon.toml");
+        let manifest: AddonManifest =
+            toml::from_str(include_str!("../../addons/nolock/addon.toml")).unwrap();
+        assert!(validate_manifest(&path, &manifest));
+        assert_eq!(manifest.id, "nolock");
+        assert!(manifest.commands.is_empty());
+        let packages = discover_addons(&root.join("addons")).unwrap();
+        assert!(packages.iter().any(|package| package.id == "nolock"));
+        let config = crate::config::extension_config::ExtensionsConfig::default();
+        let selected = select_addon_manifests(&packages, &config.addons);
+        assert!(
+            !selected
+                .iter()
+                .any(|path| path.ends_with("nolock/addon.toml"))
+        );
+    }
+
     fn write_addon(root: &Path, id: &str, builds: &[&str]) -> PathBuf {
         write_addon_at(root, id, id, builds)
     }
@@ -326,6 +346,46 @@ mod tests {
         assert_eq!(targetlines.capabilities, ["ui.draw"]);
         assert!(targetlines.commands.is_empty());
         assert!(select_addon_manifests(std::slice::from_ref(targetlines), &[]).is_empty());
+    }
+
+    #[test]
+    fn autologin_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("addons");
+        let packages = discover_addons(&root).unwrap();
+        let autologin = packages
+            .iter()
+            .find(|package| package.id == "autologin")
+            .expect("autologin package should be shipped");
+
+        assert_eq!(autologin.name, "autologin");
+        assert_eq!(autologin.author, "Aeshur");
+        assert_eq!(autologin.version, "1.0");
+        assert!(autologin.capabilities.is_empty());
+        assert!(autologin.commands.is_empty());
+        assert!(select_addon_manifests(std::slice::from_ref(autologin), &[]).is_empty());
+    }
+
+    #[test]
+    fn gearsets_is_discoverable_but_default_off() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("addons");
+        let packages = discover_addons(&root).unwrap();
+        let gearsets = packages
+            .iter()
+            .find(|package| package.id == "gearsets")
+            .expect("gearsets package should be shipped");
+
+        assert_eq!(gearsets.name, "gearsets");
+        assert_eq!(gearsets.author, "Aeshur");
+        assert_eq!(gearsets.version, "1.0.0");
+        assert_eq!(
+            gearsets
+                .commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>(),
+            ["/gearsets", "/gs"]
+        );
+        assert!(select_addon_manifests(std::slice::from_ref(gearsets), &[]).is_empty());
     }
 
     #[test]
