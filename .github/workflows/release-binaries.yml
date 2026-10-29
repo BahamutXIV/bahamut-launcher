@@ -1,9 +1,9 @@
 name: Release Binaries
 
 # Builds the launcher archive for each platform and the Linux Flatpak bundle
-# at a vX.Y.Z tag (normally the tag release.yml pushes), verifies every archive
-# against its SHA-256 sidecar, and attaches the eight files to that tag's
-# GitHub Release. A manual run either
+# at a pushed vX.Y.Z tag, verifies every archive against its SHA-256 sidecar,
+# and attaches the eight files to that tag's GitHub Release, creating it with
+# generated notes. A manual run either
 # rebuilds and re-attaches an existing tag or builds the selected branch
 # without publishing. macOS ships a zipped universal app bundle: Developer ID
 # signed, notarized and stapled when the signing secrets are set, ad hoc signed
@@ -235,6 +235,43 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}-${{ matrix.os }}
+
+      # Package versions feed Windows file properties and the macOS Info.plist.
+      # The tag sets them for this build only; nothing is committed. Bundle
+      # versions must be numeric, so a prerelease suffix is dropped here; the
+      # runtime identity still reports the full tag.
+      - name: Stamp the package versions from the tag
+        if: needs.resolve.outputs.tag != ''
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          version="${version%%-*}"
+          # Only the version key inside [workspace.package] changes.
+          awk -v V="$version" '
+            /^\[/ { in_wp = ($0 == "[workspace.package]") }
+            in_wp && /^[[:space:]]*version[[:space:]]*=/ { print "version = \"" V "\""; next }
+            { print }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+          got="$(awk '/^\[/{w=($0=="[workspace.package]")} w&&/^[[:space:]]*version[[:space:]]*=/{split($0,a,"\"");print a[2];exit}' Cargo.toml)"
+          if [[ "$got" != "$version" ]]; then
+            echo "::error::Cargo.toml [workspace.package].version is '$got', expected '$version'"
+            exit 1
+          fi
+          conf=src-tauri/tauri.conf.json
+          # No sed -i: BSD sed on macOS reads its next argument as a backup suffix.
+          sed -E "s|^(  \"version\": \")[^\"]*(\",)$|\\1${version}\\2|" "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
+          if ! jq -e --arg v "$version" '.version == $v' "$conf" >/dev/null; then
+            echo "::error::$conf .version was not rewritten to '$version'"
+            exit 1
+          fi
+          # Members inherit the workspace version; refresh their lock entries
+          # so the --locked builds below accept the stamped manifest.
+          cargo update --workspace
+          cargo metadata --format-version 1 --locked >/dev/null
+          echo "Package versions stamped as $version"
 
       - name: Configure x86 client module
         if: runner.os == 'Windows'
@@ -858,8 +895,7 @@ jobs:
           if [[ "$TAG" == *-* ]]; then
             release_args+=(--prerelease)
           fi
-          # release.yml normally created the notes-only release already. A
-          # manually pushed tag creates it here; --verify-tag refuses to
+          # A rerun finds the release already created. --verify-tag refuses to
           # fabricate a tag, and the trailing view tolerates a lost race.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --generate-notes --title "Bahamut Launcher $TAG" "${release_args[@]}" \
