@@ -26,6 +26,7 @@
 #include "target_distance.h"
 #include "targetlines.h"
 #include "targetlines_probe.h"
+#include "xhbar_runtime.h"
 
 #include <algorithm>
 #include <cstring>
@@ -353,13 +354,21 @@ public:
             return nativePluginFailed_ ? 15 : 13;
         }
         ConfigureBuiltInHotkeys(fillModeHotkeyEnabled_, fpsHotkeyEnabled_);
+        if (!settings.empty())
+        {
+            std::filesystem::path addonSettings = std::filesystem::path(settings).lexically_normal();
+            if (addonSettings.filename().empty())
+                addonSettings = addonSettings.parent_path();
+            bahamut_client::xhbar::ConfigureSettings(addonSettings.parent_path() / L"plugins" / L"xhbar" / L"settings.ini");
+        }
         runtimeCommands_.Configure(&addonHost_,
                                    manifestsById,
                                    {
                                        { "screenshot", this, &LoadScreenshotCommand, &UnloadScreenshotCommand, &ScreenshotLoaded },
                                        { "discord-rpc", this, &LoadDiscordCommand, &UnloadDiscordCommand, &DiscordLoaded },
                                    },
-                                   { nullptr, &PrintAddonChatText });
+                                   { nullptr, &PrintAddonChatText },
+                                   { nullptr, &SetXHBarLabels, &ToggleXHBar });
         packetObserver_.SetSink([this](const packet_observer::GameMessage& message)
                                 {
                                     playerState_.Observe(message);
@@ -600,6 +609,17 @@ private:
             error = plugin.LastError();
         }
         return applied;
+    }
+
+    static bool SetXHBarLabels(void*, std::string_view name)
+    {
+        const auto style = bahamut_client::xhbar::ParseLabelStyle(name);
+        return style && bahamut_client::xhbar::SaveLabels(*style);
+    }
+
+    static bool ToggleXHBar(void*, bool& visible)
+    {
+        return bahamut_client::xhbar::ToggleVisible(visible);
     }
 
     static bool LoadScreenshotCommand(void* context, std::string& error)

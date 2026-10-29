@@ -13,7 +13,7 @@ pub(crate) use extensions::{
     get_camera_zoom_selection, get_extension_inventory, get_object_distance_selection,
     open_extension_folder, reorder_dat_package, set_addon_enabled, set_camera_zoom_selection,
     set_dat_package_enabled, set_discord_rpc_enabled, set_object_distance_selection,
-    set_screenshot_enabled,
+    set_screenshot_enabled, set_xhbar_enabled,
 };
 pub(crate) use home::{get_home_status, launcher_version, list_news};
 pub(crate) use install::{

@@ -70,7 +70,7 @@ fn addon_inventory_uses_persisted_state_order_and_compatibility() {
         inventory.addons[3].compatibility,
         "Client build is not listed by this package"
     );
-    assert_eq!(inventory.plugins.len(), 2);
+    assert_eq!(inventory.plugins.len(), 3);
     assert_eq!(inventory.plugins[0].id, "screenshot");
     assert_eq!(inventory.plugins[0].author, "Aeshur");
     assert_eq!(inventory.plugins[0].version, "1.0");
@@ -81,6 +81,10 @@ fn addon_inventory_uses_persisted_state_order_and_compatibility() {
     assert_eq!(inventory.plugins[1].id, "discord-rpc");
     assert_eq!(inventory.plugins[1].name, "DiscordRPC");
     assert!(inventory.plugins[1].enabled);
+    assert_eq!(inventory.plugins[2].id, "xhbar");
+    assert_eq!(inventory.plugins[2].name, "XHBar");
+    assert_eq!(inventory.plugins[2].version, "1.0");
+    assert!(!inventory.plugins[2].enabled);
 }
 
 #[test]

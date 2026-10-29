@@ -229,6 +229,7 @@ async function setPluginEnabled(id, enabled) {
     const commands = {
       screenshot: 'set_screenshot_enabled',
       'discord-rpc': 'set_discord_rpc_enabled',
+      xhbar: 'set_xhbar_enabled',
     };
     const command = commands[id];
     if (!command) throw new Error(`Unknown plugin ${id}`);

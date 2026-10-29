@@ -36,6 +36,7 @@ pub const OBJECT_DISTANCE_ENABLED_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_OBJECT_DI
 pub const OBJECT_DISTANCE_PERCENT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_OBJECT_DISTANCE_PERCENT";
 pub const CAMERA_ZOOM_ENABLED_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_ENABLED";
 pub const CAMERA_ZOOM_LIMIT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CAMERA_ZOOM_LIMIT";
+pub const XHBAR_ENABLED_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_XHBAR_ENABLED";
 pub const BORDERLESS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS";
 pub const BORDERLESS_MONITOR_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_BORDERLESS_MONITOR";
 pub const LAUNCHER_VERSION_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_LAUNCHER_VERSION";
@@ -65,6 +66,7 @@ pub struct ExtensionLaunchRequest {
     pub object_distance_percent: u16,
     pub camera_zoom_enabled: bool,
     pub camera_zoom_limit: u8,
+    pub xhbar_enabled: bool,
     pub display_mode: DisplayMode,
     pub borderless_monitor: Option<String>,
     pub server_utc_patch: Vec<u8>,
@@ -342,6 +344,10 @@ fn helper_environment(
         request.camera_zoom_limit.to_string().into(),
     ));
     environment.push((
+        XHBAR_ENABLED_ENVIRONMENT.into(),
+        request.xhbar_enabled.to_string().into(),
+    ));
+    environment.push((
         LAUNCHER_VERSION_ENVIRONMENT.into(),
         env!("BAHAMUT_GIT_DESCRIBE").into(),
     ));
@@ -436,6 +442,7 @@ mod tests {
             object_distance_percent: 200,
             camera_zoom_enabled: false,
             camera_zoom_limit: 15,
+            xhbar_enabled: false,
             display_mode: DisplayMode::Windowed,
             borderless_monitor: None,
             server_utc_patch: vec![0xB8, 0x12, 0xE8, 0xE0, 0x50],
@@ -462,7 +469,7 @@ mod tests {
         assert_eq!(args[7], "3132372E302E302E3100");
         assert_eq!(args[8], "--launch-argument");
         assert_eq!(args[9], request().launch_argument);
-        assert_eq!(invocation.environment.len(), 23);
+        assert_eq!(invocation.environment.len(), 24);
         assert_eq!(invocation.environment[0].0, STARTUP_SCRIPT_ENVIRONMENT);
         assert_eq!(invocation.environment[0].1, request().startup_script_path);
         assert_eq!(invocation.environment[1].0, SCREENSHOT_PLUGIN_ENVIRONMENT);
@@ -542,13 +549,15 @@ mod tests {
         assert_eq!(invocation.environment[19].1, "false");
         assert_eq!(invocation.environment[20].0, CAMERA_ZOOM_LIMIT_ENVIRONMENT);
         assert_eq!(invocation.environment[20].1, "15");
-        assert_eq!(invocation.environment[21].0, LAUNCHER_VERSION_ENVIRONMENT);
+        assert_eq!(invocation.environment[21].0, XHBAR_ENABLED_ENVIRONMENT);
+        assert_eq!(invocation.environment[21].1, "false");
+        assert_eq!(invocation.environment[22].0, LAUNCHER_VERSION_ENVIRONMENT);
         assert_eq!(
-            invocation.environment[21].1,
+            invocation.environment[22].1,
             OsString::from(env!("BAHAMUT_GIT_DESCRIBE"))
         );
-        assert_eq!(invocation.environment[22].0, SERVER_ID_ENVIRONMENT);
-        assert_eq!(invocation.environment[22].1, "0123456789abcdef");
+        assert_eq!(invocation.environment[23].0, SERVER_ID_ENVIRONMENT);
+        assert_eq!(invocation.environment[23].1, "0123456789abcdef");
     }
 
     #[test]
@@ -743,7 +752,7 @@ mod tests {
     fn wine_plan_maps_path_environment_and_keeps_scalars() {
         let wine = wine_plan(&request());
         let host = plan_verified_extension_launch(&request()).unwrap();
-        assert_eq!(wine.environment.len(), 23);
+        assert_eq!(wine.environment.len(), 24);
         let mapped = [
             (
                 STARTUP_SCRIPT_ENVIRONMENT,

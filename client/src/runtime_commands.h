@@ -21,6 +21,9 @@ enum class RuntimeCommandKind
     PluginUnload,
     PluginList,
     PluginUsage,
+    XHBarLabels,
+    XHBarToggle,
+    XHBarHelp,
 };
 
 struct RuntimeCommand
@@ -30,15 +33,16 @@ struct RuntimeCommand
 };
 
 // Words owned by the runtime. Addon manifests cannot claim them.
-inline constexpr std::array<std::string_view, 4> kRuntimeCommandWords = {
+inline constexpr std::array<std::string_view, 5> kRuntimeCommandWords = {
     "/addon",
     "/load",
     "/unload",
     "/plugins",
+    "/xhbar",
 };
 
 // Parses a space-separated command. Returns nullopt when its first word is
-// not a runtime command word; malformed runtime forms parse as usage.
+// not a runtime word, or the /xhbar form is unknown; other malformed forms parse as usage.
 std::optional<RuntimeCommand> ParseRuntimeCommand(std::string_view command);
 
 struct RuntimePlugin
@@ -48,6 +52,14 @@ struct RuntimePlugin
     bool (*load)(void* context, std::string& error)   = nullptr;
     bool (*unload)(void* context, std::string& error) = nullptr;
     bool (*loaded)(void* context)                     = nullptr;
+};
+
+// setLabels accepts "xbox"/"playstation"; toggle reports visibility; both return save success.
+struct RuntimeXHBar
+{
+    void* context                                           = nullptr;
+    bool (*setLabels)(void* context, std::string_view name) = nullptr;
+    bool (*toggle)(void* context, bool& visible)            = nullptr;
 };
 
 // Runs on the retail command thread, where chat feedback can print; host locks
@@ -60,7 +72,8 @@ public:
     void Configure(AddonHost*                                             addons,
                    std::unordered_map<std::string, std::filesystem::path> catalog,
                    std::vector<RuntimePlugin>                             plugins,
-                   const AddonChatSink&                                   chat);
+                   const AddonChatSink&                                   chat,
+                   const RuntimeXHBar&                                    xhbar = {});
 
     bool IsInstalled(std::string_view addonId) const;
     // Runtime words, then each catalog command word once.
@@ -75,6 +88,7 @@ public:
 private:
     std::vector<std::string> ExecuteAddon(const RuntimeCommand& command);
     std::vector<std::string> ExecutePlugin(const RuntimeCommand& command);
+    std::vector<std::string> ExecuteXHBar(const RuntimeCommand& command);
     const RuntimePlugin*     FindPlugin(std::string_view name) const;
 
     AddonHost*                                             addons_ = nullptr;
@@ -82,4 +96,5 @@ private:
     std::vector<RuntimePlugin>                             plugins_;
     std::vector<std::string>                               words_;
     AddonChatSink                                          chat_;
+    RuntimeXHBar                                           xhbar_;
 };

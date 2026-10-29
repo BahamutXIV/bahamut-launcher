@@ -21,6 +21,7 @@ pub const SCREENSHOT_PLUGIN_ID: &str = "screenshot";
 pub const DISCORD_RPC_PLUGIN_ID: &str = "discord-rpc";
 pub const OBJECT_DISTANCE_PLUGIN_ID: &str = "object-distance";
 pub const CAMERA_ZOOM_PLUGIN_ID: &str = "camera-zoom";
+pub const XHBAR_PLUGIN_ID: &str = "xhbar";
 pub const OFFICIAL_DAT_OVERLAY_PACKAGE_ID: &str = "bahamut-dats-overlay";
 
 type IniSections = BTreeMap<String, BTreeMap<String, String>>;
@@ -105,6 +106,10 @@ impl Default for ExtensionsConfig {
                 },
                 ExtensionPreference {
                     id: CAMERA_ZOOM_PLUGIN_ID.into(),
+                    enabled: false,
+                },
+                ExtensionPreference {
+                    id: XHBAR_PLUGIN_ID.into(),
                     enabled: false,
                 },
             ],
@@ -266,6 +271,7 @@ impl ExtensionsConfig {
             && id != DISCORD_RPC_PLUGIN_ID
             && id != OBJECT_DISTANCE_PLUGIN_ID
             && id != CAMERA_ZOOM_PLUGIN_ID
+            && id != XHBAR_PLUGIN_ID
         {
             return Err(ExtensionConfigError::UnsupportedPlugin(id.into()));
         }
@@ -291,6 +297,7 @@ impl ExtensionsConfig {
                 && plugin.id != DISCORD_RPC_PLUGIN_ID
                 && plugin.id != OBJECT_DISTANCE_PLUGIN_ID
                 && plugin.id != CAMERA_ZOOM_PLUGIN_ID
+                && plugin.id != XHBAR_PLUGIN_ID
         }) {
             return Err(ExtensionConfigError::UnsupportedPlugin(plugin.id.clone()));
         }
@@ -877,6 +884,7 @@ mod tests {
                 ("discord-rpc", true),
                 ("object-distance", false),
                 ("camera-zoom", false),
+                ("xhbar", false),
             ]
         );
         assert_eq!(

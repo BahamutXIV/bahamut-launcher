@@ -113,6 +113,8 @@ The native suite covers:
   resolution over synthetic equipment and bag memory, and whole-set transactions
   through a fake executor. Separate debug tests cover switch gates, receipts,
   and the single-item diagnostic transaction.
+- the [XHBar logical input policy](src/xhbar_policy.h) and
+  selected-pad adapter, described under [XHBar](#xhbar).
 
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
@@ -141,6 +143,160 @@ The `bahamut-autologin` CTest drives the state machine with a fake clock and
 recorded requests. The offsets, request selectors and function addresses are
 specific to the retail 1.23b client; live behavior beyond the tested slot is
 not established.
+
+## XHBar
+
+The XHBar runtime is off unless its plugin is enabled in Extensions, which
+sets `BAHAMUT_RUNTIME_XHBAR_ENABLED=true` for the game process. It installs
+only on the exact retail build after checking the code at each address
+below; a refused install leaves the rest of the runtime unchanged.
+
+### Controls
+
+While LT or RT is held, a D-pad or face-button press fires native
+`UILuaCommands.ShortCutAction`, the same command a keyboard shortcut key runs.
+Holding one trigger and then the other selects an order-specific combo set; a
+press of both in the same frame counts as RT then LT. Releasing either trigger
+returns to the set of the one still held, and a button held across the change
+stays captured until it is released. Each cross counts clockwise: face Y, B,
+A, X and D-pad Up, Right, Down, Left. The sets take absolute action bar
+positions, where position k is page ceil(k/10), slot ((k-1) mod 10)+1,
+regardless of the page the bar shows:
+
+| Hold | Y | B | A | X | Up | Right | Down | Left |
+|---|---|---|---|---|---|---|---|---|
+| RT | P1 1 | P1 2 | P1 3 | P1 4 | P1 5 | P1 6 | P1 7 | P1 8 |
+| LT | P1 9 | P1 10 | P2 1 | P2 2 | P2 3 | P2 4 | P2 5 | P2 6 |
+| RT then LT | P2 7 | P2 8 | P2 9 | P2 10 | P3 1 | P3 2 | P3 3 | P3 4 |
+| LT then RT | P3 5 | P3 6 | P3 7 | P3 8 | P3 9 | P3 10 | - | - |
+
+The pad hook decodes the selected pad record through the
+[selected-pad adapter](src/xhbar_pad.h), routes it through the
+[logical input policy](src/xhbar_policy.h), and clears owned controls
+from the client's held, press, release, and repeat words. Each update's slot
+edges dispatch on the pad thread after MainModule's input step at `0x004D6570`
+returns; edges do not carry over to a later update. Dispatch looks up the
+command at `0x00928280`, builds its 0x78-byte parameter at `0x004DDCF0`, calls
+the command's CanExecute and Execute slots as the key binding executor does
+(`0x00921200`), and releases the parameter string at `0x00446F50`. The
+optional set chord stays unavailable.
+
+ShortCutAction resolves its button against the action menu's `work.slotPage`
+while its handler runs inside Execute. A slot on the page the bar shows fires
+directly. For another page the runtime writes that page into the byte, fires
+the shortcut, and restores the byte before the step returns, so the page never
+animates. It swaps only for a `SimpleAccess` work buffer. Every press needs a
+fresh read that finds action mode and no page move in progress; otherwise the
+press is dropped, so no slot fires while the macro bar is open. A nested input
+step during the command, which has not been observed, restores the real page
+before it runs and stops page swaps for the session. A restore that fails
+twice also stops page swaps; later input steps retry it only while a fresh
+read still finds the page byte at that address holding the substitute.
+
+The game's own command handlers apply every other check. The runtime adds
+connection and window-focus checks and the guards above.
+
+### Overlay
+
+Every 250 ms on the input step's thread, the runtime reads the action menu
+through [pure memory reads](src/xhbar_slots.h) that call no client code.
+For each shortcut it takes the command ID from `Label_CommandIcon_S` and the
+icon ID from that label's `TimerIcon`, whose vftable is `0x010824B4`. The
+overlay loads that icon's GTEX file from the install's `data/` tree through
+the [icon reader](src/xhbar_icon.h) and draws it in the slot with the
+slot's page. An empty slot, the macro bar, or a failed read leaves the slot
+number in place.
+
+The same read takes each slot's recast and class compatibility from the local
+player's chara work, reached from the action menu's actor through the player
+control at `[[[G+0x220]+4]+0x0C]` (`0x006F564C`) and its shared work record.
+`parameterSave.commandSlot_recastTime` holds each slot's end in server
+seconds, `parameterTemp.maxCommandRecastTime` its cap, and
+`parameterSave.commandSlot_compatibility` whether the current class may use
+it; all three are indexed by absolute slot, so every page stays current. The
+clock is the network module's whole seconds at `N+0x30C` (`0x0075BD80`). The
+overlay greys a bound action on recast, with its seconds left, or one the
+class cannot use. It does not judge MP, TP or range.
+
+The overlay shows both sets whenever the action menu is readable, Desktop
+leaves user control unlocked and no full map is open. While a trigger is held
+the other side dims, and a combo set replaces its first trigger's side.
+Desktop's `work.lockUserControl` is set in every Desktop mode except 8 and
+120, which covers events such as NPC dialogue, cutscenes and warps
+(`setDesktopModeDetail`). The runtime finds Desktop as the one element whose
+bound actor's control has vftable `0x00FD5B8C` and reads the lock and
+`work.mode` from its temp work with the action menu.
+
+The same work's `rootWidget`, an array descriptor (`0x0110F804`) of actor
+cells (`0x0110FF0C`), holds the record identity `[R+0x70]` of each of
+Desktop's 17 root windows. Each identity resolves to the one registered
+element whose record carries it; the runtime walks those windows and their
+registered descendants through the FormElement child vector at
+`[E+0xE0]..[E+0xE4]` for a record whose Lua class, the string at
+`[[R+0x0C]+0x54]`, is exactly `MapNavigationWidget`. That covers the map key
+and main menu maps at a root and a journal quest map under its window;
+`MiniMapWidget` is a different class. While the lock is set or a map is open
+the overlay is withheld. A failed Desktop read counts as unlocked, and a failed
+or ambiguous map read as no map.
+
+### Commands and settings
+
+`/xhbar xbox` and `/xhbar playstation` switch the overlay's
+control labels at once: Y, B, A, X with LT and RT, or triangle, circle, cross,
+square with L2 and R2 in the same positions. The controls themselves do not
+change. `/xhbar toggle` hides or shows the overlay; while it is hidden
+the native bar is restored and chords still fire. `/xhbar help` lists the
+three commands, and other `/xhbar` forms are not handled. The runtime owns the
+`/xhbar` word whether or not the plugin is enabled.
+
+Label and visibility choices are saved to
+`config/plugins/xhbar/settings.ini` as
+`labels=xbox|playstation` and `visible=true|false` lines and read when the game
+starts; a missing file or line keeps Xbox labels and a visible overlay. If a
+save fails, the change lasts for the session, and chat marks it not saved.
+
+### Native bar
+
+While the read is healthy in action mode and the overlay keeps rendering the
+bar, the runtime hides the native action bar. On the input step's thread it
+sets the window template's `Grid_Content` Hidden, the window's
+IsHitTestVisible false and its VisualOpacity 0 through the client's property
+setters at `0x0093C2A0`, `0x0093C300` and `0x009402C0`. It puts each value
+back after native input runs, since the bar's own show and hide storyboards
+write opacity every frame. Keyboard shortcuts still fire. The macro bar, which
+the overlay cannot show, restores the bar at once, as does hiding the overlay.
+Failed reads or a stopped overlay restore it after two seconds, and the overlay
+stays up for that long; while Desktop locks user control or has a full map
+open the hide holds without the overlay, and for two seconds after, so the
+overlay can return first. A restore puts back the saved Grid and hit values,
+and opacity 1 when the window is shown.
+
+Each step searches for a unique window before writing to it. If the search
+fails, nothing is written and the saved values are kept. Finding another
+window discards the old one without writing to it. Without the setters, the
+bar is left alone. A restore the client keeps rejecting is retried on every
+step; after 60 attempts, no new hide starts for the session.
+
+For live acceptance, `BAHAMUT_TEST_XHBAR_LOG_FILE` names a new file that
+receives menu, player, Desktop, slot-state and hide events; the launcher never
+sets it.
+
+### Tests and limits
+
+The policy tests cover thirty-two slot edges, trigger ownership and combos,
+captured releases, context changes, generation invalidation, optional
+set-chord priority, and the shortcut mapping. The adapter tests cover the
+observed Xbox masks and state filtering; axis words and other bytes stay
+intact. The slot reader tests run the menu, player-work, Desktop and map
+reads, with their guards, against synthetic memory. These tests run without the
+retail client.
+
+Manual retail sessions with an Xbox controller showed chorded and combo slots
+firing on every page, recast greying, the native bar hidden and restored by
+the macro bar, the overlay withheld during NPC dialogue, a cutscene and
+loading screens, no native response to LT+A or LT+Up, neither trigger opening
+its native macro bar, and no dispatch with chat input open. DirectInput pads
+and other contexts have not been tried in game.
 
 ## Limits and related docs
 

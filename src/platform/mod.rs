@@ -96,6 +96,7 @@ pub struct ExtensionArtifacts {
     pub object_distance_percent: u16,
     pub camera_zoom_enabled: bool,
     pub camera_zoom_limit: u8,
+    pub xhbar_enabled: bool,
 }
 
 impl ExtensionArtifacts {
@@ -130,6 +131,7 @@ impl ExtensionArtifacts {
             object_distance_percent: self.object_distance_percent,
             camera_zoom_enabled: self.camera_zoom_enabled,
             camera_zoom_limit: self.camera_zoom_limit,
+            xhbar_enabled: self.xhbar_enabled,
             display_mode: options.display_mode,
             borderless_monitor: options.borderless_monitor.clone(),
             server_utc_patch: contract_patches[0].bytes.clone(),

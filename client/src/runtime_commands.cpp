@@ -84,6 +84,16 @@ std::optional<RuntimeCommand> ParseRuntimeCommand(std::string_view command)
     {
         return RuntimeCommand{ words.size() == 1 ? RuntimeCommandKind::PluginList : RuntimeCommandKind::PluginUsage, {} };
     }
+    if (words[0] == "/xhbar")
+    {
+        if (words.size() == 2 && (words[1] == "xbox" || words[1] == "playstation"))
+            return RuntimeCommand{ RuntimeCommandKind::XHBarLabels, std::string(words[1]) };
+        if (words.size() == 2 && words[1] == "toggle")
+            return RuntimeCommand{ RuntimeCommandKind::XHBarToggle, {} };
+        if (words.size() == 2 && words[1] == "help")
+            return RuntimeCommand{ RuntimeCommandKind::XHBarHelp, {} };
+        return std::nullopt;
+    }
     if (words.size() != 2)
     {
         return RuntimeCommand{ RuntimeCommandKind::PluginUsage, {} };
@@ -94,12 +104,14 @@ std::optional<RuntimeCommand> ParseRuntimeCommand(std::string_view command)
 void RuntimeCommands::Configure(AddonHost*                                             addons,
                                 std::unordered_map<std::string, std::filesystem::path> catalog,
                                 std::vector<RuntimePlugin>                             plugins,
-                                const AddonChatSink&                                   chat)
+                                const AddonChatSink&                                   chat,
+                                const RuntimeXHBar&                                    xhbar)
 {
     addons_  = addons;
     catalog_ = std::move(catalog);
     plugins_ = std::move(plugins);
     chat_    = chat;
+    xhbar_   = xhbar;
     words_.assign(kRuntimeCommandWords.begin(), kRuntimeCommandWords.end());
     // Sort ids so the claimed word order does not depend on map iteration.
     std::vector<std::string> ids;
@@ -147,8 +159,29 @@ std::vector<std::string> RuntimeCommands::Execute(const RuntimeCommand& command)
             return ExecutePlugin(command);
         case RuntimeCommandKind::PluginUsage:
             return { "Usage: /load <plugin>, /unload <plugin>, /plugins" };
+        case RuntimeCommandKind::XHBarLabels:
+        case RuntimeCommandKind::XHBarToggle:
+            return ExecuteXHBar(command);
+        case RuntimeCommandKind::XHBarHelp:
+            return { "/xhbar xbox", "/xhbar playstation", "/xhbar toggle" };
     }
     return {};
+}
+
+std::vector<std::string> RuntimeCommands::ExecuteXHBar(const RuntimeCommand& command)
+{
+    if (xhbar_.setLabels == nullptr || xhbar_.toggle == nullptr)
+    {
+        return { "XHBar is unavailable" };
+    }
+    if (command.kind == RuntimeCommandKind::XHBarToggle)
+    {
+        bool       visible = false;
+        const bool saved   = xhbar_.toggle(xhbar_.context, visible);
+        return { std::string(visible ? "XHBar shown" : "XHBar hidden") + (saved ? "" : " (not saved)") };
+    }
+    const bool saved = xhbar_.setLabels(xhbar_.context, command.name);
+    return { "XHBar labels: " + command.name + (saved ? "" : " (not saved)") };
 }
 
 std::vector<std::string> RuntimeCommands::ExecuteAddon(const RuntimeCommand& command)
@@ -275,6 +308,12 @@ bool RuntimeCommands::Dispatch(void* context, std::string_view command)
     const auto parsed = ParseRuntimeCommand(command);
     if (!parsed)
     {
+        // Keep unclaimed reserved words out of addon callbacks, which see every command.
+        const auto words = SplitWords(command);
+        if (!words.empty() && IsRuntimeWord(words[0]))
+        {
+            return false;
+        }
         return commands->addons_ != nullptr && commands->addons_->DispatchCommand(command);
     }
     for (const auto& line : commands->Execute(*parsed))

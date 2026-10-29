@@ -12,6 +12,7 @@
 #include "player_state.h"
 #include "runtime_commands.h"
 #include "targetlines_probe.h"
+#include "xhbar_runtime.h"
 
 #include <MinHook.h>
 #include <d3d9.h>
@@ -614,6 +615,10 @@ HRESULT STDMETHODCALLTYPE HookedCreateDevice(IDirect3D9* direct3d, UINT adapter,
                 ConfigureOverlayWindow(window);
                 hooksReady = InstallInputBoundary(
                     window, gTelemetry, gAddonHost, gNativePluginHost);
+            }
+            if (hooksReady)
+            {
+                static_cast<void>(bahamut_client::xhbar::InstallRuntime());
             }
             if (hooksReady)
             {

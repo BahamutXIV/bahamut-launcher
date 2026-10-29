@@ -55,6 +55,30 @@ bool UnloadStub(void* context, std::string&)
     return true;
 }
 
+struct OverlayStub
+{
+    std::string labels  = "xbox";
+    bool        visible = true;
+    bool        save    = true;
+    int         sets    = 0;
+};
+
+bool SetStubLabels(void* context, std::string_view name)
+{
+    auto& overlay = *static_cast<OverlayStub*>(context);
+    ++overlay.sets;
+    overlay.labels = name;
+    return overlay.save;
+}
+
+bool ToggleStub(void* context, bool& visible)
+{
+    auto& overlay   = *static_cast<OverlayStub*>(context);
+    overlay.visible = !overlay.visible;
+    visible         = overlay.visible;
+    return overlay.save;
+}
+
 bool StubLoaded(void* context)
 {
     return static_cast<PluginStub*>(context)->loaded;
@@ -105,9 +129,15 @@ int wmain(int argc, wchar_t** argv)
                      ParsesAs("/load", RuntimeCommandKind::PluginUsage) &&
                      ParsesAs("/unload a b", RuntimeCommandKind::PluginUsage) &&
                      ParsesAs("/plugins", RuntimeCommandKind::PluginList) &&
-                     ParsesAs("/plugins all", RuntimeCommandKind::PluginUsage),
+                     ParsesAs("/plugins all", RuntimeCommandKind::PluginUsage) &&
+                     ParsesAs("/xhbar xbox", RuntimeCommandKind::XHBarLabels, "xbox") &&
+                     ParsesAs("/xhbar playstation", RuntimeCommandKind::XHBarLabels, "playstation") &&
+                     ParsesAs("/xhbar toggle", RuntimeCommandKind::XHBarToggle) &&
+                     ParsesAs("/xhbar help", RuntimeCommandKind::XHBarHelp),
                  "runtime command grammar was not parsed") ||
-        !Require(!ParseRuntimeCommand("/fps") && !ParseRuntimeCommand("/addons list") && !ParseRuntimeCommand("/loader x") && !ParseRuntimeCommand(""),
+        !Require(!ParseRuntimeCommand("/fps") && !ParseRuntimeCommand("/addons list") && !ParseRuntimeCommand("/loader x") && !ParseRuntimeCommand("/xhbars") &&
+                     !ParseRuntimeCommand("/xhbar") && !ParseRuntimeCommand("/xhbar ps") && !ParseRuntimeCommand("/xhbar xbox now") &&
+                     !ParseRuntimeCommand("/xhbar help me") && !ParseRuntimeCommand(""),
                  "a non-runtime command was claimed"))
     {
         return 1;
@@ -138,7 +168,7 @@ int wmain(int argc, wchar_t** argv)
                        { &chat, &CaptureChat });
 
     // Reserved, malformed and repeated words are not claimed again.
-    const std::vector<std::string> expectedWords = { "/addon", "/load", "/unload", "/plugins", "/table", "/second", "/fps", "/words", "/later", "/single", "/pos" };
+    const std::vector<std::string> expectedWords = { "/addon", "/load", "/unload", "/plugins", "/xhbar", "/table", "/second", "/fps", "/words", "/later", "/single", "/pos" };
     if (!Require(commands.CommandWords() == expectedWords, "claimed command words were incorrect") ||
         !Require(commands.IsInstalled("pos") && !commands.IsInstalled("screenshot"), "catalog membership was incorrect"))
     {
@@ -188,6 +218,7 @@ int wmain(int argc, wchar_t** argv)
     if (!Require(run("/addon load command-words-test") == Lines{ "Loaded addon: command-words-test" }, "fixture addon did not load") ||
         !Require(RuntimeCommands::Dispatch(&commands, "/words go") && !RuntimeCommands::Dispatch(&commands, "/words stop"),
                  "manifest-declared command was not dispatched to its addon") ||
+        !Require(run("/xhbar foo") == Lines{ "<not handled>" }, "an unclaimed reserved form reached an addon") ||
         !Require(run("/addon unload command-words-test") == Lines{ "Unloaded addon: command-words-test" }, "fixture addon did not unload"))
     {
         return 1;
@@ -215,6 +246,36 @@ int wmain(int argc, wchar_t** argv)
     if (!Require(run("/load discord-rpc") == Lines{ "Plugin failed to load: discord-rpc (plugin DLL could not be loaded)" }, "plugin load failure was not reported"))
     {
         return 1;
+    }
+
+    if (!Require(run("/xhbar help") == Lines{ "/xhbar xbox", "/xhbar playstation", "/xhbar toggle" }, "XHBar help was not printed") ||
+        !Require(run("/xhbar toggle") == Lines{ "XHBar is unavailable" }, "missing XHBar was not reported"))
+    {
+        return 1;
+    }
+    {
+        OverlayStub     overlay;
+        ChatCapture     overlayChat;
+        RuntimeCommands overlayCommands;
+        overlayCommands.Configure(nullptr, {}, {}, { &overlayChat, &CaptureChat }, { &overlay, &SetStubLabels, &ToggleStub });
+        const auto runOverlay = [&](std::string_view command)
+        {
+            overlayChat.lines.clear();
+            return RuntimeCommands::Dispatch(&overlayCommands, command) ? overlayChat.lines : Lines{ "<not handled>" };
+        };
+        if (!Require(runOverlay("/xhbar playstation") == Lines{ "XHBar labels: playstation" } && overlay.labels == "playstation", "labels were not applied") ||
+            !Require(runOverlay("/xhbar ps") == Lines{ "<not handled>" } && overlay.sets == 1, "an unknown style was claimed") ||
+            !Require(runOverlay("/xhbar toggle") == Lines{ "XHBar hidden" } && !overlay.visible, "toggle did not hide") ||
+            !Require(runOverlay("/xhbar toggle") == Lines{ "XHBar shown" } && overlay.visible, "toggle did not show"))
+        {
+            return 1;
+        }
+        overlay.save = false;
+        if (!Require(runOverlay("/xhbar xbox") == Lines{ "XHBar labels: xbox (not saved)" } && overlay.labels == "xbox", "an unsaved label change was not marked") ||
+            !Require(runOverlay("/xhbar toggle") == Lines{ "XHBar hidden (not saved)" }, "an unsaved toggle was not marked"))
+        {
+            return 1;
+        }
     }
 
     // A command still applies when chat rejects its feedback.
