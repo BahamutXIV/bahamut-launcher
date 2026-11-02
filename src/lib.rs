@@ -5,6 +5,7 @@ pub mod auth;
 pub mod backups;
 pub mod config;
 pub mod content;
+pub mod crash_log;
 pub mod diagnostics;
 pub mod digest;
 pub mod extensions;

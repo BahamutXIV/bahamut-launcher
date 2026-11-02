@@ -119,6 +119,65 @@ The native suite covers:
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
 
+## Crash logs
+
+When `BAHAMUT_RUNTIME_CRASH_LOGS` names a directory, `bahamut.dll` installs an
+unhandled-exception filter ([crash log](src/crash_log.h)) during
+initialization. An empty or absent value leaves crash logging off. The
+directory is created if missing; files are never deleted.
+
+The first unhandled exception in the game process writes
+`game-YYYYMMDDTHHMMSSZ-<pid>.log` (UTC). The log is ASCII with one fact per
+line:
+
+- launcher version, process ID and the ID of the faulting thread;
+- one `startup_addon:` line per addon ID selected at startup, within 512
+  characters of IDs; when some do not fit, a `startup_addons_truncated: yes`
+  line follows. Later loads and unloads are not tracked;
+- exception code and name, and for access violations the access kind and
+  target address;
+- the faulting address and the x86 registers;
+- `stack_snapshot_bytes`, then up to 1024 stack dwords from ESP that fall
+  inside the executable span of a listed module, read from a copy of the stack
+  taken at the fault (ESP up to 4 KiB or the end of its memory region);
+- the loaded modules, capped at 256, each with base, SizeOfImage and
+  TimeDateStamp, plus the PDB GUID, age and file name only for a module with a
+  readable RSDS CodeView record;
+- a final `end of crash log` line, which a cut-off log lacks.
+
+Code addresses print as `module+0xOFFSET`, or `?` outside listed modules,
+including modules past the cap. The module list lets maintainers match symbols.
+MSVC Release builds emit PDBs that embed only their file name. The stack values
+are unverified candidates: a span can cover non-code gaps between sections, and
+a value may be stale data rather than a return address. The log does not hold
+memory contents beyond registers and those values.
+
+The filter calls the previous filter and returns its result, or continues
+the search if none existed, preserving the game's own handling. The
+retail client sets its own unhandled-exception filter during startup. The
+module therefore reinstalls its filter once, on the first game frame, and
+chains to whatever it displaced. A filter the game installs after that frame
+replaces it. A chained filter that leads back to the crash filter on the same
+thread gets a continue-search result instead of looping.
+
+Capture runs on a thread started at install with its own stack, so a stack
+overflow or damaged heap on the faulting thread does not stop it. The faulting
+thread copies the exception record, context and stack window into static
+storage, signals the capture thread, waits up to 20 s, then chains. A thread
+that faults meanwhile waits the same way. Threads inside the filter are tracked
+in a fixed array of 64 thread IDs; a thread already present is a re-entry, and
+one that finds the array full waits and chains. If the capture thread cannot
+start, crash logging stays off. Capture is best effort: process exit may cut
+off capture after the timeout; a failed write drops the rest of the log,
+including `end of crash log`; exceptions that never reach the filter, such as
+a fast-fail stack buffer overrun, write nothing.
+
+The heap may be corrupt at crash time, so the capture allocates nothing from
+the CRT heap and uses no iostreams or `std::string`. The directory path,
+launcher version and addon IDs are prepared at install; the log is formatted
+into fixed buffers with Win32 calls. The `bahamut-crash-log` CTests use
+synthetic exceptions and never crash the test process.
+
 ## Autologin
 
 The [autologin service](src/autologin.h) drives the retail Bootup title and
