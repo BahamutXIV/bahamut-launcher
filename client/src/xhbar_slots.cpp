@@ -495,11 +495,14 @@ constexpr std::uint32_t kNetworkTable    = 0x00f91b5c;
 constexpr std::uint32_t kMyPlayerTable   = 0x00fd785c;
 constexpr std::uint32_t kSyncContainer   = 0x0110ef34;
 constexpr std::uint32_t kStructTable     = 0x0110f974;
+constexpr std::uint32_t kInteger32Table  = 0x0110fda4;
 constexpr std::uint32_t kSyncKind        = 2;
 constexpr std::uint32_t kSyncScope       = 0x68;
 
 constexpr std::string_view kParameterSave = "parameterSave";
 constexpr std::string_view kParameterTemp = "parameterTemp";
+// playerWork.comboNextCommandId int32[2], set by the "playerWork/combo" property group.
+constexpr std::string_view kComboNext = "comboNextCommandId";
 
 // Binder declaration order:
 // parameterSave.commandSlot_recastTime int32[40], parameterSave.commandSlot_compatibility boolean[40],
@@ -510,11 +513,12 @@ constexpr std::uint32_t kMaxRecastBits     = 48;
 
 struct SyncField
 {
-    std::uint32_t work  = 0;
-    std::uint32_t start = 0; // bits into the work's sync group
+    std::uint32_t work       = 0;
+    std::uint32_t start      = 0; // bits into the work's sync group
+    std::uint32_t descriptor = 0;
 };
 
-bool FindSyncField(Memory& memory, std::uint32_t shared, std::string_view name, SyncField& out) noexcept
+bool FindSyncField(Memory& memory, std::uint32_t shared, std::string_view name, SyncField& out, std::uint32_t table = kStructTable) noexcept
 {
     std::uint32_t matches = 0;
     auto          visit   = [&](std::uint32_t node)
@@ -525,9 +529,10 @@ bool FindSyncField(Memory& memory, std::uint32_t shared, std::string_view name, 
         if (descriptor != 0)
         {
             ++matches;
-            out.work  = work;
-            out.start = memory.U32(descriptor + 8);
-            if (memory.U32(descriptor) != kStructTable)
+            out.work       = work;
+            out.start      = memory.U32(descriptor + 8);
+            out.descriptor = descriptor;
+            if (memory.U32(descriptor) != table)
                 out.work = 0;
         }
         return !memory.Faulted();
@@ -591,26 +596,52 @@ bool ReadClock(Memory& memory, std::uint32_t mainModule, std::int32_t& now) noex
 
 // ActionMenu LuaActorImpl I -> GameEngine [I+4] -> player [[[G+0x220]+4]+0x0C] (0x006F564C, _getMyPlayer 0x00707970).
 // Player record (0x00CD7A30) -> shared work [[R+0x14]].
-void ReadStates(Memory& memory, std::uint32_t mainModule, std::uint32_t element, SlotStates& states) noexcept
+std::uint32_t FindShared(Memory& memory, std::uint32_t element) noexcept
 {
-    std::int32_t now = 0;
-    if (!ReadClock(memory, mainModule, now))
-        return;
     const std::uint32_t holder = memory.U32(element + 0x80);
     const std::uint32_t actor  = holder == 0 ? 0 : memory.U32(holder);
     if (!HasType(memory, actor, kLuaActorType))
-        return;
+        return 0;
     const std::uint32_t engine = memory.U32(actor + 4);
     const std::uint32_t outer  = engine == 0 ? 0 : memory.U32(engine + 0x220);
     const std::uint32_t inner  = outer == 0 ? 0 : memory.U32(outer + 4);
     const std::uint32_t player = inner == 0 ? 0 : memory.U32(inner + 0x0c);
     if (player == 0 || memory.U32(player) != kMyPlayerTable || memory.Faulted())
-        return;
+        return 0;
     const std::uint32_t first  = memory.U32(engine + 0x1bc);
     const std::uint32_t record = first != 0 && memory.U32(first) == player ? first : memory.U32(player + 4);
     const std::uint32_t link   = record == 0 ? 0 : memory.U32(record + 0x14);
     const std::uint32_t shared = link == 0 ? 0 : memory.U32(link);
-    if (shared == 0 || memory.Faulted())
+    return memory.Faulted() ? 0 : shared;
+}
+
+// Array descriptor: start bit +8, count +0x10, element descriptor +0x14 sharing the start.
+void ReadCombo(Memory& memory, std::uint32_t element, SlotStates& states) noexcept
+{
+    const std::uint32_t shared = FindShared(memory, element);
+    SyncField           field;
+    WorkBuffer          buffer;
+    if (shared == 0 || !FindSyncField(memory, shared, kComboNext, field, kArrayTable))
+        return;
+    const std::uint32_t entry = memory.U32(field.descriptor + 0x14);
+    if (memory.U32(field.descriptor + 0x10) != states.comboNext.size() || entry == 0 || memory.U32(entry) != kInteger32Table ||
+        memory.U32(entry + 8) != field.start || memory.Faulted() || !FindSyncBuffer(memory, shared, field.work, buffer))
+        return;
+    std::array<std::int32_t, 2> next{};
+    for (std::uint32_t index = 0; index < next.size(); ++index)
+        if (!ReadAligned<std::int32_t>(memory, buffer, field.start + 32 * index, next[index]))
+            return;
+    states.comboNext  = next;
+    states.comboValid = !memory.Faulted();
+}
+
+void ReadStates(Memory& memory, std::uint32_t mainModule, std::uint32_t element, SlotStates& states) noexcept
+{
+    std::int32_t now = 0;
+    if (!ReadClock(memory, mainModule, now))
+        return;
+    const std::uint32_t shared = FindShared(memory, element);
+    if (shared == 0)
         return;
 
     SyncField  save;
@@ -796,6 +827,11 @@ DesktopState ReadDesktop(std::uint32_t mainModule, ReadMemory copy, void* contex
     return state;
 }
 
+bool ComboReady(const SlotStates& states, std::int32_t command) noexcept
+{
+    return states.comboValid && command > 0 && (command == states.comboNext[0] || command == states.comboNext[1]);
+}
+
 std::int32_t RecastRemaining(std::int32_t end, std::int32_t now, std::int32_t limit) noexcept
 {
     std::int64_t left = static_cast<std::int64_t>(end) - now;
@@ -870,6 +906,9 @@ SlotCommands ReadSlotCommands(std::uint32_t mainModule, std::uint32_t tlsArray, 
         // Separate budget and fault state isolate player-work failures from the menu read.
         Memory player(copy, context);
         ReadStates(player, mainModule, window.element, *states);
+        // Combo layout is unobserved with a chain open; keep its failures out of recast state.
+        Memory combo(copy, context);
+        ReadCombo(combo, window.element, *states);
     }
     if (!labels || macroType != 0)
         return result;

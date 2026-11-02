@@ -277,6 +277,13 @@ clock is the network module's whole seconds at `N+0x30C` (`0x0075BD80`). The
 overlay greys a bound action on recast, with its seconds left, or one the
 class cannot use. It does not judge MP, TP or range.
 
+Action combos follow the native bar's `updateComboInfo`. The server sets
+`playerWork.comboNextCommandId`, two command IDs in the player work's own
+sync group, while a chain is open and zeroes them when it closes. The overlay
+gives each bound action matching either ID a steady red border and a second
+border pulsing over 0.8 s, regardless of recast. A failed combo read drops
+only the outline; recast and compatibility stay current.
+
 The overlay shows both sets whenever the action menu is readable, Desktop
 leaves user control unlocked and no full map is open. While a trigger is held
 the other side dims, and a combo set replaces its first trigger's side.
@@ -337,8 +344,8 @@ bar is left alone. A restore the client keeps rejecting is retried on every
 step; after 60 attempts, no new hide starts for the session.
 
 For live acceptance, `BAHAMUT_TEST_XHBAR_LOG_FILE` names a new file that
-receives menu, player, Desktop, slot-state and hide events; the launcher never
-sets it.
+receives menu, player, combo, Desktop, slot-state and hide events; the
+launcher never sets it.
 
 ### Tests and limits
 
@@ -346,16 +353,18 @@ The policy tests cover thirty-two slot edges, trigger ownership and combos,
 captured releases, context changes, generation invalidation, optional
 set-chord priority, and the shortcut mapping. The adapter tests cover the
 observed Xbox masks and state filtering; axis words and other bytes stay
-intact. The slot reader tests run the menu, player-work, Desktop and map
-reads, with their guards, against synthetic memory. These tests run without the
-retail client.
+intact. The slot reader tests run the menu, player-work, action-combo, Desktop
+and map reads, with their guards, against synthetic memory. These tests run
+without the retail client.
 
 Manual retail sessions with an Xbox controller showed chorded and combo slots
 firing on every page, recast greying, the native bar hidden and restored by
 the macro bar, the overlay withheld during NPC dialogue, a cutscene and
 loading screens, no native response to LT+A or LT+Up, neither trigger opening
-its native macro bar, and no dispatch with chat input open. DirectInput pads
-and other contexts have not been tried in game.
+its native macro bar, and no dispatch with chat input open. The action-combo
+field was found in game but read only as zero, with no chain open; the
+outline has not been seen in game. DirectInput pads and other contexts have
+not been tried in game.
 
 ## Limits and related docs
 

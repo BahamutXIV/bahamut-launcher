@@ -1123,10 +1123,139 @@ void TestStatesCleared()
     states.now    = 2;
     states.remaining.fill(3);
     states.compatible.fill(true);
+    states.comboValid = true;
+    states.comboNext  = { 4, 5 };
     Require(!ReadSlotCommands(0, scenario.tlsArray, &Space::Copy, &scenario.fixture.space, true, &states).valid, "no main module");
     Require(!states.valid && states.shared == 0 && states.now == 0, "stale header cleared");
+    Require(!states.comboValid && states.comboNext[0] == 0 && states.comboNext[1] == 0, "stale combo cleared");
     for (std::uint32_t slot = 0; slot != 30; ++slot)
         Require(states.remaining[slot] == 0 && !states.compatible[slot], "stale slots cleared");
+}
+
+// playerWork.comboNextCommandId: int32[2] at 5792 in the player work's own sync group.
+constexpr std::uint32_t kComboStart      = 5792;
+constexpr std::uint32_t kPlayerGroupBase = 0x40;
+
+struct ComboLayout
+{
+    std::uint32_t table        = 0x0110f804;
+    std::uint32_t start        = kComboStart;
+    std::uint32_t count        = 2;
+    std::uint32_t elementTable = 0x0110fda4;
+    std::uint32_t elementStart = kComboStart;
+};
+
+std::uint32_t AddCombo(Scenario& scenario, const ComboLayout& layout = {})
+{
+    Fixture&            f    = scenario.fixture;
+    const std::uint32_t work = f.space.Alloc(0x90);
+    f.space.Put8(work + 0x18, 2);
+    const std::uint32_t entry = f.space.Alloc(0x10);
+    f.space.Put32(entry, layout.elementTable);
+    f.space.Put32(entry + 8, layout.elementStart);
+    const std::uint32_t descriptor = f.space.Alloc(0x18);
+    f.space.Put32(descriptor, layout.table);
+    f.space.Put32(descriptor + 8, layout.start);
+    f.space.Put32(descriptor + 0x10, layout.count);
+    f.space.Put32(descriptor + 0x14, entry);
+    Declare(f, work, { f.InternedNode(0x28, scenario.pool, f.Interned("comboNextCommandId"), descriptor) });
+    PlayerWorks(scenario, { f.InternedNode(0x24, scenario.pool, f.Interned("PlayerWork"), work) });
+    const std::uint32_t scopes = f.space.Get32(scenario.shared + 0x2c);
+    const std::uint32_t groups = f.space.Alloc(12);
+    f.space.Put32(groups + 4, kGroupBase);
+    f.space.Put32(groups + 8, kPlayerGroupBase);
+    f.space.Put32(scopes + 0x20 + 4, groups);
+    f.space.Put32(scopes + 0x20 + 8, groups + 12);
+    return work;
+}
+
+std::uint32_t ComboAddress(Scenario& scenario)
+{
+    return scenario.syncData - kGroupBase + kPlayerGroupBase + kComboStart / 8;
+}
+
+void PutCombo(Scenario& scenario, std::int32_t first, std::int32_t second)
+{
+    scenario.fixture.space.Put32(ComboAddress(scenario), static_cast<std::uint32_t>(first));
+    scenario.fixture.space.Put32(ComboAddress(scenario) + 4, static_cast<std::uint32_t>(second));
+}
+
+void TestCombo()
+{
+    Scenario scenario;
+    Build(scenario);
+    SetMoving(scenario, false);
+    AddCombo(scenario);
+    // Labels hold 101-130; 105 is slot 5 on page 1, 117 is slot 7 on page 2.
+    PutCombo(scenario, 105, 117);
+    SlotStates         states;
+    const SlotCommands result = Run(scenario, &states);
+    RequireMenuIntact(result, "menu beside combo");
+    Require(states.valid && states.remaining[1] == PatternRemaining(1), "recast beside combo");
+    Require(states.comboValid && states.comboNext[0] == 105 && states.comboNext[1] == 117, "combo follow-ups");
+    for (std::size_t index = 0; index != result.commands.size(); ++index)
+        Require(ComboReady(states, result.commands[index]) == (index == 4 || index == 16), "combo slots");
+
+    PutCombo(scenario, 0, 0);
+    Run(scenario, &states);
+    Require(states.comboValid && states.comboNext[0] == 0 && states.comboNext[1] == 0, "closed chain");
+    Require(!ComboReady(states, 0) && !ComboReady(states, 105), "closed chain readies nothing");
+
+    states.comboNext  = { 117, 117 };
+    states.comboValid = false;
+    Require(!ComboReady(states, 117), "unread combo readies nothing");
+}
+
+void RequireNoCombo(Scenario& scenario, const char* reason)
+{
+    SlotStates         states;
+    const SlotCommands result = Run(scenario, &states);
+    RequireMenuIntact(result, reason);
+    Require(states.valid && states.remaining[1] == PatternRemaining(1), reason);
+    Require(!states.comboValid && states.comboNext[0] == 0 && states.comboNext[1] == 0, reason);
+}
+
+void TestComboGuards()
+{
+    const auto guarded = [](const ComboLayout& layout, const char* reason)
+    {
+        Scenario scenario;
+        Build(scenario);
+        SetMoving(scenario, false);
+        AddCombo(scenario, layout);
+        PutCombo(scenario, 105, 117);
+        RequireNoCombo(scenario, reason);
+    };
+    guarded({ .table = 0x0110f974 }, "combo field is not an array");
+    guarded({ .count = 3 }, "combo array count");
+    guarded({ .elementTable = 0x0110fd2c }, "combo element is not integer32");
+    guarded({ .elementStart = kComboStart + 32 }, "combo element start");
+    guarded({ .start = kComboStart + 4, .elementStart = kComboStart + 4 }, "unaligned combo start");
+    {
+        Scenario scenario;
+        Build(scenario);
+        SetMoving(scenario, false);
+        RequireNoCombo(scenario, "combo field absent");
+    }
+    {
+        Scenario scenario;
+        Build(scenario);
+        SetMoving(scenario, false);
+        AddCombo(scenario);
+        PutCombo(scenario, 105, 117);
+        scenario.fixture.space.Unmap(ComboAddress(scenario) + 4, 4);
+        RequireNoCombo(scenario, "fault in the second follow-up");
+    }
+    {
+        Scenario scenario;
+        Build(scenario);
+        AddCombo(scenario);
+        PutCombo(scenario, 105, 117);
+        scenario.fixture.space.Unmap(scenario.syncData + (kSaveStart + 368 + 32 * 29) / 8, 4);
+        SlotStates states;
+        Run(scenario, &states);
+        Require(!states.valid && states.comboValid && states.comboNext[1] == 117, "combo beside failed recast");
+    }
 }
 
 // Use the engine's first record only if it names the player; otherwise follow the player's link.
@@ -1396,6 +1525,8 @@ int main()
         TestRecastRemaining();
         TestStatesGuards();
         TestStatesCleared();
+        TestCombo();
+        TestComboGuards();
         TestPlayerRecordSelection();
         TestDesktopComplete();
         TestDesktopGuards();

@@ -1485,6 +1485,16 @@ bool DrawXHBar(IDirect3DDevice9* device)
                 centeredText(18.0f, center, color(255, 255, 255, alpha), alpha, seconds);
             }
 
+            // Native ComboEffectON: a steady red border plus one pulsing 0-1-0 over 0.8 s, regardless of recast.
+            if (view.comboReady && number != 0)
+            {
+                constexpr std::uint64_t kComboPulse = 800;
+                const float             phase       = static_cast<float>(now % kComboPulse) / static_cast<float>(kComboPulse);
+                const float             pulse       = 1.0f - std::fabs(phase * 2.0f - 1.0f);
+                draw->AddRect(ImVec2(slotMin.x - 1.0f, slotMin.y - 1.0f), ImVec2(slotMax.x + 1.0f, slotMax.y + 1.0f), color(232, 48, 40, alpha), 5.0f, 0, 2.0f);
+                draw->AddRect(ImVec2(slotMin.x - 3.0f, slotMin.y - 3.0f), ImVec2(slotMax.x + 3.0f, slotMax.y + 3.0f), color(255, 96, 72, alpha * pulse), 6.0f, 0, 2.5f);
+            }
+
             if (view.page != 0)
             {
                 char marker[8]{};
