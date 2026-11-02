@@ -187,10 +187,10 @@ bahamut-launcher-vX.Y.Z-windows-client-symbols.zip.sha256
 ```
 
 The symbols ZIP holds the PDBs of the MSVC-built `bahamut.dll`,
-`bahamut-loader.exe`, `screenshot.dll` and `discord-rpc.dll` from the Windows
-package. A game crash log lists the PDB GUID and age of each module that has a
-CodeView PDB record, and these PDBs resolve its logged offsets. The Linux and macOS packages carry llvm-mingw
-builds of the client without debug information.
+`screenshot.dll` and `discord-rpc.dll` from the Windows package. A game crash
+log lists the PDB GUID and age of each module that has a CodeView PDB record,
+and these PDBs resolve its logged offsets. The Linux and macOS packages carry
+llvm-mingw builds of the client without debug information.
 
 Publishing to GitHub does not authorize an in-app stable update. The owner
 must separately sign [release metadata](release-metadata.md) locally; CI has

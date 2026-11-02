@@ -172,8 +172,7 @@ fn main() {
     }
 
     let startup_started = Instant::now();
-    // Installed before anything else at startup can panic; its writes do not
-    // depend on the persistent log.
+    // Capture startup panics without depending on persistent logging.
     let crash_logs = dirs::crash_logs_dir();
     if let Ok(directory) = &crash_logs {
         bahamut_launcher::crash_log::install_panic_hook(directory.clone());

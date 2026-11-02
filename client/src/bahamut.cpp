@@ -408,17 +408,14 @@ public:
     }
 
 private:
-    // Runs first among the game-frame observers: the retail client imports
-    // SetUnhandledExceptionFilter and may replace the crash filter during
-    // startup, so it is reasserted once the first frame shows startup is done.
+    // The retail client may replace the crash filter during startup; the first frame reasserts it.
     static void ObserveGameFrame(void* context, const void* container)
     {
         crash_log::ReassertFilterOnce();
         bahamut_client::GearsetsRuntime::ObserveGameFrame(&static_cast<RuntimeHost*>(context)->gearsetsRuntime_, container);
     }
 
-    // Crash logging is optional; a failed install never aborts startup. The
-    // addon list is the selection at startup, not the live set.
+    // Crash logging must not abort startup; addon IDs reflect only the startup selection.
     static void InstallCrashLog(const std::vector<std::filesystem::path>& manifests)
     {
         const std::wstring directory = EnvironmentValue(kCrashLogsEnvironment);

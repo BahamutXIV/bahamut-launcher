@@ -346,7 +346,7 @@ jobs:
         env:
           SYMBOLS_NAME: bahamut-launcher-${{ needs.resolve.outputs.label }}-windows-client-symbols
         run: |
-          $pdbs = 'bahamut.pdb', 'bahamut-loader.pdb', 'screenshot.pdb', 'discord-rpc.pdb' |
+          $pdbs = 'bahamut.pdb', 'screenshot.pdb', 'discord-rpc.pdb' |
             ForEach-Object { Join-Path 'out/client-release/Release' $_ }
           foreach ($pdb in $pdbs) {
             if (-not (Test-Path -LiteralPath $pdb -PathType Leaf)) { throw "missing client symbols: $pdb" }

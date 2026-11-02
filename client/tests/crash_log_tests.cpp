@@ -107,11 +107,8 @@ void TestTextBuffer()
     TextBuffer out(storage, sizeof(storage));
     out.AppendHex(0xabcu, 8);
     ExpectText(out.view(), "00000ABC", "AppendHex pads to the minimum digits in uppercase");
-    Expect(!out.truncated(), "a buffer filled exactly is not truncated");
     out.AppendChar('x');
-    Expect(out.truncated(), "output past the capacity sets truncated");
-    out.AppendNewline();
-    Expect(out.view() == "00000AB\n", "AppendNewline ends a full buffer with a newline");
+    ExpectText(out.view(), "00000ABC", "output past the capacity is dropped");
 
     char       wide[32];
     TextBuffer text(wide, sizeof(wide));
@@ -169,9 +166,6 @@ void TestStem()
     TextBuffer    stem(storage, sizeof(storage));
     AppendFileStem(stem, time, 1234);
     ExpectText(stem.view(), "game-20260102T030405Z-1234", "file stem uses UTC digits and the process id");
-    TextBuffer iso(storage, sizeof(storage));
-    AppendIsoTime(iso, UtcTime{ 2026, 12, 31, 23, 59, 58 });
-    ExpectText(iso.view(), "2026-12-31T23:59:58Z", "ISO time");
 }
 
 template <std::size_t Capacity>
@@ -188,8 +182,8 @@ std::unique_ptr<ModuleTable> SampleModules()
     game.base                   = 0x00400000;
     game.sizeOfImage            = 0x00a00000;
     game.timeDateStamp          = 0x5f000000;
-    game.code[0]                = { 0x1000, 0x800000 };
-    game.codeCount              = 1;
+    game.codeBegin              = 0x1000;
+    game.codeEnd                = 0x800000;
     game.hasPdb                 = true;
     const std::uint8_t guid[16] = { 0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 0x88, 0x77, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00 };
     std::memcpy(game.pdbGuid, guid, sizeof(guid));
@@ -200,8 +194,8 @@ std::unique_ptr<ModuleTable> SampleModules()
     d3d.base          = 0x6c000000;
     d3d.sizeOfImage   = 0x00200000;
     d3d.timeDateStamp = 0x4a000001;
-    d3d.code[0]       = { 0x1000, 0x100000 };
-    d3d.codeCount     = 1;
+    d3d.codeBegin     = 0x1000;
+    d3d.codeEnd       = 0x100000;
     SetText(d3d.name, "d3d9.dll");
     table->count = 2;
     return table;
@@ -228,15 +222,6 @@ void TestModuleLookup()
     Expect(!IsCodeAddress(*modules, 0x00400fff), "header bytes below the code range are not code");
     Expect(!IsCodeAddress(*modules, 0x00c00000), "end of the executable range is exclusive");
     Expect(!IsCodeAddress(*modules, 0x7fff0000), "an address outside every module is not code");
-
-    // Two executable sections with a non-executable gap between them.
-    ModuleTable& gapped         = *modules;
-    gapped.entries[1].code[0]   = { 0x1000, 0x2800 };
-    gapped.entries[1].code[1]   = { 0x4800, 0x4900 };
-    gapped.entries[1].codeCount = 2;
-    Expect(IsCodeAddress(gapped, 0x6c001000) && IsCodeAddress(gapped, 0x6c0027ff), "the first executable section is code");
-    Expect(!IsCodeAddress(gapped, 0x6c002800) && !IsCodeAddress(gapped, 0x6c003800) && !IsCodeAddress(gapped, 0x6c0047ff), "a gap between executable sections is not code");
-    Expect(IsCodeAddress(gapped, 0x6c004800) && IsCodeAddress(gapped, 0x6c0048ff) && !IsCodeAddress(gapped, 0x6c004900), "the second executable section is code and its end is exclusive");
 }
 
 // A mapped 32-bit image: headers, three sections, and a debug directory with
@@ -335,8 +320,7 @@ void TestModuleImage()
         Expect(ReadModuleImage(image.Reader(), SyntheticImage::kBase, record), "a valid image parses");
         Expect(record.sizeOfImage == 0x5000, "SizeOfImage is read");
         Expect(record.timeDateStamp == 0x5f3e2a10, "TimeDateStamp is read");
-        Expect(record.codeCount == 2 && record.code[0].begin == 0x1000 && record.code[0].end == 0x2800, "the first executable section is recorded");
-        Expect(record.code[1].begin == 0x4800 && record.code[1].end == 0x4900, "a zero VirtualSize falls back to the raw size and non-executable sections are skipped");
+        Expect(record.codeBegin == 0x1000 && record.codeEnd == 0x4900, "executable sections form one span and a zero VirtualSize falls back to the raw size");
         Expect(record.hasPdb, "the CodeView entry after a non-CodeView entry is found");
         Expect(record.pdbAge == 7, "PDB age");
         ExpectText(record.pdbName, "Game.pdb", "PDB file name without its directory");
@@ -374,58 +358,10 @@ void TestModuleImage()
     }
 }
 
-void TestWalkFrames()
-{
-    std::uintptr_t frames[kMaximumFrames];
-    {
-        FakeMemory memory;
-        memory.AddDwords(0x1000, { 0x1010, 0x00401000 });
-        memory.AddDwords(0x1010, { 0x1020, 0x00402000 });
-        memory.AddDwords(0x1020, { 0, 0 });
-        const std::size_t count = WalkFrames(memory.Reader(), 0x1000, frames, kMaximumFrames);
-        Expect(count == 2 && frames[0] == 0x00401000 && frames[1] == 0x00402000, "the chain ends at a frame whose return address is below 0x10000");
-    }
-    {
-        FakeMemory memory;
-        memory.AddDwords(0x1000, { 0x1000, 0x00401000 });
-        Expect(WalkFrames(memory.Reader(), 0x1000, frames, kMaximumFrames) == 1, "a frame pointer that does not increase ends the walk");
-    }
-    {
-        FakeMemory memory;
-        memory.AddDwords(0x1000, { 0x1012, 0x00401000 });
-        memory.AddDwords(0x1010, { 0x1030, 0x00402000 });
-        Expect(WalkFrames(memory.Reader(), 0x1000, frames, kMaximumFrames) == 1, "an unaligned next frame pointer ends the walk");
-        Expect(WalkFrames(memory.Reader(), 0x1002, frames, kMaximumFrames) == 0, "an unaligned first frame pointer yields no frames");
-    }
-    {
-        FakeMemory memory;
-        memory.AddDwords(0x1000, { 0x2000, 0x00401000 });
-        Expect(WalkFrames(memory.Reader(), 0x1000, frames, kMaximumFrames) == 1, "an unreadable next frame ends the walk");
-        Expect(WalkFrames(memory.Reader(), 0, frames, kMaximumFrames) == 0, "a null frame pointer yields no frames");
-    }
-    {
-        std::vector<std::uint8_t> chain(200 * 8);
-        for (std::uint32_t index = 0; index < 200; ++index)
-        {
-            const std::uint32_t next   = 0x10000 + (index + 1) * 8;
-            const std::uint32_t target = 0x00401000 + index;
-            std::memcpy(&chain[index * 8], &next, 4);
-            std::memcpy(&chain[index * 8 + 4], &target, 4);
-        }
-        FakeMemory memory;
-        memory.Add(0x10000, chain);
-        const std::size_t count = WalkFrames(memory.Reader(), 0x10000, frames, kMaximumFrames);
-        Expect(count == kMaximumFrames && frames[kMaximumFrames - 1] == 0x00401000 + kMaximumFrames - 1, "the walk stops at 64 frames");
-    }
-}
-
 void TestReports()
 {
     const auto modules = SampleModules();
     FakeMemory memory;
-    memory.AddDwords(0x0019ff00, { 0x0019ff40, 0x00401500 });
-    memory.AddDwords(0x0019ff40, { 0x0019ff80, 0x6c001000 });
-    memory.AddDwords(0x0019ff80, { 0, 0 });
     memory.AddDwords(0x0019fe00, { 0x00000010, 0x00402000, 0x6c001000, 0x6c000800 });
 
     EXCEPTION_RECORD record{};
@@ -452,7 +388,6 @@ void TestReports()
     const auto  append = [](void* target, const char* data, std::size_t size)
     {
         static_cast<std::string*>(target)->append(data, size);
-        return true;
     };
 
     ReportInput input;
@@ -491,14 +426,12 @@ void TestReports()
                "cs: 0x00000023\n"
                "ss: 0x0000002B\n"
                "stack_snapshot_bytes: 4080\n"
-               "frame 0: 0x00401500 game.exe+0x1500\n"
-               "frame 1: 0x6C001000 d3d9.dll+0x1000\n"
                "stack esp+0x0004: 0x00402000 game.exe+0x2000\n"
                "stack esp+0x0008: 0x6C001000 d3d9.dll+0x1000\n"
                "module game.exe base=0x00400000 size_of_image=0x00A00000 time_date_stamp=0x5F000000 pdb_guid=11223344-5566-7788-99AA-BBCCDDEEFF00 pdb_age=3 pdb=game.pdb\n"
                "module d3d9.dll base=0x6C000000 size_of_image=0x00200000 time_date_stamp=0x4A000001\n"
                "end of crash log\n",
-               "full report with modules, frames and stack scan");
+               "full report with modules and stack scan");
 
     EXCEPTION_RECORD paging{};
     paging.ExceptionCode           = EXCEPTION_IN_PAGE_ERROR;
@@ -512,6 +445,8 @@ void TestReports()
     minimal.processId = 7;
     minimal.threadId  = 8;
     minimal.record    = &paging;
+    const auto none   = std::make_unique<ModuleTable>();
+    minimal.modules   = none.get();
     out.clear();
     WriteReport(ByteSink{ append, &out }, minimal);
     ExpectText(out,
@@ -525,7 +460,7 @@ void TestReports()
                "exception_status: 0xC000009C\n"
                "fault_address: 0x00000010 ?\n"
                "end of crash log\n",
-               "report without modules, context or version");
+               "report without listed modules, context or version");
 
     EXCEPTION_RECORD unknown{};
     unknown.ExceptionCode = 0x80000003;
@@ -534,49 +469,12 @@ void TestReports()
     WriteReport(ByteSink{ append, &out }, minimal);
     Expect(out.find("exception_code: 0x80000003\n") != std::string::npos && out.find("exception_access") == std::string::npos, "an unnamed code prints bare hex and no access line");
 
-    // One line per addon, bounded, with an explicit mark when some are dropped.
-    std::string many;
-    for (int index = 0; index < 70; ++index)
-    {
-        many += (index == 0 ? "" : ",") + std::string("addon-") + std::to_string(index);
-    }
-    minimal.record        = nullptr;
-    minimal.startupAddons = many;
-    out.clear();
-    WriteReport(ByteSink{ append, &out }, minimal);
-    Expect(Contains(out, "startup_addon: addon-0\n") && Contains(out, "startup_addon: addon-63\n") && !Contains(out, "addon-64"), "at most 64 addon lines are written");
-    Expect(Contains(out, "startup_addons_truncated: yes\n"), "dropped addons are marked");
-    minimal.startupAddons          = "a,,b";
+    minimal.record                 = nullptr;
+    minimal.startupAddons          = "a,b";
     minimal.startupAddonsTruncated = true;
     out.clear();
     WriteReport(ByteSink{ append, &out }, minimal);
-    Expect(Contains(out, "startup_addon: a\nstartup_addon: b\nstartup_addons_truncated: yes\n"), "empty ids are skipped and a caller-side truncation is marked");
-
-    // After the first failed write nothing more reaches the sink, including
-    // the end marker.
-    struct FailingSink
-    {
-        int         calls  = 0;
-        int         failAt = 0;
-        std::string text;
-    } failing;
-
-    failing.failAt       = 4;
-    const auto failAfter = [](void* target, const char* data, std::size_t size)
-    {
-        auto& sink = *static_cast<FailingSink*>(target);
-        ++sink.calls;
-        if (sink.calls >= sink.failAt)
-        {
-            return false;
-        }
-        sink.text.append(data, size);
-        return true;
-    };
-    input.stackSnapshotBytes = 0;
-    WriteReport(ByteSink{ failAfter, &failing }, input);
-    Expect(failing.calls == failing.failAt, "no write is attempted after the first failure");
-    Expect(!Contains(failing.text, "end of crash log") && Contains(failing.text, "launcher_version: 1.2.3\n") && !Contains(failing.text, "process_id"), "output stops at the failed write and never ends with the end marker");
+    Expect(Contains(out, "startup_addon: a\nstartup_addon: b\nstartup_addons_truncated: yes\n"), "each addon gets a line and a truncation is marked");
 }
 
 std::wstring BaseName(const std::wstring& path)
@@ -716,9 +614,7 @@ LONG WINAPI PreviousFilter(EXCEPTION_POINTERS*)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-// Chains to the crash filter the way a game filter does with the filter it
-// replaced; without re-entry protection this recurses until the stack ends.
-// While g_release is set it also holds its thread inside the filter.
+// Model a game filter chaining back to CrashFilter; g_release holds the thread inside.
 LONG WINAPI GameFilter(EXCEPTION_POINTERS* pointers)
 {
     ++g_gameCalls;
@@ -779,23 +675,30 @@ void TestInstallAndFilter(const fs::path& root)
     Expect(!Install({ std::wstring_view(), "1", "" }), "an empty directory leaves crash logging off");
 
     const auto original = SetUnhandledExceptionFilter(&PreviousFilter);
+
+    // A failed Install must leave both filters inert and allow a later capture.
+    const fs::path blocker = root / L"blocker";
+    fs::create_directories(root);
+    std::ofstream(blocker).put('x');
+    Expect(!Install({ (blocker / L"logs").native(), "9.9.9", "" }), "a directory that cannot be created leaves crash logging off");
+    ReassertFilterOnce();
+    Expect(SetUnhandledExceptionFilter(&PreviousFilter) == &PreviousFilter, "reassert after a failed Install installs nothing");
+    {
+        const auto early = std::make_unique<Crash>(EXCEPTION_ACCESS_VIOLATION);
+        Expect(CrashFilter(&early->pointers) == EXCEPTION_CONTINUE_SEARCH && !fs::exists(directory), "the filter writes nothing before a successful Install");
+    }
+
     Expect(Install({ directory.native(), "9.9.9", "fps,pos" }), "Install succeeds");
     Expect(fs::is_directory(directory), "Install creates the missing directory");
-    Expect(ChainedFilter() == &PreviousFilter, "the filter in place at install time becomes the chained filter");
     Expect(!Install({ directory.native(), "9.9.9", "" }), "a second Install is refused");
 
     Expect(SetUnhandledExceptionFilter(&GameFilter) == &CrashFilter, "the crash filter is the installed filter");
     ReassertFilterOnce();
-    Expect(ChainedFilter() == &GameFilter, "a filter the game installed replaces the chained one on reassert");
     Expect(SetUnhandledExceptionFilter(&OtherFilter) == &CrashFilter, "reassert installs the crash filter again");
     ReassertFilterOnce();
-    Expect(ChainedFilter() == &GameFilter, "a second reassert changes nothing");
     Expect(SetUnhandledExceptionFilter(&OtherFilter) == &OtherFilter, "a second reassert does not reinstall the filter");
 
-    // More concurrent faulting threads than any fixed bookkeeping table would
-    // hold, each held inside the chained filter: all of them must wait for
-    // the one capture, chain, and survive the chained filter's call back into
-    // the crash filter.
+    // Concurrent threads must wait for one capture, chain and survive re-entry.
     constexpr int kThreads = 17;
     g_release              = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     const auto crash       = std::make_unique<Crash>(EXCEPTION_ACCESS_VIOLATION);
@@ -858,8 +761,7 @@ void TestInstallAndFilter(const fs::path& root)
         Expect(Contains(log, "module " + exeName + " base=0x"), "the module list is logged");
     }
 
-    // More threads inside the filter than it has slots: the ones that find the
-    // array full are not re-entries, so they wait and chain like the rest.
+    // A full thread array must still wait and chain, not report re-entry.
     constexpr int kManyThreads = 70;
     g_callNested               = false;
     CloseHandle(g_release);
@@ -902,8 +804,7 @@ void TestInstallAndFilter(const fs::path& root)
 
 void* g_fakeStack = nullptr;
 
-// Stands in for the faulting stack being unwound: runs right after the
-// capture is signaled and destroys the original stack memory.
+// Simulate stack unwinding by overwriting it just after signaling capture.
 LONG WINAPI ClobberFilter(EXCEPTION_POINTERS*)
 {
     ++g_previousCalls;
@@ -913,18 +814,17 @@ LONG WINAPI ClobberFilter(EXCEPTION_POINTERS*)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-// The capture thread must read the copies made before it was signaled: with
-// no wait, the faulting thread returns at once and the originals are
-// overwritten while the capture is still running. The stack walk and scan
-// must come from the stack snapshot, which stops at 16 KiB above ESP.
+// With no wait, the originals are overwritten during capture; only the snapshot
+// ending 4 KiB above ESP must be read.
 void TestCaptureReadsCopies(const fs::path& root)
 {
     const fs::path directory = PrepareDirectory(root);
     SetUnhandledExceptionFilter(&ClobberFilter);
     std::string addons;
-    for (int index = 0; index < 80; ++index)
+    // Short ids: more than 64 fit inside the install cut.
+    for (int index = 0; index < 150; ++index)
     {
-        addons += (index == 0 ? "addon-" : ",addon-") + std::to_string(index / 10) + std::to_string(index % 10);
+        addons += (index == 0 ? "a" : ",a") + std::to_string(1000 + index).substr(1);
     }
     InstallOptions options{ directory.native(), "1.0.0", addons };
     options.captureTimeoutMs = 0;
@@ -943,17 +843,11 @@ void TestCaptureReadsCopies(const fs::path& root)
     };
     const std::uint32_t marker = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(&Crash::Marker));
     put(base + 0x20, marker, 0);
-    put(base + 0x40, static_cast<std::uint32_t>(base + 0x80), 0x00401500);
-    put(base + 0x80, static_cast<std::uint32_t>(base + 0xc0), 0x6c001000);
-    put(base + 0xc0, static_cast<std::uint32_t>(base + 0x4020), 0x00401800);
-    put(base + 0x4020, 0, 0x00401900); // live, but 16 KiB above ESP: outside the snapshot
+    put(base + 0x100c, marker, marker); // last dword of the snapshot, then one past it
 
-    const auto crash              = std::make_unique<Crash>(EXCEPTION_ACCESS_VIOLATION);
-    crash->context.Eax            = 0x1234abcd;
-    crash->context.Esp            = static_cast<DWORD>(base + 0x10);
-    crash->context.Ebp            = static_cast<DWORD>(base + 0x40);
-    EXCEPTION_RECORD chained      = {};
-    crash->record.ExceptionRecord = &chained;
+    const auto crash   = std::make_unique<Crash>(EXCEPTION_ACCESS_VIOLATION);
+    crash->context.Eax = 0x1234abcd;
+    crash->context.Esp = static_cast<DWORD>(base + 0x10);
     Expect(CrashFilter(&crash->pointers) == EXCEPTION_CONTINUE_SEARCH && g_previousCalls == 1, "a zero timeout chains without waiting");
     std::memset(&crash->record, 0xdd, sizeof(crash->record));
     std::memset(&crash->context, 0xdd, sizeof(crash->context));
@@ -965,47 +859,22 @@ void TestCaptureReadsCopies(const fs::path& root)
         Expect(Contains(log, "exception_code: 0xC0000005 (access violation)\n") && Contains(log, "exception_access: write at 0x00000010\n"), "the copied exception record is logged");
         Expect(Contains(log, "eax: 0x1234ABCD\n"), "the copied context is logged");
         Expect(Contains(log, "thread_id: " + std::to_string(GetCurrentThreadId()) + "\n"), "the faulting thread id is logged");
-        Expect(Contains(log, "stack_snapshot_bytes: 16384\n"), "the stack snapshot is bounded to 16 KiB and logged");
-        Expect(Contains(log, "frame 0: 0x00401500 ") && Contains(log, "frame 1: 0x6C001000 ") && Contains(log, "frame 2: 0x00401800 "), "the frame walk reads the snapshot after the original stack was destroyed");
-        Expect(!Contains(log, "0x00401900"), "a frame outside the snapshot ends the walk");
-        Expect(Contains(log, "stack esp+0x0010: 0x"), "the stack scan reads the snapshot");
+        Expect(Contains(log, "stack_snapshot_bytes: 4096\n"), "the stack snapshot is bounded to 4 KiB and logged");
+        Expect(Contains(log, "stack esp+0x0010: 0x") && Contains(log, "stack esp+0x0FFC: 0x"), "the stack scan reads the snapshot after the original stack was destroyed");
+        Expect(!Contains(log, "stack esp+0x1000: "), "a dword past the snapshot is not scanned");
 
         std::size_t lines = 0, whole = 0;
         for (std::size_t at = log.find("startup_addon: "); at != std::string::npos; at = log.find("startup_addon: ", at + 1))
         {
             ++lines;
         }
-        const std::regex wholeLine("startup_addon: addon-[0-9]{2}\n");
+        const std::regex wholeLine("startup_addon: a[0-9]{3}\n");
         for (std::sregex_iterator match(log.begin(), log.end(), wholeLine), end; match != end; ++match)
         {
             ++whole;
         }
-        Expect(lines >= 50 && lines < 80 && lines == whole, "an oversized addon list is cut at a whole id");
+        Expect(lines > 64 && lines < 150 && lines == whole, "every addon inside the cut is logged and the list is cut at a whole id");
         Expect(Contains(log, "startup_addons_truncated: yes\n"), "the cut addon list is marked");
-    }
-}
-
-// Without a capture thread the log is written on the faulting thread, except
-// for a stack overflow, which only chains.
-void TestFallback(const fs::path& root, bool stackOverflow)
-{
-    const fs::path directory = PrepareDirectory(root);
-    SetUnhandledExceptionFilter(&PreviousFilter);
-    InstallOptions options{ directory.native(), "1.0.0", "" };
-    options.startCaptureThread = false;
-    Expect(Install(options), "Install succeeds");
-
-    const auto crash = std::make_unique<Crash>(stackOverflow ? EXCEPTION_STACK_OVERFLOW : EXCEPTION_ACCESS_VIOLATION);
-    Expect(CrashFilter(&crash->pointers) == EXCEPTION_CONTINUE_SEARCH && g_previousCalls == 1, "the exception chains");
-    if (stackOverflow)
-    {
-        Expect(FilesWithExtension(directory, L".log").empty(), "a stack overflow writes nothing without a capture thread");
-        Expect(CrashFilter(&crash->pointers) == EXCEPTION_CONTINUE_SEARCH && g_previousCalls == 2, "a later exception chains without waiting for the skipped capture");
-    }
-    else
-    {
-        Expect(LogComplete(), "the log is complete when the filter returns");
-        Expect(FilesWithExtension(directory, L".log").size() == 1, "one log is written");
     }
 }
 
@@ -1015,7 +884,7 @@ int wmain(int argc, wchar_t** argv)
 {
     if (argc < 2 || argc > 3)
     {
-        std::cerr << "usage: bahamut-crash-log-tests <scratch directory> [copy|fallback|fallback-overflow]\n";
+        std::cerr << "usage: bahamut-crash-log-tests <scratch directory> [copy]\n";
         return 2;
     }
     const std::wstring scenario = argc == 3 ? argv[2] : L"";
@@ -1029,7 +898,6 @@ int wmain(int argc, wchar_t** argv)
             TestStem();
             TestModuleLookup();
             TestModuleImage();
-            TestWalkFrames();
             TestReports();
             TestProcessReader();
             TestCaptureModules();
@@ -1038,10 +906,6 @@ int wmain(int argc, wchar_t** argv)
         else if (scenario == L"copy")
         {
             TestCaptureReadsCopies(root);
-        }
-        else if (scenario == L"fallback" || scenario == L"fallback-overflow")
-        {
-            TestFallback(root, scenario == L"fallback-overflow");
         }
         else
         {

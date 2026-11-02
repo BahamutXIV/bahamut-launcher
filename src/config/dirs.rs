@@ -318,7 +318,7 @@ pub fn launcher_log_path() -> Result<PathBuf, ConfigDirError> {
         .join(LAUNCHER_LOG_FILE_NAME))
 }
 
-/// Resolve the directory that receives launcher and client crash logs.
+/// Shared directory for launcher and client crash logs.
 pub fn crash_logs_dir() -> Result<PathBuf, ConfigDirError> {
     Ok(state_root()?
         .join(LAUNCHER_LOGS_DIR_NAME)

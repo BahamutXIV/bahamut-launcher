@@ -251,9 +251,9 @@ When the game crashes, the client module usually writes a crash log to
 launcher crash writes `launcher-<UTC time>-<process id>.log` there instead.
 These files stay on your computer; nothing is uploaded. Attach the newest
 `.log` to your report in the [Bahamut Discord](https://discord.gg/PxK5RJYQjm),
-with the launcher version. A game crash log holds the error, registers, return
-addresses and the loaded module list; some crashes end the game before any
-log is written.
+with the launcher version. A game crash log holds the error, registers,
+candidate code addresses from the stack and the loaded module list; some
+crashes end the game before any log is written.
 
 Keep the launcher open while reproducing a Wine crash: set
 `close_on_game_start = false` in `bahamut.ini`. The default, `true`, closes the

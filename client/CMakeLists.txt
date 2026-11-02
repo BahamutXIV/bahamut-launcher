@@ -16,8 +16,7 @@ endif()
 
 if(MSVC)
     add_compile_options(/W4 /WX /EHsc /permissive-)
-    # Release PDBs carry no code change; they let a crash log's module list map
-    # to symbols.
+    # Release PDBs map crash-log module offsets to symbols.
     add_compile_options($<$<CONFIG:Release>:/Zi>)
 else()
     # The clang analog of /W4 /WX; the disabled groups are ones /W4 does not raise.
@@ -57,8 +56,7 @@ function(bahamut_module_definition variable input)
     set(${variable} "${output}" PARENT_SCOPE)
 endfunction()
 
-# Release PDBs for the shipped binaries; /DEBUG would otherwise turn off the
-# default reference and COMDAT folding.
+# /DEBUG disables default reference and COMDAT folding; keep both enabled.
 function(bahamut_release_pdb target)
     if(MSVC)
         target_link_options(${target} PRIVATE
@@ -333,7 +331,6 @@ add_executable(bahamut-loader
 target_include_directories(bahamut-loader PRIVATE api)
 target_link_libraries(bahamut-loader PRIVATE advapi32 bcrypt psapi)
 bahamut_unicode_entry(bahamut-loader)
-bahamut_release_pdb(bahamut-loader)
 
 # Keep shared test objects separate from the runtime DLL's export/probe variants.
 add_library(bahamut-test-monitor-selection-objects OBJECT src/monitor_selection.cpp)
@@ -994,8 +991,6 @@ add_test(NAME bahamut-packet-observer COMMAND bahamut-packet-observer-tests)
 add_test(NAME bahamut-packet-capture COMMAND bahamut-packet-capture-tests)
 add_test(NAME bahamut-crash-log COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test)
 add_test(NAME bahamut-crash-log-copy COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-copy copy)
-add_test(NAME bahamut-crash-log-fallback COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-fallback fallback)
-add_test(NAME bahamut-crash-log-fallback-overflow COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-fallback-overflow fallback-overflow)
 add_test(
     NAME bahamut-addon-host
     COMMAND bahamut-addon-host-tests

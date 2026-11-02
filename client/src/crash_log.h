@@ -1,10 +1,7 @@
 #pragma once
 
-// Crash log for the game process. Everything reachable from CrashFilter runs
-// while the heap may be corrupt, so it uses only fixed buffers and Win32 calls:
-// no CRT allocation, iostreams, std::string or std::filesystem. The formatting
-// and parsing helpers below take caller-supplied buffers and memory readers so
-// tests can drive them without crashing.
+// CrashFilter may run with a corrupt heap: use fixed buffers and Win32 calls,
+// never CRT allocation, iostreams, std::string or std::filesystem.
 
 #include <windows.h>
 
@@ -15,21 +12,17 @@
 namespace crash_log
 {
 
-constexpr std::size_t kMaximumModules       = 256;
-constexpr std::size_t kMaximumFrames        = 64;
-constexpr std::size_t kStackScanDwords      = 1024;
-constexpr std::size_t kModuleNameCapacity   = 48;
-constexpr std::size_t kPdbNameCapacity      = 64;
-constexpr std::size_t kMaximumAddonsText    = 512;
-constexpr std::size_t kMaximumVersionText   = 64;
-constexpr std::size_t kMaximumSections      = 96;
-constexpr std::size_t kMaximumDebugEntries  = 16;
-constexpr std::size_t kMaximumPdbPathBytes  = 260;
-constexpr std::size_t kMaximumCodeRanges    = 8;
-constexpr std::size_t kMaximumStartupAddons = 64;
+constexpr std::size_t kMaximumModules      = 256;
+constexpr std::size_t kStackScanDwords     = 1024;
+constexpr std::size_t kModuleNameCapacity  = 48;
+constexpr std::size_t kPdbNameCapacity     = 64;
+constexpr std::size_t kMaximumAddonsText   = 512;
+constexpr std::size_t kMaximumVersionText  = 64;
+constexpr std::size_t kMaximumSections     = 96;
+constexpr std::size_t kMaximumDebugEntries = 16;
+constexpr std::size_t kMaximumPdbPathBytes = 260;
 
-// Fixed-capacity ASCII appender. Output past the capacity is dropped and
-// sets truncated().
+// Output past capacity is dropped.
 class TextBuffer
 {
 public:
@@ -44,10 +37,6 @@ public:
         if (size_ < capacity_)
         {
             storage_[size_++] = value;
-        }
-        else
-        {
-            truncated_ = true;
         }
     }
 
@@ -76,7 +65,7 @@ public:
         }
     }
 
-    // Uppercase hex, zero-padded to at least minimumDigits.
+    // Uppercase hex, zero-padded to at least minimumDigits (at most 8).
     void AppendHex(std::uint32_t value, unsigned minimumDigits = 1) noexcept
     {
         char     digits[8];
@@ -86,7 +75,7 @@ public:
             digits[count++] = "0123456789ABCDEF"[value & 0xfu];
             value >>= 4;
         } while (value != 0);
-        for (unsigned pad = count; pad < minimumDigits && pad < 8; ++pad)
+        for (unsigned pad = count; pad < minimumDigits; ++pad)
         {
             AppendChar('0');
         }
@@ -96,6 +85,7 @@ public:
         }
     }
 
+    // Zero-padded to at least minimumDigits (at most 10).
     void AppendDecimal(std::uint32_t value, unsigned minimumDigits = 1) noexcept
     {
         char     digits[10];
@@ -105,7 +95,7 @@ public:
             digits[count++] = static_cast<char>('0' + value % 10u);
             value /= 10u;
         } while (value != 0);
-        for (unsigned pad = count; pad < minimumDigits && pad < 10; ++pad)
+        for (unsigned pad = count; pad < minimumDigits; ++pad)
         {
             AppendChar('0');
         }
@@ -115,23 +105,9 @@ public:
         }
     }
 
-    // Ends the line even when the text filled the buffer.
-    void AppendNewline() noexcept
-    {
-        if (size_ < capacity_)
-        {
-            storage_[size_++] = '\n';
-        }
-        else if (capacity_ != 0)
-        {
-            storage_[capacity_ - 1] = '\n';
-        }
-    }
-
     void Clear() noexcept
     {
-        size_      = 0;
-        truncated_ = false;
+        size_ = 0;
     }
 
     [[nodiscard]] const char* data() const noexcept
@@ -144,11 +120,6 @@ public:
         return size_;
     }
 
-    [[nodiscard]] bool truncated() const noexcept
-    {
-        return truncated_;
-    }
-
     [[nodiscard]] std::string_view view() const noexcept
     {
         return { storage_, size_ };
@@ -157,8 +128,7 @@ public:
 private:
     char*       storage_;
     std::size_t capacity_;
-    std::size_t size_      = 0;
-    bool        truncated_ = false;
+    std::size_t size_ = 0;
 };
 
 struct UtcTime
@@ -191,14 +161,8 @@ struct MemoryReader
 
     [[nodiscard]] bool Read(std::uintptr_t address, void* out, std::size_t size) const noexcept
     {
-        return read != nullptr && read(context, address, out, size);
+        return read(context, address, out, size);
     }
-};
-
-struct CodeRange
-{
-    std::uint32_t begin = 0;
-    std::uint32_t end   = 0;
 };
 
 struct ModuleRecord
@@ -206,10 +170,9 @@ struct ModuleRecord
     std::uintptr_t base          = 0;
     std::uint32_t  sizeOfImage   = 0;
     std::uint32_t  timeDateStamp = 0;
-    // Executable sections as RVA ranges; sections past the capacity are not
-    // recorded.
-    CodeRange     code[kMaximumCodeRanges]{};
-    std::uint32_t codeCount = 0;
+    // Span of the executable sections as RVAs: [codeBegin, codeEnd).
+    std::uint32_t codeBegin = 0;
+    std::uint32_t codeEnd   = 0;
     bool          hasPdb    = false;
     std::uint8_t  pdbGuid[16]{};
     std::uint32_t pdbAge = 0;
@@ -226,28 +189,20 @@ struct ModuleTable
 // The loaded module whose image contains address, or nullptr.
 [[nodiscard]] const ModuleRecord* FindModule(const ModuleTable& modules, std::uintptr_t address) noexcept;
 
-// True when address lies in one of the executable sections of a listed module.
+// True when address lies in the executable span of a listed module.
 [[nodiscard]] bool IsCodeAddress(const ModuleTable& modules, std::uintptr_t address) noexcept;
 
 // "name+0xOFFSET", or "?" when no listed module contains the address.
 void AppendModuleOffset(TextBuffer& out, const ModuleTable& modules, std::uintptr_t address) noexcept;
 
-// Fills the PE-derived fields of record from the mapped image at base:
-// SizeOfImage, TimeDateStamp, executable range and the CodeView RSDS record.
-// The name is left to the caller. False when the headers are not a readable
-// 32-bit PE.
+// Read SizeOfImage, TimeDateStamp, executable span and CodeView RSDS from a 32-bit PE.
+// Requires a fresh record; the caller sets its name. False for unreadable or invalid headers.
 [[nodiscard]] bool ReadModuleImage(const MemoryReader& reader, std::uintptr_t base, ModuleRecord& record) noexcept;
-
-// Return addresses along the EBP chain starting at ebp. Each frame pointer
-// must be 4-byte aligned, strictly above the previous one and readable; the
-// walk ends at a return address below 0x10000. Returns the count stored.
-[[nodiscard]] std::size_t WalkFrames(const MemoryReader& reader, std::uintptr_t ebp, std::uintptr_t* returnAddresses, std::size_t capacity) noexcept;
 
 struct ByteSink
 {
-    // Returns false when the data could not be written; WriteReport then stops
-    // forwarding output, so it never continues past a gap.
-    bool (*write)(void* context, const char* data, std::size_t size) = nullptr;
+    // Receives one line per call; after failure, the sink must drop all later lines.
+    void (*write)(void* context, const char* data, std::size_t size) = nullptr;
     void* context                                                    = nullptr;
 };
 
@@ -257,23 +212,21 @@ struct ReportInput
     std::uint32_t    processId = 0;
     std::uint32_t    threadId  = 0;
     std::string_view launcherVersion;
-    // Comma-joined addon IDs selected at startup, written one per line up to
-    // kMaximumStartupAddons; later loads and unloads are not tracked.
+    // Comma-joined IDs selected at startup, printable ASCII; later loads are not tracked.
     std::string_view startupAddons;
-    // The caller already dropped addon IDs that did not fit.
+    // Install dropped IDs to fit its capacity.
     bool startupAddonsTruncated = false;
     // Bytes of the faulting thread's stack, from ESP up, that reader serves.
     std::uint32_t           stackSnapshotBytes = 0;
     const EXCEPTION_RECORD* record             = nullptr;
     const CONTEXT*          context            = nullptr;
-    const ModuleTable*      modules            = nullptr;
+    const ModuleTable*      modules            = nullptr; // required
     MemoryReader            reader{};
 };
 
 void WriteReport(const ByteSink& sink, const ReportInput& input) noexcept;
 
-// Fills the table from the loader's module list. A module whose headers are
-// unreadable is skipped.
+// Read the loader's module list, skipping unreadable headers.
 void CaptureModules(ModuleTable& modules, const MemoryReader& reader) noexcept;
 
 // VirtualQuery-validated reads of the current process.
@@ -286,36 +239,19 @@ struct InstallOptions
     std::string_view  launcherVersion;
     // Comma-joined addon IDs selected at startup; may be empty.
     std::string_view addons;
-    // false forces the in-thread fallback that is used when the capture
-    // thread cannot start.
-    bool startCaptureThread = true;
     // How long a faulting thread waits for the capture before it chains.
     DWORD captureTimeoutMs = 20000;
 };
 
-// Creates the directory, starts the capture thread and installs CrashFilter as
-// the unhandled-exception filter, keeping the previous one to chain to. False
-// when disabled, already installed, or the directory cannot be created.
+// Create the directory and capture thread; install CrashFilter and chain the previous filter.
+// False if disabled, already installed, or directory or thread creation fails.
 bool Install(const InstallOptions& options) noexcept;
 
-// Reinstalls CrashFilter once, on the first call after Install, in case the
-// game replaced it. A different filter returned there becomes the one chained
-// to. Cheap to call every frame.
+// Reinstall once after Install, chaining any replacement filter; cheap to call every frame.
 void ReassertFilterOnce() noexcept;
 
-// The filter the crash filter chains to, or nullptr.
-[[nodiscard]] LPTOP_LEVEL_EXCEPTION_FILTER ChainedFilter() noexcept;
-
-// Copies the first exception and up to 16 KiB of the faulting stack from ESP
-// into static storage and hands them to the capture thread, which writes the
-// log from the copies, then waits up to the capture timeout (20 s by default). Any other thread entering meanwhile waits the same
-// way. A thread that re-enters the filter from a chained filter gets
-// EXCEPTION_CONTINUE_SEARCH with no chaining; threads are tracked in a fixed
-// array of 64 ids, and one that finds it full waits and chains unmarked. Each
-// thread then returns the
-// chained filter's result, or EXCEPTION_CONTINUE_SEARCH when there is none.
-// Without a capture thread the log is written on the faulting thread, except
-// for a stack overflow, which only chains.
+// Capture the first exception, wait, then chain; see ../README.md#crash-logs.
+// Re-entry returns EXCEPTION_CONTINUE_SEARCH; a full thread array still waits and chains.
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* exception);
 
 } // namespace crash_log

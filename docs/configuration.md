@@ -766,7 +766,7 @@ session's log to `bahamut-launcher.previous.log`. Help and Support copy only a
 bounded portion of the current log and redact secrets before showing it in
 the UI.
 
-`logs/crashes/` holds crash logs, written on a best-effort basis. When a game
+`logs/crashes/` holds best-effort crash logs. When a game
 crash reaches the client's exception filter, it writes a `game-*.log`; the
 launcher writes a `launcher-*.log` for every panic, including one that an
 install or repair worker recovers from while the launcher keeps running. Files

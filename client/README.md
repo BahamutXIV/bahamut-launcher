@@ -124,38 +124,36 @@ loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
 When `BAHAMUT_RUNTIME_CRASH_LOGS` names a directory, `bahamut.dll` installs an
 unhandled-exception filter ([crash log](src/crash_log.h)) during
 initialization. An empty or absent value leaves crash logging off. The
-directory is created if missing, and no file is ever deleted.
+directory is created if missing; files are never deleted.
 
 The first unhandled exception in the game process writes
 `game-YYYYMMDDTHHMMSSZ-<pid>.log` (UTC). The log is ASCII with one fact per
 line:
 
 - launcher version, process ID and the ID of the faulting thread;
-- one `startup_addon:` line per addon ID selected at startup, up to 64 and
-  within 512 characters of IDs; when some do not fit, a
-  `startup_addons_truncated: yes` line follows. Later loads and unloads are not
-  tracked;
+- one `startup_addon:` line per addon ID selected at startup, within 512
+  characters of IDs; when some do not fit, a `startup_addons_truncated: yes`
+  line follows. Later loads and unloads are not tracked;
 - exception code and name, and for access violations the access kind and
   target address;
 - the faulting address and the x86 registers;
-- `stack_snapshot_bytes`, then an EBP-chain walk of up to 64 return addresses
-  and up to 1024 stack dwords from ESP that point into an executable section
-  of a listed module, both read from a copy of the stack taken at the fault
-  (ESP up to 16 KiB or the end of its memory region), so a frame outside the
-  copy ends the walk;
+- `stack_snapshot_bytes`, then up to 1024 stack dwords from ESP that fall
+  inside the executable span of a listed module, read from a copy of the stack
+  taken at the fault (ESP up to 4 KiB or the end of its memory region);
 - the loaded modules, capped at 256, each with base, SizeOfImage and
   TimeDateStamp, plus the PDB GUID, age and file name only for a module with a
   readable RSDS CodeView record;
 - a final `end of crash log` line, which a cut-off log lacks.
 
-Code addresses print as `module+0xOFFSET`, or `?` outside every module. A
-module past the cap is not listed and prints as `?`. The module list lets a
-maintainer match symbols. MSVC Release builds emit PDBs that embed only their
-file name. The log holds registers, return addresses and raw stack values that
-point into code; it does not hold memory contents beyond those values.
+Code addresses print as `module+0xOFFSET`, or `?` outside listed modules,
+including modules past the cap. The module list lets maintainers match symbols.
+MSVC Release builds emit PDBs that embed only their file name. The stack values
+are unverified candidates: a span can cover non-code gaps between sections, and
+a value may be stale data rather than a return address. The log does not hold
+memory contents beyond registers and those values.
 
-The filter calls the filter it replaced and returns that result, or continues
-the search when there was none, so the game's own handling still runs. The
+The filter calls the previous filter and returns its result, or continues
+the search if none existed, preserving the game's own handling. The
 retail client sets its own unhandled-exception filter during startup. The
 module therefore reinstalls its filter once, on the first game frame, and
 chains to whatever it displaced. A filter the game installs after that frame
@@ -168,23 +166,17 @@ thread copies the exception record, context and stack window into static
 storage, signals the capture thread, waits up to 20 s, then chains. A thread
 that faults meanwhile waits the same way. Threads inside the filter are tracked
 in a fixed array of 64 thread IDs; a thread already present is a re-entry, and
-one that finds the array full is not, so it waits and chains. Capture is best
-effort: if the capture thread cannot start, the log is written on the faulting
-thread, except for a stack overflow, which only chains; a capture that exceeds
-the timeout may be cut off when the process ends; after the first failed write
-the rest of the log, including `end of crash log`, is dropped; and exceptions
-that never reach the filter, such as a fast-fail stack buffer overrun, write
-nothing.
+one that finds the array full waits and chains. If the capture thread cannot
+start, crash logging stays off. Capture is best effort: process exit may cut
+off capture after the timeout; a failed write drops the rest of the log,
+including `end of crash log`; exceptions that never reach the filter, such as
+a fast-fail stack buffer overrun, write nothing.
 
 The heap may be corrupt at crash time, so the capture allocates nothing from
 the CRT heap and uses no iostreams or `std::string`. The directory path,
 launcher version and addon IDs are prepared at install; the log is formatted
-into fixed buffers with Win32 calls. The `bahamut-crash-log` CTests drive the
-formatting, PE and PDB parsing, per-section code checks, frame walk, capture
-thread, copied exception and stack, write-failure latching, concurrent
-faulting threads, re-entry, a full thread array, fallback and filter chaining
-with
-synthetic exception records and never crash the test process.
+into fixed buffers with Win32 calls. The `bahamut-crash-log` CTests use
+synthetic exceptions and never crash the test process.
 
 ## Autologin
 

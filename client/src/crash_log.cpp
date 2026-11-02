@@ -17,18 +17,17 @@ namespace crash_log
 namespace
 {
 
-constexpr DWORD          kCaptureStackBytes    = 256 * 1024;
-constexpr std::size_t    kMaximumActiveThreads = 64;
-constexpr std::size_t    kStackSnapshotBytes   = 16 * 1024;
-constexpr DWORD          kReadableProtection   = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-constexpr std::size_t    kLineCapacity         = 384;
-constexpr std::size_t    kSinkCapacity         = 8192;
-constexpr std::size_t    kDirectoryCapacity    = 400;
-constexpr std::size_t    kPathCapacity         = kDirectoryCapacity + 64;
-constexpr std::size_t    kMaximumLoaderEntries = 512;
-constexpr std::uint32_t  kRsdsSignature        = 0x53445352; // "RSDS"
-constexpr std::uint32_t  kCppExceptionCode     = 0xe06d7363;
-constexpr std::uintptr_t kNullPageLimit        = 0x10000;
+constexpr DWORD         kCaptureStackBytes    = 256 * 1024;
+constexpr std::size_t   kMaximumActiveThreads = 64;
+constexpr std::size_t   kStackSnapshotBytes   = kStackScanDwords * sizeof(std::uint32_t);
+constexpr DWORD         kReadableProtection   = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+constexpr std::size_t   kLineCapacity         = 384;
+constexpr std::size_t   kSinkCapacity         = 8192;
+constexpr std::size_t   kDirectoryCapacity    = 400;
+constexpr std::size_t   kPathCapacity         = kDirectoryCapacity + 64;
+constexpr std::size_t   kMaximumLoaderEntries = 512;
+constexpr std::uint32_t kRsdsSignature        = 0x53445352; // "RSDS"
+constexpr std::uint32_t kCppExceptionCode     = 0xe06d7363;
 
 // x86 LDR_DATA_TABLE_ENTRY up to the fields read; winternl.h leaves the
 // middle of the structure opaque.
@@ -58,21 +57,20 @@ struct FileSink
 // Everything the filter touches is static storage prepared at install time.
 struct State
 {
-    std::atomic<bool>                         installed{ false };
-    std::atomic<bool>                         reasserted{ false };
+    std::atomic<bool> installed{ false };
+    // Both filters stay inert until the events and capture thread exist.
+    std::atomic<bool>                         ready{ false };
     std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> chained{ nullptr };
-    // Nonzero once a thread owns the capture; finished once it has ended.
-    volatile LONG claimed  = 0;
-    volatile LONG finished = 0;
-    // Ids of the threads inside CrashFilter (0 = free), so a chained filter
-    // that leads back to it cannot recurse. Fixed storage: no TLS, no heap.
+    // Only the game thread's ReassertFilterOnce touches this.
+    bool reasserted = false;
+    // Nonzero once a thread owns the capture.
+    volatile LONG claimed = 0;
+    // Prevent chained-filter recursion without TLS or heap storage; 0 marks a free slot.
     volatile LONG activeThreads[kMaximumActiveThreads]{};
-    DWORD         captureTimeoutMs     = 20000;
-    HANDLE        requestEvent         = nullptr;
-    HANDLE        doneEvent            = nullptr;
-    bool          captureThreadStarted = false;
-    // The first exception, copied before the capture thread is signaled; the
-    // capture thread never reads the faulting thread's own records.
+    DWORD         captureTimeoutMs = 20000;
+    HANDLE        requestEvent     = nullptr;
+    HANDLE        doneEvent        = nullptr;
+    // Copy before signaling; capture must not read the faulting thread's records.
     EXCEPTION_RECORD record{};
     CONTEXT          context{};
     bool             hasRecord      = false;
@@ -95,8 +93,7 @@ struct State
     FileSink       sink;
 };
 
-State       gState;
-ModuleTable gNoModules;
+State gState;
 
 bool IsSeparator(wchar_t value) noexcept
 {
@@ -111,29 +108,9 @@ bool ReadValue(const MemoryReader& reader, std::uintptr_t address, Value& value)
 
 void WriteLine(const ByteSink& sink, TextBuffer& line) noexcept
 {
-    line.AppendNewline();
-    if (sink.write != nullptr)
-    {
-        sink.write(sink.context, line.data(), line.size());
-    }
+    line.AppendChar('\n');
+    sink.write(sink.context, line.data(), line.size());
     line.Clear();
-}
-
-// Wraps the caller's sink; after its first failure nothing more is written.
-struct LatchedSink
-{
-    ByteSink inner;
-    bool     failed = false;
-};
-
-bool LatchedWrite(void* context, const char* data, std::size_t size) noexcept
-{
-    auto& latch = *static_cast<LatchedSink*>(context);
-    if (!latch.failed && (latch.inner.write == nullptr || !latch.inner.write(latch.inner.context, data, size)))
-    {
-        latch.failed = true;
-    }
-    return !latch.failed;
 }
 
 void AppendHex32(TextBuffer& out, std::uint32_t value) noexcept
@@ -168,7 +145,6 @@ void AppendGuid(TextBuffer& out, const std::uint8_t (&guid)[16]) noexcept
     }
 }
 
-// Copies the part of text after the last path separator, as printable ASCII.
 void CopyBaseName(char* destination, std::size_t capacity, const char* text, std::size_t length) noexcept
 {
     std::size_t start = 0;
@@ -227,10 +203,6 @@ bool ReadDebugRecord(const MemoryReader& reader, std::uintptr_t base, const IMAG
 
 bool ProcessRead(void*, std::uintptr_t address, void* out, std::size_t size) noexcept
 {
-    if (size == 0)
-    {
-        return true;
-    }
     if (address + size < address)
     {
         return false;
@@ -270,7 +242,7 @@ bool ProcessRead(void*, std::uintptr_t address, void* out, std::size_t size) noe
 void FlushSink(FileSink& sink) noexcept
 {
     std::size_t written = 0;
-    while (written < sink.used && sink.file != INVALID_HANDLE_VALUE && !sink.failed)
+    while (written < sink.used && !sink.failed)
     {
         DWORD count = 0;
         if (!WriteFile(sink.file, sink.buffer + written, static_cast<DWORD>(sink.used - written), &count, nullptr) || count == 0)
@@ -283,9 +255,8 @@ void FlushSink(FileSink& sink) noexcept
     sink.used = 0;
 }
 
-// Once a write has failed every later call fails too, so a gap is never
-// followed by more output.
-bool SinkWrite(void* context, const char* data, std::size_t size) noexcept
+// Stop after a failed write so an incomplete log cannot have an end marker.
+void SinkWrite(void* context, const char* data, std::size_t size) noexcept
 {
     auto& sink = *static_cast<FileSink*>(context);
     while (size != 0 && !sink.failed)
@@ -305,18 +276,12 @@ bool SinkWrite(void* context, const char* data, std::size_t size) noexcept
         data += chunk;
         size -= chunk;
     }
-    return !sink.failed;
 }
 
-// Creates every missing component of path; true when it ends as a directory.
-// Failures are judged by the final attribute check, not by CreateDirectoryW.
+// The final attribute check decides success even if CreateDirectoryW fails.
 bool EnsureDirectory(const wchar_t* path, std::size_t length) noexcept
 {
     wchar_t* scratch = gState.scratch;
-    if (length == 0 || length >= kDirectoryCapacity)
-    {
-        return false;
-    }
     std::memcpy(scratch, path, length * sizeof(wchar_t));
     scratch[length] = L'\0';
     for (std::size_t index = 3; index < length; ++index)
@@ -334,44 +299,31 @@ bool EnsureDirectory(const wchar_t* path, std::size_t length) noexcept
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-// directory\stem.extension into gState.path; false when it does not fit.
-bool BuildPath(const char* stem, std::size_t stemLength, const wchar_t* extension) noexcept
+// directory\stem.log into gState.path; the longest directory leaves room.
+void BuildPath(const char* stem, std::size_t stemLength) noexcept
 {
     std::size_t length = gState.directoryLength;
     std::memcpy(gState.path, gState.directory, length * sizeof(wchar_t));
     gState.path[length++] = L'\\';
     for (std::size_t index = 0; index < stemLength; ++index)
     {
-        if (length + 1 >= kPathCapacity)
-        {
-            return false;
-        }
         gState.path[length++] = static_cast<wchar_t>(static_cast<unsigned char>(stem[index]));
     }
-    for (std::size_t index = 0; extension[index] != L'\0'; ++index)
-    {
-        if (length + 1 >= kPathCapacity)
-        {
-            return false;
-        }
-        gState.path[length++] = extension[index];
-    }
-    gState.path[length] = L'\0';
-    return true;
+    constexpr wchar_t kExtension[] = L".log";
+    std::memcpy(gState.path + length, kExtension, sizeof(kExtension));
 }
 
-HANDLE CreateCrashFile(DWORD access) noexcept
+HANDLE CreateCrashFile() noexcept
 {
-    HANDLE file = CreateFileW(gState.path, access, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE file = CreateFileW(gState.path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PATH_NOT_FOUND && EnsureDirectory(gState.directory, gState.directoryLength))
     {
-        file = CreateFileW(gState.path, access, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        file = CreateFileW(gState.path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
     return file;
 }
 
-// Serves reads from the stack snapshot only: addresses outside it fail, which
-// ends the frame walk and the stack scan.
+// Reads outside the snapshot return false, ending the stack scan.
 bool SnapshotRead(void*, std::uintptr_t address, void* out, std::size_t size) noexcept
 {
     if (address < gState.stackBase || address - gState.stackBase > gState.stackBytes || size > gState.stackBytes - (address - gState.stackBase))
@@ -382,8 +334,7 @@ bool SnapshotRead(void*, std::uintptr_t address, void* out, std::size_t size) no
     return true;
 }
 
-// Runs on the capture thread (or the faulting thread when none started) and
-// reads only the stored copies of the exception and the stack.
+// The capture thread reads only copies of the exception and stack.
 void WriteCrashFiles(DWORD faultingThread) noexcept
 {
     SYSTEMTIME now{};
@@ -394,14 +345,11 @@ void WriteCrashFiles(DWORD faultingThread) noexcept
     char       stemStorage[kModuleNameCapacity];
     TextBuffer stem(stemStorage, sizeof(stemStorage));
     AppendFileStem(stem, time, processId);
-    if (!BuildPath(stem.data(), stem.size(), L".log"))
-    {
-        return;
-    }
+    BuildPath(stem.data(), stem.size());
     FileSink& sink = gState.sink;
     sink.used      = 0;
     sink.failed    = false;
-    sink.file      = CreateCrashFile(GENERIC_WRITE);
+    sink.file      = CreateCrashFile();
     if (sink.file == INVALID_HANDLE_VALUE)
     {
         return;
@@ -427,31 +375,12 @@ void WriteCrashFiles(DWORD faultingThread) noexcept
     sink.file = INVALID_HANDLE_VALUE;
 }
 
-void FinishCapture() noexcept
+void WaitForCapture() noexcept
 {
-    InterlockedExchange(&gState.finished, 1);
-    if (gState.doneEvent != nullptr)
-    {
-        SetEvent(gState.doneEvent);
-    }
+    WaitForSingleObject(gState.doneEvent, gState.captureTimeoutMs);
 }
 
-// True when the capture finished within the timeout.
-bool WaitForCapture() noexcept
-{
-    if (gState.doneEvent != nullptr)
-    {
-        return WaitForSingleObject(gState.doneEvent, gState.captureTimeoutMs) == WAIT_OBJECT_0;
-    }
-    for (DWORD waited = 0; gState.finished == 0 && waited < gState.captureTimeoutMs; waited += 5)
-    {
-        Sleep(5);
-    }
-    return gState.finished != 0;
-}
-
-// Started at install with its own stack so a capture neither runs on an
-// exhausted faulting stack nor blocks the faulting thread past the timeout.
+// Own stack, so a capture works after a stack overflow while the faulter waits at most the timeout.
 DWORD WINAPI CaptureThreadMain(LPVOID)
 {
     WaitForSingleObject(gState.requestEvent, INFINITE);
@@ -462,12 +391,11 @@ DWORD WINAPI CaptureThreadMain(LPVOID)
     BAHAMUT_FAULT_EXCEPT
     {
     }
-    FinishCapture();
+    SetEvent(gState.doneEvent);
     return 0;
 }
 
-// Copies the first record (without its chain) and the context, so a capture
-// that outlives the wait never reads a released stack.
+// Copy the record and context before capture can outlive the faulting stack.
 void StoreException(const EXCEPTION_POINTERS* exception) noexcept
 {
     gState.hasRecord  = false;
@@ -476,9 +404,8 @@ void StoreException(const EXCEPTION_POINTERS* exception) noexcept
     {
         if (exception->ExceptionRecord != nullptr)
         {
-            gState.record                 = *exception->ExceptionRecord;
-            gState.record.ExceptionRecord = nullptr;
-            gState.hasRecord              = true;
+            gState.record    = *exception->ExceptionRecord;
+            gState.hasRecord = true;
         }
         if (exception->ContextRecord != nullptr)
         {
@@ -491,10 +418,8 @@ void StoreException(const EXCEPTION_POINTERS* exception) noexcept
     }
 }
 
-// Copies the stack from ESP up to 16 KiB or the end of its region, so the
-// frame walk and stack scan read what the fault saw even if the thread runs
-// on. A copy and one VirtualQuery: it needs almost no stack, so it also runs
-// after a stack overflow.
+// Snapshot from ESP to the scan limit or region end before the thread resumes.
+// One VirtualQuery and a copy use little stack, permitting capture after stack overflow.
 void StoreStack() noexcept
 {
     gState.stackBase  = 0;
@@ -535,24 +460,8 @@ void RunCapture(const EXCEPTION_POINTERS* exception, DWORD thread) noexcept
     StoreException(exception);
     StoreStack();
     gState.faultingThread = static_cast<LONG>(thread);
-    if (gState.captureThreadStarted)
-    {
-        SetEvent(gState.requestEvent);
-        WaitForCapture();
-        return;
-    }
-    // The faulting thread has no spare stack after a stack overflow.
-    if (!(gState.hasRecord && gState.record.ExceptionCode == EXCEPTION_STACK_OVERFLOW))
-    {
-        BAHAMUT_FAULT_TRY
-        {
-            WriteCrashFiles(thread);
-        }
-        BAHAMUT_FAULT_EXCEPT
-        {
-        }
-    }
-    FinishCapture();
+    SetEvent(gState.requestEvent);
+    WaitForCapture();
 }
 
 constexpr int kReentered = -1;
@@ -676,14 +585,7 @@ bool IsCodeAddress(const ModuleTable& modules, std::uintptr_t address) noexcept
         return false;
     }
     const std::uintptr_t offset = address - module->base;
-    for (std::uint32_t index = 0; index < module->codeCount; ++index)
-    {
-        if (offset >= module->code[index].begin && offset < module->code[index].end)
-        {
-            return true;
-        }
-    }
-    return false;
+    return offset >= module->codeBegin && offset < module->codeEnd;
 }
 
 void AppendModuleOffset(TextBuffer& out, const ModuleTable& modules, std::uintptr_t address) noexcept
@@ -714,8 +616,6 @@ bool ReadModuleImage(const MemoryReader& reader, std::uintptr_t base, ModuleReco
     }
     record.sizeOfImage   = nt.OptionalHeader.SizeOfImage;
     record.timeDateStamp = nt.FileHeader.TimeDateStamp;
-    record.codeCount     = 0;
-    record.hasPdb        = false;
 
     std::uintptr_t section = ntAddress + offsetof(IMAGE_NT_HEADERS32, OptionalHeader) + nt.FileHeader.SizeOfOptionalHeader;
     std::size_t    count   = nt.FileHeader.NumberOfSections;
@@ -741,9 +641,13 @@ bool ReadModuleImage(const MemoryReader& reader, std::uintptr_t base, ModuleReco
         {
             continue;
         }
-        if (record.codeCount < kMaximumCodeRanges)
+        if (record.codeEnd == 0 || begin < record.codeBegin)
         {
-            record.code[record.codeCount++] = { begin, end };
+            record.codeBegin = begin;
+        }
+        if (end > record.codeEnd)
+        {
+            record.codeEnd = end;
         }
     }
 
@@ -771,35 +675,11 @@ bool ReadModuleImage(const MemoryReader& reader, std::uintptr_t base, ModuleReco
     return true;
 }
 
-std::size_t WalkFrames(const MemoryReader& reader, std::uintptr_t ebp, std::uintptr_t* returnAddresses, std::size_t capacity) noexcept
+void WriteReport(const ByteSink& sink, const ReportInput& input) noexcept
 {
-    std::size_t    count    = 0;
-    std::uintptr_t previous = 0;
-    while (count < capacity && count < kMaximumFrames)
-    {
-        if (ebp == 0 || (ebp & 3u) != 0 || ebp <= previous)
-        {
-            break;
-        }
-        std::uint32_t frame[2]{};
-        if (!reader.Read(ebp, frame, sizeof(frame)) || frame[1] < kNullPageLimit)
-        {
-            break;
-        }
-        returnAddresses[count++] = frame[1];
-        previous                 = ebp;
-        ebp                      = frame[0];
-    }
-    return count;
-}
-
-void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
-{
-    LatchedSink        latch{ target };
-    const ByteSink     sink{ &LatchedWrite, &latch };
     char               storage[kLineCapacity];
     TextBuffer         line(storage, sizeof(storage));
-    const ModuleTable& modules = input.modules != nullptr ? *input.modules : gNoModules;
+    const ModuleTable& modules = *input.modules;
 
     line.Append("Bahamut game crash log");
     WriteLine(sink, line);
@@ -815,7 +695,7 @@ void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
     }
     else
     {
-        line.AppendAscii(input.launcherVersion);
+        line.Append(input.launcherVersion);
     }
     WriteLine(sink, line);
 
@@ -827,36 +707,22 @@ void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
     line.AppendDecimal(input.threadId);
     WriteLine(sink, line);
 
+    for (std::size_t start = 0; start < input.startupAddons.size();)
     {
-        std::size_t listed = 0;
-        std::size_t start  = 0;
-        bool        more   = input.startupAddonsTruncated;
-        while (start < input.startupAddons.size())
+        std::size_t end = input.startupAddons.find(',', start);
+        if (end == std::string_view::npos)
         {
-            std::size_t end = input.startupAddons.find(',', start);
-            if (end == std::string_view::npos)
-            {
-                end = input.startupAddons.size();
-            }
-            if (end > start)
-            {
-                if (listed == kMaximumStartupAddons)
-                {
-                    more = true;
-                    break;
-                }
-                line.Append("startup_addon: ");
-                line.AppendAscii(input.startupAddons.substr(start, end - start));
-                WriteLine(sink, line);
-                ++listed;
-            }
-            start = end + 1;
+            end = input.startupAddons.size();
         }
-        if (more)
-        {
-            line.Append("startup_addons_truncated: yes");
-            WriteLine(sink, line);
-        }
+        line.Append("startup_addon: ");
+        line.Append(input.startupAddons.substr(start, end - start));
+        WriteLine(sink, line);
+        start = end + 1;
+    }
+    if (input.startupAddonsTruncated)
+    {
+        line.Append("startup_addons_truncated: yes");
+        WriteLine(sink, line);
     }
 
     if (input.record != nullptr)
@@ -929,17 +795,6 @@ void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
         line.AppendDecimal(input.stackSnapshotBytes);
         WriteLine(sink, line);
 
-        std::uintptr_t    frames[kMaximumFrames];
-        const std::size_t frameCount = WalkFrames(input.reader, context.Ebp, frames, kMaximumFrames);
-        for (std::size_t index = 0; index < frameCount; ++index)
-        {
-            line.Append("frame ");
-            line.AppendDecimal(static_cast<std::uint32_t>(index));
-            line.Append(": ");
-            AppendAddressWithModule(line, modules, frames[index]);
-            WriteLine(sink, line);
-        }
-
         for (std::uint32_t index = 0; index < kStackScanDwords; ++index)
         {
             std::uint32_t value = 0;
@@ -963,7 +818,7 @@ void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
     {
         const ModuleRecord& module = modules.entries[index];
         line.Append("module ");
-        line.AppendAscii(module.name);
+        line.Append(module.name);
         line.Append(" base=");
         AppendHex32(line, static_cast<std::uint32_t>(module.base));
         line.Append(" size_of_image=");
@@ -977,7 +832,7 @@ void WriteReport(const ByteSink& target, const ReportInput& input) noexcept
             line.Append(" pdb_age=");
             line.AppendDecimal(module.pdbAge);
             line.Append(" pdb=");
-            line.AppendAscii(module.pdbName);
+            line.Append(module.pdbName);
         }
         WriteLine(sink, line);
     }
@@ -1068,18 +923,14 @@ bool Install(const InstallOptions& options) noexcept
     gState.addonsLength = addons.size();
 
     gState.captureTimeoutMs = options.captureTimeoutMs;
-
-    gState.requestEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    gState.doneEvent    = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (options.startCaptureThread && gState.requestEvent != nullptr && gState.doneEvent != nullptr)
+    gState.requestEvent     = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    gState.doneEvent        = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE thread           = nullptr;
+    if (gState.requestEvent != nullptr && gState.doneEvent != nullptr)
     {
-        if (const HANDLE thread = CreateThread(nullptr, kCaptureStackBytes, &CaptureThreadMain, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr))
-        {
-            CloseHandle(thread);
-            gState.captureThreadStarted = true;
-        }
+        thread = CreateThread(nullptr, kCaptureStackBytes, &CaptureThreadMain, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
     }
-    if (!gState.captureThreadStarted)
+    if (thread == nullptr)
     {
         for (HANDLE* event : { &gState.requestEvent, &gState.doneEvent })
         {
@@ -1089,32 +940,28 @@ bool Install(const InstallOptions& options) noexcept
                 *event = nullptr;
             }
         }
+        gState.installed.store(false);
+        return false;
     }
+    CloseHandle(thread);
 
+    gState.ready.store(true, std::memory_order_release);
     gState.chained.store(SetUnhandledExceptionFilter(&CrashFilter));
     return true;
 }
 
 void ReassertFilterOnce() noexcept
 {
-    if (gState.reasserted.load(std::memory_order_relaxed) || !gState.installed.load(std::memory_order_acquire))
+    if (gState.reasserted || !gState.ready.load(std::memory_order_acquire))
     {
         return;
     }
-    if (gState.reasserted.exchange(true))
-    {
-        return;
-    }
+    gState.reasserted                           = true;
     const LPTOP_LEVEL_EXCEPTION_FILTER previous = SetUnhandledExceptionFilter(&CrashFilter);
     if (previous != &CrashFilter)
     {
         gState.chained.store(previous);
     }
-}
-
-LPTOP_LEVEL_EXCEPTION_FILTER ChainedFilter() noexcept
-{
-    return gState.chained.load();
 }
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* exception)
@@ -1124,7 +971,7 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* exception)
     {
         return EXCEPTION_CONTINUE_SEARCH;
     }
-    if (exception != nullptr)
+    if (exception != nullptr && gState.ready.load(std::memory_order_acquire))
     {
         if (InterlockedCompareExchange(&gState.claimed, 1, 0) == 0)
         {
