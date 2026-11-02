@@ -171,7 +171,7 @@ tar.gz and SHA-256 sidecar, then checks that the remote tag resolves to the
 commit every build leg built, including for annotated tags. It attaches the
 assets to the tag's GitHub Release, replacing same-named files on reruns.
 
-Each release publishes exactly eight assets:
+Each release publishes exactly ten assets:
 
 ```text
 bahamut-launcher-vX.Y.Z-windows-x86_64.zip
@@ -182,7 +182,15 @@ bahamut-launcher-vX.Y.Z-macos-universal.zip
 bahamut-launcher-vX.Y.Z-macos-universal.zip.sha256
 bahamut-launcher-vX.Y.Z-linux-flatpak.zip
 bahamut-launcher-vX.Y.Z-linux-flatpak.zip.sha256
+bahamut-launcher-vX.Y.Z-windows-client-symbols.zip
+bahamut-launcher-vX.Y.Z-windows-client-symbols.zip.sha256
 ```
+
+The symbols ZIP holds the PDBs of the MSVC-built `bahamut.dll`,
+`bahamut-loader.exe`, `screenshot.dll` and `discord-rpc.dll` from the Windows
+package. A game crash log lists the PDB GUID and age of each module that has a
+CodeView PDB record, and these PDBs resolve its logged offsets. The Linux and macOS packages carry llvm-mingw
+builds of the client without debug information.
 
 Publishing to GitHub does not authorize an in-app stable update. The owner
 must separately sign [release metadata](release-metadata.md) locally; CI has
