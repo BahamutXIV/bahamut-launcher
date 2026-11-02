@@ -499,6 +499,7 @@ mod tests {
             addon_catalog: vec![launcher.join("addons/alpha/addon.toml")],
             addon_settings_path: launcher.join("config/addons"),
             chat_logs_path: launcher.join("logs/chat"),
+            crash_logs_path: launcher.join("logs/crashes"),
             dat_roots: Vec::new(),
             startup_script_path: launcher.join("scripts/default.txt"),
             screenshot_plugin_path: launcher.join("plugins/screenshot.dll"),

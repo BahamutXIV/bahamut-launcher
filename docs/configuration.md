@@ -77,7 +77,7 @@ described above:
 ~/.bahamut-launcher/
   config/                               <- every settings file listed above
   backups/  data/                       <- as in the portable layout, except WebView storage (below)
-  logs/                                 <- launcher, chat, and packet logs, wine.log, helper.log
+  logs/                                 <- launcher, chat, packet, and crash logs, wine.log, helper.log
   addons/<addon-id>/                    <- player-installed addons
   plugins/dats/<package-id>/            <- player-installed DAT packages
   screenshots/
@@ -119,7 +119,7 @@ therefore finds its files in `<prefix>/lib/bahamut-launcher`.
 ~/.bahamut-launcher/
   config/                               <- every settings file listed above
   backups/  data/                       <- as in the portable layout
-  logs/                                 <- launcher, chat, and packet logs, wine.log, helper.log
+  logs/                                 <- launcher, chat, packet, and crash logs, wine.log, helper.log
   addons/<addon-id>/                    <- player-installed addons
   plugins/dats/<package-id>/            <- player-installed DAT packages
   screenshots/
@@ -746,6 +746,8 @@ config/dats.ini
 config/extensions.ini
 config/plugins/screenshot/settings.ini
 logs/chat/YYYY-MM-DD.log
+logs/crashes/game-YYYYMMDDTHHMMSSZ-<pid>.log
+logs/crashes/launcher-YYYYMMDDTHHMMSSZ-<pid>.log
 logs/packets/capture-<UTC time>.csv
 logs/packets/capture-<UTC time>-part<NNNN>.csv
 logs/launcher/bahamut-launcher.log
@@ -763,6 +765,12 @@ Each session starts a fresh `bahamut-launcher.log` and moves the previous
 session's log to `bahamut-launcher.previous.log`. Help and Support copy only a
 bounded portion of the current log and redact secrets before showing it in
 the UI.
+
+`logs/crashes/` holds crash logs, written on a best-effort basis. When a game
+crash reaches the client's exception filter, it writes a `game-*.log`; the
+launcher writes a `launcher-*.log` for every panic, including one that an
+install or repair worker recovers from while the launcher keeps running. Files
+stay on this machine and are never uploaded; attach them to a bug report.
 
 ### Startup scripts
 

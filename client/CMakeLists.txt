@@ -16,6 +16,9 @@ endif()
 
 if(MSVC)
     add_compile_options(/W4 /WX /EHsc /permissive-)
+    # Release PDBs carry no code change; they let a crash log's module list map
+    # to symbols.
+    add_compile_options($<$<CONFIG:Release>:/Zi>)
 else()
     # The clang analog of /W4 /WX; the disabled groups are ones /W4 does not raise.
     add_compile_options(
@@ -52,6 +55,18 @@ function(bahamut_module_definition variable input)
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
     set(${variable} "${output}" PARENT_SCOPE)
+endfunction()
+
+# Release PDBs for the shipped binaries; /DEBUG would otherwise turn off the
+# default reference and COMDAT folding.
+function(bahamut_release_pdb target)
+    if(MSVC)
+        target_link_options(${target} PRIVATE
+            "$<$<CONFIG:Release>:/DEBUG>"
+            "$<$<CONFIG:Release>:/OPT:REF>"
+            "$<$<CONFIG:Release>:/OPT:ICF>"
+            "$<$<CONFIG:Release>:/PDBALTPATH:$<TARGET_PDB_FILE_NAME:${target}>>")
+    endif()
 endfunction()
 
 # mingw needs -municode for wmain and wWinMain entry points; link.exe infers them.
@@ -189,6 +204,8 @@ add_library(bahamut SHARED
     src/chat_boundary.h
     src/command_boundary.cpp
     src/command_boundary.h
+    src/crash_log.cpp
+    src/crash_log.h
     src/xhbar_icon.cpp
     src/xhbar_icon.h
     src/xhbar_pad.cpp
@@ -272,6 +289,7 @@ target_link_libraries(bahamut PRIVATE
     bcrypt d3d9 dwmapi imgui lua51 minhook miniz ole32 shell32 user32 windowscodecs ws2_32
 )
 set_target_properties(bahamut PROPERTIES PREFIX "")
+bahamut_release_pdb(bahamut)
 
 option(BAHAMUT_TARGETLINES_PROBE "Build the optional Targetlines scene camera diagnostic" OFF)
 if(BAHAMUT_TARGETLINES_PROBE)
@@ -291,6 +309,7 @@ add_library(screenshot SHARED
 )
 target_include_directories(screenshot PRIVATE api src)
 target_link_libraries(screenshot PRIVATE d3d9 ole32 user32 windowscodecs)
+bahamut_release_pdb(screenshot)
 set_target_properties(screenshot PROPERTIES
     OUTPUT_NAME "screenshot"
     PREFIX ""
@@ -306,6 +325,7 @@ set_target_properties(discord-rpc PROPERTIES
     OUTPUT_NAME "discord-rpc"
     PREFIX ""
 )
+bahamut_release_pdb(discord-rpc)
 
 add_executable(bahamut-loader
     src/loader.cpp
@@ -313,6 +333,7 @@ add_executable(bahamut-loader
 target_include_directories(bahamut-loader PRIVATE api)
 target_link_libraries(bahamut-loader PRIVATE advapi32 bcrypt psapi)
 bahamut_unicode_entry(bahamut-loader)
+bahamut_release_pdb(bahamut-loader)
 
 # Keep shared test objects separate from the runtime DLL's export/probe variants.
 add_library(bahamut-test-monitor-selection-objects OBJECT src/monitor_selection.cpp)
@@ -907,6 +928,14 @@ add_executable(bahamut-packet-observer-tests
 target_include_directories(bahamut-packet-observer-tests PRIVATE src vendor/minhook/include vendor/miniz)
 target_link_libraries(bahamut-packet-observer-tests PRIVATE minhook miniz ws2_32)
 
+add_executable(bahamut-crash-log-tests
+    src/crash_log.cpp
+    src/crash_log.h
+    tests/crash_log_tests.cpp
+)
+target_include_directories(bahamut-crash-log-tests PRIVATE src)
+bahamut_unicode_entry(bahamut-crash-log-tests)
+
 add_executable(bahamut-packet-capture-tests
     $<TARGET_OBJECTS:bahamut-test-packet-capture-objects>
     src/packet_capture.h
@@ -963,6 +992,10 @@ add_test(NAME bahamut-camera-zoom COMMAND bahamut-camera-zoom-tests)
 add_test(NAME bahamut-object-distance COMMAND bahamut-object-distance-tests)
 add_test(NAME bahamut-packet-observer COMMAND bahamut-packet-observer-tests)
 add_test(NAME bahamut-packet-capture COMMAND bahamut-packet-capture-tests)
+add_test(NAME bahamut-crash-log COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test)
+add_test(NAME bahamut-crash-log-copy COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-copy copy)
+add_test(NAME bahamut-crash-log-fallback COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-fallback fallback)
+add_test(NAME bahamut-crash-log-fallback-overflow COMMAND bahamut-crash-log-tests ${CMAKE_CURRENT_BINARY_DIR}/crash-log-test-fallback-overflow fallback-overflow)
 add_test(
     NAME bahamut-addon-host
     COMMAND bahamut-addon-host-tests

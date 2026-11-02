@@ -5,6 +5,7 @@
 #include "autologin.h"
 #include "camera_zoom.h"
 #include "chat_boundary.h"
+#include "crash_log.h"
 #include "custom_timer.h"
 #include "dat_overlay.h"
 #include "enemy_cast.h"
@@ -52,6 +53,7 @@ constexpr wchar_t kAddonManifestsEnvironment[] = L"BAHAMUT_RUNTIME_ADDON_MANIFES
 constexpr wchar_t kAddonCatalogEnvironment[]   = L"BAHAMUT_RUNTIME_ADDON_CATALOG";
 constexpr wchar_t kAddonSettingsEnvironment[]  = L"BAHAMUT_RUNTIME_ADDON_SETTINGS";
 constexpr wchar_t kChatLogsEnvironment[]       = L"BAHAMUT_RUNTIME_CHAT_LOGS";
+constexpr wchar_t kCrashLogsEnvironment[]      = L"BAHAMUT_RUNTIME_CRASH_LOGS";
 constexpr wchar_t kScreenshotPluginEnvironment[] =
     L"BAHAMUT_RUNTIME_SCREENSHOT_PLUGIN";
 constexpr wchar_t kScreenshotsEnvironment[]      = L"BAHAMUT_RUNTIME_SCREENSHOTS";
@@ -254,6 +256,7 @@ public:
         const auto                                             catalog   = PathList(kAddonCatalogEnvironment);
         StartupScriptPlan                                      startupPlan;
         std::unordered_map<std::string, std::filesystem::path> manifestsById;
+        InstallCrashLog(manifests);
         if (!PrepareStartupScript(catalog, startupPlan, manifestsById))
         {
             ReleaseHandles();
@@ -319,7 +322,7 @@ public:
         gearsetsRuntime_.SetMetadataProvider(gearsetsMetadata);
         addonHost_.SetEquipmentStateService(&equipment_);
         addonHost_.SetGearsetsRuntime(&gearsetsRuntime_);
-        playerState_.SetGameFrameObserver(&bahamut_client::GearsetsRuntime::ObserveGameFrame, &gearsetsRuntime_);
+        playerState_.SetGameFrameObserver(&RuntimeHost::ObserveGameFrame, this);
         const auto gearsetsDebugSwitches = bahamut_client::ReadGearsetsDebugSwitchesFromEnvironment();
         if (gearsetsDebugSwitches.Any())
         {
@@ -405,6 +408,36 @@ public:
     }
 
 private:
+    // Runs first among the game-frame observers: the retail client imports
+    // SetUnhandledExceptionFilter and may replace the crash filter during
+    // startup, so it is reasserted once the first frame shows startup is done.
+    static void ObserveGameFrame(void* context, const void* container)
+    {
+        crash_log::ReassertFilterOnce();
+        bahamut_client::GearsetsRuntime::ObserveGameFrame(&static_cast<RuntimeHost*>(context)->gearsetsRuntime_, container);
+    }
+
+    // Crash logging is optional; a failed install never aborts startup. The
+    // addon list is the selection at startup, not the live set.
+    static void InstallCrashLog(const std::vector<std::filesystem::path>& manifests)
+    {
+        const std::wstring directory = EnvironmentValue(kCrashLogsEnvironment);
+        if (directory.empty())
+        {
+            return;
+        }
+        std::string addons;
+        for (const auto& manifest : manifests)
+        {
+            if (const auto id = ReadAddonManifestId(manifest))
+            {
+                addons += addons.empty() ? "" : ",";
+                addons += *id;
+            }
+        }
+        static_cast<void>(crash_log::Install({ directory, NarrowUtf8(EnvironmentValue(kLauncherVersionEnvironment)), addons }));
+    }
+
     // An unverified target leaves movement unchanged; hook failure does not abort startup.
     // Register the enabled nolock manifest, else the catalog entry that /addon load resolves.
     void InstallActionMovement(const std::vector<std::filesystem::path>&                     manifests,

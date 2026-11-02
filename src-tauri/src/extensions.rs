@@ -124,6 +124,7 @@ pub(super) fn launch_artifacts(
             addon_catalog,
             addon_settings_path: layout.addon_settings,
             chat_logs_path: layout.chat_logs,
+            crash_logs_path: layout.crash_logs,
             dat_roots,
             startup_script_path,
             screenshot_plugin_path: layout.screenshot_plugin_path,

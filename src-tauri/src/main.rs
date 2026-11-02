@@ -172,6 +172,12 @@ fn main() {
     }
 
     let startup_started = Instant::now();
+    // Installed before anything else at startup can panic; its writes do not
+    // depend on the persistent log.
+    let crash_logs = dirs::crash_logs_dir();
+    if let Ok(directory) = &crash_logs {
+        bahamut_launcher::crash_log::install_panic_hook(directory.clone());
+    }
     let launcher_log_path = match logging::init_persistent() {
         Ok(path) => Some(path),
         Err(error) => {
@@ -180,6 +186,9 @@ fn main() {
             None
         }
     };
+    if let Err(error) = &crash_logs {
+        tracing::warn!(%error, "launcher crash logs are unavailable");
+    }
     tracing::info!("------------------------------------------------------------");
     tracing::info!(
         "BahamutXIV Launcher {}",

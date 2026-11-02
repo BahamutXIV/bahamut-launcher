@@ -35,6 +35,8 @@ const RETAIL_GAME_DOCUMENTS_DIR: &str = "FINAL FANTASY XIV";
 
 const LAUNCHER_LOGS_DIR_NAME: &str = "logs";
 
+const CRASH_LOGS_SCOPE_NAME: &str = "crashes";
+
 const LAUNCHER_LOGS_SCOPE_NAME: &str = "launcher";
 
 const LAUNCHER_LOG_FILE_NAME: &str = "bahamut-launcher.log";
@@ -314,6 +316,13 @@ pub fn launcher_log_path() -> Result<PathBuf, ConfigDirError> {
         .join(LAUNCHER_LOGS_DIR_NAME)
         .join(LAUNCHER_LOGS_SCOPE_NAME)
         .join(LAUNCHER_LOG_FILE_NAME))
+}
+
+/// Resolve the directory that receives launcher and client crash logs.
+pub fn crash_logs_dir() -> Result<PathBuf, ConfigDirError> {
+    Ok(state_root()?
+        .join(LAUNCHER_LOGS_DIR_NAME)
+        .join(CRASH_LOGS_SCOPE_NAME))
 }
 
 /// Resolve the WebView profile used for local storage and browser caches.
