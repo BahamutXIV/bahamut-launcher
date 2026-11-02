@@ -14,10 +14,12 @@ struct GearsetIntent
 {
     std::uint64_t                                  session = 0;
     std::array<EquipmentSlot, kEquipmentSlotCount> slots{};
-    // Metadata only: neither class nor job is a request to change jobs.
-    std::uint16_t classId = 0;
-    std::uint16_t jobId   = 0;
+    // Job after the main hand: ID, 0 for none, or nullopt to leave it alone.
+    std::optional<std::uint8_t> job;
 };
+
+// Returns nullopt for non-job IDs.
+std::optional<std::uint8_t> GearsetsJobClass(std::uint8_t job);
 
 struct GearsetsView
 {
@@ -79,6 +81,8 @@ public:
     // that can be established before a class transition. Called again afterward.
     virtual std::optional<GearsetsFailure> Preflight(const GearsetIntent& intent, const GearsetsView& view) const = 0;
     virtual GearsetsSubmission             Submit(const GearsetsOperation& operation)                             = 0;
+    // Change Job mode 1 takes the current class's job, mode 2 leaves it.
+    virtual GearsetsSubmission SubmitJob(std::uint8_t mode) = 0;
 };
 
 class UnavailableGearsetsExecutor final : public GearsetsExecutor
@@ -95,6 +99,11 @@ public:
     }
 
     GearsetsSubmission Submit(const GearsetsOperation&) override
+    {
+        return GearsetsSubmission::Unavailable;
+    }
+
+    GearsetsSubmission SubmitJob(std::uint8_t) override
     {
         return GearsetsSubmission::Unavailable;
     }
@@ -144,6 +153,8 @@ private:
     bool                           ExpectedChanges(const GearsetsView& view, std::optional<std::uint8_t>& unexpected) const;
     bool                           LateClassChange(const GearsetsView& view) const;
     bool                           WearsIntent(const GearsetsView& view) const;
+    bool                           TowardJob(const GearsetsView& view) const;
+    void                           SubmitJob(const GearsetsView& view, GearsetsExecutor& executor);
 
     GearsetIntent                    intent_;
     GearsetsPlan                     plan_;
@@ -157,6 +168,12 @@ private:
     bool                         lateSettle_ = false;
     std::optional<std::uint64_t> settleUntilMs_;
     std::optional<std::uint64_t> deferredSinceMs_;
+    // Job refusals have no reply; retry only after further slot submissions.
+    bool                         jobPending_     = false;
+    bool                         jobChanged_     = false; // counts toward a partial outcome
+    std::uint32_t                jobAttempts_    = 0;
+    std::uint32_t                jobSubmissions_ = 0; // submissions as of the last attempt
+    std::optional<std::uint64_t> classSinceMs_;
 };
 
 } // namespace bahamut_client

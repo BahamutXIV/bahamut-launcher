@@ -372,8 +372,8 @@ and platform status.
 The `gearsets` addon is disabled by default. `/gearsets` toggles the Gear Sets
 window, and `/gs` is the short form of every `/gearsets` command with the same
 arguments. Selection never equips; double-click a set, use Equip Set, or run
-`/gs equip <set>` to apply it slot by slot, main hand first. Equip never
-requests a Job Change.
+`/gs equip <set>` to apply it slot by slot, main hand first, then the set's
+job.
 Sets are stored per server and character in an editable `sets.lua` file parsed as
 data and never run.
 Controls and host services are described in
@@ -430,11 +430,23 @@ requested slot, and accepts ordering, restriction checks, a confirmation
 deadline, and a settling window only from its executor. The fake-executor
 tests cover sequential operations, explicit Empty/unequip, moved items, an
 observed class change, dependent slots cleared by class transitions,
-deferred submission, cancellation, and partial or unconfirmed outcomes. A
-queued request is not success; `complete` requires a fresh full match.
-Cancellation stops unsent work and accounts for an accepted request that
-subsequently confirms. Sent requests are never retried or rolled back, and
-saved job metadata never requests a Job Change.
+deferred submission, cancellation, partial or unconfirmed outcomes, and the
+job step. A queued request is not success; `complete` requires a fresh full
+match, in the intent's job when it names one. Cancellation stops unsent work
+and accounts for an accepted request that subsequently confirms. Sent slot
+requests are never retried or rolled back.
+
+An intent's optional job is a job ID or 0 for none. Once the main hand is
+worn, and before any other slot, a job that differs from the observed one is
+requested with Change Job mode 1 (take the class's job) or 2 (leave it). The
+equipped main hand may report its class after settling, so the first request
+waits up to the confirmation deadline for the job's class (`waiting-class`).
+If the class still differs, it stops as `job-class-mismatch` without a
+request. The server sends no command reply when it refuses a job change
+because worn gear does not fit the new state, so a change unseen within the
+confirmation deadline is tried once more after the other slots if any were
+sent; otherwise, or on a second miss, it stops as `job-refused`. A change to
+the intent's job counts as the transaction's own, even after its deadline.
 
 `gearsets_native_executor.cpp` submits each operation as the client to server
 0x012D `commandRequest` for EquipCommand (12009) that the retail Gear window
@@ -456,9 +468,16 @@ reader failure stops an active Equip only after a second without a good read.
 On the supported Windows client against a Bahamut server, this request
 equipped a body item and the reader confirmed it.
 
+A job step sends the same 0x012D `commandRequest` for ChangeJobCommand
+(12017) under the same conditions, with reference `0xA0F02EF1`. Neither
+the reference nor the request has been captured: the reference follows
+EquipCommand's `0xA0F00000 | ID` form; the tail follows the retail Change Job
+path, which forwards the mode and three nils.
+
 Live acceptance still requires unequip, same-class and class-changing whole
-sets, moved-UID durability, stable server/character identity,
-missing/restricted items, cancellation, and staged overlay/input checks.
+sets, taking and leaving a job, a refused job change, moved-UID durability,
+stable server/character identity, missing/restricted items, cancellation, and
+staged overlay/input checks.
 Windows fixtures do not establish Wine or other platform behavior.
 
 ### Client evidence
@@ -572,7 +591,8 @@ event name, 128-byte tail, then seven bytes the builder leaves unwritten.
 commandRequest(item, nil, 1, nil x5, equipSlot, itemDBIds) with the
 parameter tags of the captured requests: 07 item reference (owner actor,
 bag slot, package 0), 05 nil, 00 i32, 09 two u64 unique IDs, 0f end. An
-unequip sends a nil item and no unique IDs.
+unequip sends a nil item and no unique IDs. The uncaptured Change Job request
+is commandRequest(mode, nil x3): 00 i32 mode, three 05 nils, 0f end.
 
 #### Game-frame ordering
 

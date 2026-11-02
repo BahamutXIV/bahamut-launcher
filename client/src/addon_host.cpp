@@ -2192,6 +2192,15 @@ int AddonHost::LuaGearsetsEquip(lua_State* state)
         lua_pop(state, 2);
     }
     lua_pop(state, 1);
+    lua_getfield(state, 1, "job");
+    if (!lua_isnil(state, -1))
+    {
+        const auto job = WholeArgument(state, -1, 0, 255);
+        valid          = valid && job.has_value();
+        if (job)
+            intent.job = static_cast<std::uint8_t>(*job);
+    }
+    lua_pop(state, 1);
     if (!valid)
     {
         lua_pushboolean(state, 0);

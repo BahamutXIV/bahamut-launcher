@@ -29,4 +29,16 @@ std::uint32_t GearsetsCrc32(std::span<const std::uint8_t> bytes);
 // Equip/unequip parameter tags: client/README.md#client-evidence.
 std::array<std::uint8_t, kGearsetsCommandRequestSize> EncodeGearsetsEquipCommandRequest(const GearsetsEquipCommandRequest& request);
 
+struct GearsetsJobCommandRequest
+{
+    std::uint32_t actor     = 0;
+    std::uint32_t owner     = 0; // ChangeJobCommand reference, 0xA0F02EF1
+    std::uint32_t stateWord = 0;
+    std::uint8_t  eventType = 0;
+    std::uint8_t  mode      = 0; // 1 takes the class's job, 2 leaves it
+};
+
+// commandRequest(mode, nil x3): client/README.md#client-evidence.
+std::array<std::uint8_t, kGearsetsCommandRequestSize> EncodeGearsetsJobCommandRequest(const GearsetsJobCommandRequest& request);
+
 } // namespace bahamut_client

@@ -378,6 +378,23 @@ local function test_matches()
         not gearsets.matches(set_of({ [0] = { state = 'item', catalog = CANE } }), snapshot_of({}, { complete = false })) and
         not gearsets.matches(set_of({ [0] = { state = 'item', catalog = CANE } }), nil),
         'no complete snapshot matches nothing')
+
+    local cane = { [0] = { state = 'item', catalog = CANE } }
+    check(not gearsets.matches({ name = 'S', class = 'PLD', slots = cane }, worn) and
+        gearsets.matches({ name = 'S', class = 'PLD', slots = cane }, snapshot_of({ [0] = { COPY, CANE } }, { job_id = 16 })),
+        'a job set matches only in its job')
+    check(gearsets.matches({ name = 'S', class = 'GLD', slots = cane }, worn) and
+        not gearsets.matches({ name = 'S', class = 'GLD', slots = cane }, snapshot_of({ [0] = { COPY, CANE } }, { job_id = 16 })),
+        'a class set with a job matches only without it')
+    check(gearsets.matches({ name = 'S', class = 'CRP', slots = cane }, snapshot_of({ [0] = { COPY, CANE } }, { job_id = 16 })),
+        'a class without a job ignores the job')
+end
+
+local function test_target_job()
+    local cases = { { 'PLD', 16 }, { 'WHM', 27 }, { 'GLD', 0 }, { 'CNJ', 0 }, { 'CRP', nil }, { '', nil } }
+    for _, case in ipairs(cases) do
+        check(gearsets.target_job({ class = case[1] }) == case[2], 'target job for ' .. case[1])
+    end
 end
 
 local function test_intent()
@@ -432,6 +449,9 @@ local function test_intent()
     check(intent.slots[13].state == 'item' and intent.slots[13].uid == '00000000000000c1', 'a slot left out keeps the worn item')
     check(intent.slots[8].state == 'empty' and intent.slots[12].state == 'empty', 'a slot left out and empty stays empty')
     check(#asked == 1 and asked[1] == CANE, 'only the slot needing a lookup should ask, got ' .. #asked)
+    check(intent.job == nil, 'a set without a class leaves the job alone')
+    set.class = 'WHM'
+    check(gearsets.intent(set, worn, find_copy).job == 27, 'a job set asks for its job')
 
     local refusals =
     {
@@ -466,6 +486,7 @@ function load()
         test_positions_names_and_edits()
         test_changed_on_disk()
         test_matches()
+        test_target_job()
         test_intent()
     end)
     if not ok then failures[#failures + 1] = 'driver error: ' .. tostring(err) end

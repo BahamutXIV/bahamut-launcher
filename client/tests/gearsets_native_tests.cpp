@@ -290,9 +290,13 @@ FakeMemory Ready()
 
 bool TestRoute()
 {
-    FakeMemory                                                       memory = Ready();
-    const auto                                                       route  = ReadGearsetsNativeRoute(memory.View(), kContainer, kPlayer);
-    bool                                                             ok     = Expect(route && route->network == kNetwork && route->actor == 0x48u && route->owner == kReference && route->stateWord == 0x30400000u && route->eventType == 0u, "an idle connected player has a route");
+    FakeMemory memory                                                       = Ready();
+    const auto route                                                        = ReadGearsetsNativeRoute(memory.View(), kContainer, kPlayer);
+    bool       ok                                                           = Expect(route && route->network == kNetwork && route->actor == 0x48u && route->owner == kReference && route->stateWord == 0x30400000u && route->eventType == 0u, "an idle connected player has a route");
+    const auto job                                                          = ReadGearsetsNativeRoute(memory.View(), kContainer, kPlayer, GearsetsNativeCommand::ChangeJob);
+    ok                                                                      = Expect(job && job->owner == 0xA0F02EF1u && job->actor == 0x48u, "the Change Job route names ChangeJobCommand 12017") && ok;
+    const auto request                                                      = job ? GearsetsNativeJobRequest(2u, *job) : GearsetsJobCommandRequest{};
+    ok                                                                      = Expect(request.mode == 2u && request.owner == 0xA0F02EF1u && request.actor == 0x48u && request.stateWord == 0x30400000u, "a job request carries the route and mode") && ok;
     const std::vector<std::pair<const char*, void (*)(FakeMemory&)>> closed = {
         { "a halted engine has no route", [](FakeMemory& value)
           {
@@ -394,6 +398,11 @@ public:
         sent.push_back(operation);
         return GearsetsSubmission::Accepted;
     }
+
+    GearsetsSubmission SubmitJob(std::uint8_t) override
+    {
+        return GearsetsSubmission::Unavailable;
+    }
 };
 
 const void* PlayerOf(const equipment_memory_fixture::Fixture& fixture)
@@ -410,7 +419,7 @@ std::pair<GearsetIntent, GearsetsView> Current(const EquipmentStateService& equi
         view.inventory = *inventory;
         view.session   = inventory->equipment.session;
     }
-    return { GearsetIntent{ view.session, view.inventory.equipment.slots, 0, 0 }, view };
+    return { GearsetIntent{ view.session, view.inventory.equipment.slots, std::nullopt }, view };
 }
 
 void CountFrame(void* context, const void*)
