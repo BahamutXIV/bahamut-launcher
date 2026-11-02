@@ -24,12 +24,17 @@ struct SlotCommands
 
 struct SlotStates
 {
-    bool                         valid  = false; // all state reads succeeded
-    std::uint32_t                shared = 0;     // player's shared work record
-    std::int32_t                 now    = 0;     // server whole seconds
-    std::array<std::int32_t, 30> remaining{};    // recast seconds at S-1; 0 if ready
-    std::array<bool, 30>         compatible{};   // class compatibility at S-1
+    bool                         valid  = false;     // recast and compatibility reads succeeded
+    std::uint32_t                shared = 0;         // player's shared work record
+    std::int32_t                 now    = 0;         // server whole seconds
+    std::array<std::int32_t, 30> remaining{};        // recast seconds at S-1; 0 if ready
+    std::array<bool, 30>         compatible{};       // class compatibility at S-1
+    bool                         comboValid = false; // comboNext read; independent of valid
+    std::array<std::int32_t, 2>  comboNext{};        // playerWork.comboNextCommandId; 0 when no chain is open
 };
+
+// updateComboInfo outlines a slot whose command ID equals either follow-up.
+bool ComboReady(const SlotStates& states, std::int32_t command) noexcept;
 
 // getRecastTimeForCustomCommand caps remaining seconds at a positive limit.
 std::int32_t RecastRemaining(std::int32_t end, std::int32_t now, std::int32_t limit) noexcept;
