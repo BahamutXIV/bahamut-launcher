@@ -34,7 +34,28 @@ bool Complete(const EquipmentSnapshot& snapshot)
     return true;
 }
 
+// Job and base-class IDs: bahamut:src/common/job_stones.h kJobStones.
+struct JobClass
+{
+    std::uint8_t job;
+    std::uint8_t base;
+};
+
+constexpr std::array<JobClass, 7> kJobClasses = {
+    { { 15, 2 }, { 16, 3 }, { 17, 4 }, { 18, 7 }, { 19, 8 }, { 26, 22 }, { 27, 23 } }
+};
+
 } // namespace
+
+std::optional<std::uint8_t> GearsetsJobClass(std::uint8_t job)
+{
+    for (const auto& [id, base] : kJobClasses)
+    {
+        if (id == job)
+            return base;
+    }
+    return std::nullopt;
+}
 
 std::string_view GearsetsPhaseName(GearsetsPhase phase)
 {
@@ -71,20 +92,23 @@ void GearsetsTransaction::ObserveChanges(const GearsetsView& view)
     {
         result_.changed[index] = !Matches(view.inventory.equipment.slots[index], baseline_.inventory.equipment.slots[index]);
     }
+    jobChanged_ = view.jobId != baseline_.jobId;
 }
 
 void GearsetsTransaction::Stop(std::string reason, std::optional<std::uint8_t> slot)
 {
-    const bool changed = std::any_of(result_.changed.begin(), result_.changed.end(), [](bool value)
-                                     {
-                                         return value;
-                                     });
-    result_.phase      = pending_ ? GearsetsPhase::Unconfirmed : changed        ? GearsetsPhase::Partial
-                                                             : cancelRequested_ ? GearsetsPhase::Cancelled
-                                                                                : GearsetsPhase::Rejected;
+    const bool changed = jobChanged_ || std::any_of(result_.changed.begin(), result_.changed.end(), [](bool value)
+                                                    {
+                                                        return value;
+                                                    });
+    result_.phase      = pending_ || jobPending_ ? GearsetsPhase::Unconfirmed
+                         : changed               ? GearsetsPhase::Partial
+                         : cancelRequested_      ? GearsetsPhase::Cancelled
+                                                 : GearsetsPhase::Rejected;
     result_.reason     = std::move(reason);
     result_.slot       = slot;
     pending_.reset();
+    jobPending_ = false;
 }
 
 std::optional<GearsetsFailure> GearsetsTransaction::Preflight(const GearsetsView& view, const GearsetsExecutor& executor) const
@@ -129,6 +153,15 @@ bool GearsetsTransaction::Begin(const GearsetIntent& intent, const GearsetsView&
     deferredSinceMs_.reset();
     cancelRequested_ = false;
     lateSettle_      = false;
+    jobPending_      = false;
+    jobChanged_      = false;
+    jobAttempts_     = 0;
+    classSinceMs_.reset();
+    if (intent_.job && *intent_.job != 0 && !GearsetsJobClass(*intent_.job))
+    {
+        Stop("invalid-intent");
+        return true;
+    }
     for (std::size_t index = 0; index < kEquipmentSlotCount; ++index)
     {
         const auto& slot = intent_.slots[index];
@@ -174,7 +207,13 @@ bool GearsetsTransaction::LateClassChange(const GearsetsView& view) const
     // window; it is still this transaction's change while that main hand is
     // the one it equipped.
     return result_.changed[0] && Matches(view.inventory.equipment.slots[0], intent_.slots[0]) &&
-           (view.classId != expected_.classId || view.jobId != expected_.jobId);
+           (view.classId != expected_.classId || (view.jobId != expected_.jobId && !TowardJob(view)));
+}
+
+bool GearsetsTransaction::TowardJob(const GearsetsView& view) const
+{
+    // Includes a change that confirms after its attempt timed out.
+    return intent_.job && view.jobId != expected_.jobId && view.jobId == *intent_.job;
 }
 
 bool GearsetsTransaction::WearsIntent(const GearsetsView& view) const
@@ -193,7 +232,7 @@ bool GearsetsTransaction::ExpectedChanges(const GearsetsView& view, std::optiona
     // or dependent-slot clears, including a late class change while the equipped
     // main hand still matches.
     const bool mainHand = (pending_ && pending_->target.slot == 0) || (settleUntilMs_ && view.nowMs < *settleUntilMs_) || LateClassChange(view);
-    if (!mainHand && (view.classId != expected_.classId || view.jobId != expected_.jobId))
+    if (!mainHand && (view.classId != expected_.classId || (view.jobId != expected_.jobId && !TowardJob(view))))
         return false;
     for (std::size_t index = 0; index < kEquipmentSlotCount; ++index)
     {
@@ -278,6 +317,19 @@ void GearsetsTransaction::Step(const GearsetsView& view, GearsetsExecutor& execu
         // Observe confirmation on its own frame before sending another request.
         return;
     }
+    if (jobPending_)
+    {
+        const bool confirmed = view.jobId == *intent_.job;
+        if (!confirmed && view.nowMs >= submittedMs_ && view.nowMs - submittedMs_ < plan_.confirmationMs)
+            return;
+        jobPending_ = false;
+        expected_   = view;
+        if (!confirmed && jobAttempts_ >= 2)
+            Stop("job-refused");
+        else if (cancelRequested_)
+            Stop("cancelled");
+        return;
+    }
     if (settleUntilMs_)
     {
         // Accept the main hand's class change and cleared slots seen so far.
@@ -298,6 +350,25 @@ void GearsetsTransaction::Step(const GearsetsView& view, GearsetsExecutor& execu
     if (const auto failure = Preflight(view, executor))
     {
         Stop(failure->reason, failure->slot);
+        return;
+    }
+    // A main-hand class change leaves the job; request the set's job before job-only gear.
+    const bool jobNeeded = intent_.job && view.jobId != *intent_.job;
+    if (jobNeeded && jobAttempts_ == 0 && Matches(view.inventory.equipment.slots[0], intent_.slots[0]))
+    {
+        // The class of a main hand this set equipped can arrive after settling.
+        if (result_.changed[0] && *intent_.job != 0 && GearsetsJobClass(*intent_.job) != view.classId)
+        {
+            if (!classSinceMs_)
+                classSinceMs_ = view.nowMs;
+            if (view.nowMs >= *classSinceMs_ && view.nowMs - *classSinceMs_ < plan_.confirmationMs)
+            {
+                result_.reason = "waiting-class";
+                result_.slot.reset();
+                return;
+            }
+        }
+        SubmitJob(view, executor);
         return;
     }
     for (const auto slot : plan_.order)
@@ -343,8 +414,56 @@ void GearsetsTransaction::Step(const GearsetsView& view, GearsetsExecutor& execu
         result_.slot   = slot;
         return;
     }
+    // Retry only after replacing gear that may have blocked the job change.
+    if (jobNeeded)
+    {
+        if (jobAttempts_ != 0 && result_.submissions == jobSubmissions_)
+            Stop("job-refused");
+        else
+            SubmitJob(view, executor);
+        return;
+    }
     result_.phase  = GearsetsPhase::Complete;
     result_.reason = "observed-match";
+    result_.slot.reset();
+}
+
+void GearsetsTransaction::SubmitJob(const GearsetsView& view, GearsetsExecutor& executor)
+{
+    const std::uint8_t job = *intent_.job;
+    if (job != 0 && GearsetsJobClass(job) != view.classId)
+    {
+        Stop("job-class-mismatch");
+        return;
+    }
+    if (deferredSinceMs_ && (view.nowMs < *deferredSinceMs_ || view.nowMs - *deferredSinceMs_ >= plan_.confirmationMs))
+    {
+        Stop("native-not-ready");
+        return;
+    }
+    const auto submitted = executor.SubmitJob(job != 0 ? 1 : 2);
+    if (submitted == GearsetsSubmission::Deferred)
+    {
+        if (!deferredSinceMs_)
+            deferredSinceMs_ = view.nowMs;
+        result_.reason = "waiting-native";
+        result_.slot.reset();
+        return;
+    }
+    deferredSinceMs_.reset();
+    ++result_.submissions;
+    if (submitted != GearsetsSubmission::Accepted)
+    {
+        Stop(submitted == GearsetsSubmission::Rejected ? "native-rejected" : "executor-unavailable");
+        return;
+    }
+    ++jobAttempts_;
+    jobSubmissions_ = result_.submissions;
+    jobPending_     = true;
+    expected_       = view;
+    submittedMs_    = view.nowMs;
+    result_.phase   = GearsetsPhase::Applying;
+    result_.reason  = "awaiting-job";
     result_.slot.reset();
 }
 
@@ -353,7 +472,7 @@ void GearsetsTransaction::Cancel()
     if (!Active())
         return;
     cancelRequested_ = true;
-    if (!pending_ && !settleUntilMs_)
+    if (!pending_ && !jobPending_ && !settleUntilMs_)
         Stop("cancelled");
     else
         result_.reason = "cancelling";

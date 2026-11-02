@@ -73,6 +73,10 @@ for _, entry in pairs(CLASSES) do ABBREVIATIONS[entry[1]] = true end
 
 for _, entry in pairs(JOBS) do ABBREVIATIONS[entry[1]] = true end
 
+-- Job taken after the main hand: an ID, or 0 for a class with a job (bahamut:src/common/job_stones.h).
+local TARGET_JOBS = { GLD = 0, PGL = 0, MRD = 0, ARC = 0, LNC = 0, THM = 0, CNJ = 0 }
+for id, entry in pairs(JOBS) do TARGET_JOBS[entry[1]] = id end
+
 local FILE_HEADER =
 {
     '-- Gear Sets for one character. Gear Sets rewrites this file when sets change',
@@ -84,7 +88,8 @@ local FILE_HEADER =
     "-- A slot is 'empty', an item name such as 'WEATHERED_CANE', an item number,",
     "-- or { 'WEATHERED_CANE', copy = '<16 hex digits>' } for one exact copy.",
     '-- Without a copy, Equip uses the only copy you carry. Slots left out keep',
-    '-- what you are wearing.',
+    '-- what you are wearing. A job such as WHM is taken with its soul crystal;',
+    '-- its class, such as CNJ, leaves the job.',
 }
 
 local M           = {}
@@ -566,6 +571,11 @@ function M.abbreviation(snapshot)
     return entry and entry[1] or ''
 end
 
+-- nil leaves the job alone: no abbreviation, or a class without a job.
+function M.target_job(set)
+    return TARGET_JOBS[set.class or '']
+end
+
 -- Every slot, each an exact copy. Unknown slots are never saved as Empty.
 local function capture(snapshot)
     if type(snapshot) ~= 'table' or snapshot.complete ~= true or type(snapshot.slots) ~= 'table' then return nil, 'incomplete-snapshot' end
@@ -699,10 +709,13 @@ local function current_slots(snapshot)
     return current
 end
 
--- Every slot the set names is worn: the exact copy when it names one.
+-- Named slots must match, including any exact copies and requested job.
 function M.matches(set, snapshot)
     local current = current_slots(snapshot)
     if current == nil then return false end
+
+    local job = M.target_job(set)
+    if job ~= nil and (snapshot.job_id or 0) ~= job then return false end
 
     local named = false
     for _, slot in ipairs(SLOTS) do
@@ -751,7 +764,7 @@ function M.intent(set, snapshot, find_copy)
         end
     end
 
-    return { slots = slots }
+    return { slots = slots, job = M.target_job(set) }
 end
 
 M.slots      = SLOTS

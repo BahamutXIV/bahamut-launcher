@@ -21,12 +21,20 @@ struct GearsetsNativeRoute
     std::uint8_t  eventType = 0;
 };
 
+enum class GearsetsNativeCommand
+{
+    Equip,    // EquipCommand 12009
+    ChangeJob // ChangeJobCommand 12017
+};
+
 // container is the player-state container, player the MyPlayer control.
-std::optional<GearsetsNativeRoute> ReadGearsetsNativeRoute(const GearsetsNativeMemory& memory, std::uint32_t container, std::uint32_t player);
+std::optional<GearsetsNativeRoute> ReadGearsetsNativeRoute(const GearsetsNativeMemory& memory, std::uint32_t container, std::uint32_t player, GearsetsNativeCommand command = GearsetsNativeCommand::Equip);
 
 // The request for one operation: wire slots are 1-based equipment positions.
 // nullopt for an item without a bag position.
 std::optional<GearsetsEquipCommandRequest> GearsetsNativeRequest(const GearsetsOperation& operation, const GearsetsNativeRoute& route);
+
+GearsetsJobCommandRequest GearsetsNativeJobRequest(std::uint8_t mode, const GearsetsNativeRoute& route);
 
 // Retail 1.23b equips/unequips on the game window thread, without Lua or local events.
 // The server's inventory replies apply the change. See client/README.md#gearsets.
@@ -43,6 +51,7 @@ public:
     std::optional<GearsetsFailure> Preflight(const GearsetIntent& intent, const GearsetsView& view) const override;
     void                           BeginFrame(const void* container, const void* player) override;
     GearsetsSubmission             Submit(const GearsetsOperation& operation) override;
+    GearsetsSubmission             SubmitJob(std::uint8_t mode) override;
 
 private:
     const void* container_ = nullptr;

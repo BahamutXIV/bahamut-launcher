@@ -78,5 +78,26 @@ int main()
     ok                        = Expect(r1.size() == kGearsetsCommandRequestSize * 2u, "the expected unequip record is 184 bytes") && ok;
     ok                        = Expect(Hex(removed) == r1, "the encoded unequip matches the captured unequip byte for byte, ignoring bag slot and uid") && ok;
 
+    // Uncaptured Change Job requests: commandRequest(mode, nil x3) to 0xA0F02EF1.
+    GearsetsJobCommandRequest job;
+    job.actor     = 0x12u;
+    job.owner     = 0xA0F02EF1u;
+    job.stateWord = 0x30400000u;
+
+    struct JobCase
+    {
+        std::uint8_t mode;
+        const char*  header; // CRC from an independent CRC-32 of the tail
+        const char*  tail;
+    };
+
+    for (const JobCase& expect : { JobCase{ 1u, "12000000f12ef0a000004030208c7be600", "00000000010505050f" }, JobCase{ 2u, "12000000f12ef0a0000040309f83707a00", "00000000020505050f" } })
+    {
+        job.mode                 = expect.mode;
+        const std::string jobHex = std::string(expect.header) + "636f6d6d616e6452657175657374" + std::string(36u, '0') + expect.tail + std::string(238u, '0') + std::string(14u, '0');
+        ok                       = Expect(jobHex.size() == kGearsetsCommandRequestSize * 2u, "the expected job record is 184 bytes") && ok;
+        ok                       = Expect(Hex(EncodeGearsetsJobCommandRequest(job)) == jobHex, "the job request carries its mode before three nils") && ok;
+    }
+
     return ok ? 0 : 1;
 }
