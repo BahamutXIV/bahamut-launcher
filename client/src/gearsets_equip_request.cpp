@@ -45,6 +45,17 @@ private:
     std::size_t   size_ = 0;
 };
 
+void Seal(std::array<std::uint8_t, bahamut_client::kGearsetsCommandRequestSize>& payload, std::uint32_t actor, std::uint32_t owner, std::uint32_t stateWord, std::uint8_t eventType)
+{
+    PutLittle32(payload.data() + 0x00u, actor);
+    PutLittle32(payload.data() + 0x04u, owner);
+    PutLittle32(payload.data() + 0x08u, stateWord);
+    PutLittle32(payload.data() + 0x0Cu, bahamut_client::GearsetsCrc32(std::span<const std::uint8_t>(payload.data() + kTailOffset, kTailSize)));
+    payload[0x10u] = eventType;
+    static_assert(sizeof(kCommandName) <= kNameSize);
+    std::memcpy(payload.data() + kNameOffset, kCommandName, sizeof(kCommandName) - 1u);
+}
+
 } // namespace
 
 namespace bahamut_client
@@ -99,14 +110,22 @@ std::array<std::uint8_t, kGearsetsCommandRequestSize> EncodeGearsetsEquipCommand
         writer.Big(0u, 8);
     }
     writer.Byte(0x0Fu);
+    Seal(payload, request.actor, request.owner, request.stateWord, request.eventType);
+    return payload;
+}
 
-    PutLittle32(payload.data() + 0x00u, request.actor);
-    PutLittle32(payload.data() + 0x04u, request.owner);
-    PutLittle32(payload.data() + 0x08u, request.stateWord);
-    PutLittle32(payload.data() + 0x0Cu, GearsetsCrc32(std::span<const std::uint8_t>(tail, kTailSize)));
-    payload[0x10u] = request.eventType;
-    static_assert(sizeof(kCommandName) <= kNameSize);
-    std::memcpy(payload.data() + kNameOffset, kCommandName, sizeof(kCommandName) - 1u);
+std::array<std::uint8_t, kGearsetsCommandRequestSize> EncodeGearsetsJobCommandRequest(const GearsetsJobCommandRequest& request)
+{
+    std::array<std::uint8_t, kGearsetsCommandRequestSize> payload{};
+    TailWriter                                            writer(payload.data() + kTailOffset);
+    writer.Byte(0x00u);
+    writer.Big(request.mode, 4);
+    for (int index = 0; index < 3; ++index)
+    {
+        writer.Byte(0x05u);
+    }
+    writer.Byte(0x0Fu);
+    Seal(payload, request.actor, request.owner, request.stateWord, request.eventType);
     return payload;
 }
 

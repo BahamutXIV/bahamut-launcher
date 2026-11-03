@@ -417,7 +417,8 @@ normal. Live acceptance of this build on the retail client is pending.
 Gearsets is disabled by default. `/gs` or `/gearsets` opens and closes the Gear
 Sets window, which starts closed. It lists sets by number with the class or job
 icon, its abbreviation and the set name; a gold star marks every set whose gear
-you are wearing. The window takes clicks and typing without Shift.
+you are wearing with its requested job, if any. The window takes clicks
+and typing without Shift.
 
 - `+` saves the gear you are wearing as a new set named after its number, such
   as `Set1`. The arrow buttons move the selected set up or down.
@@ -430,8 +431,19 @@ you are wearing. The window takes clicks and typing without Shift.
 Equip changes one slot at a time through the game's own equip request, main
 hand first, and waits to see each change before the next. A main hand for
 another class changes your class, and the remaining slots are checked again
-afterward. Equip never requests a Job Change, never retries a sent request
-and never undoes one; the game's own restrictions still apply. A one-line
+afterward.
+
+A set saved in a job, such as PLD, takes that job after its main hand is worn
+and before the other slots, using the soul crystal you hold. A set saved in a
+class that has a job, such as GLD, leaves the job. For any other class or no
+abbreviation, Equip requests no job change, though a main hand of another
+class still leaves any job. The server refuses a job change if your gear
+cannot be worn in the new state and explains why in chat. Equip retries once
+after replacing the other slots. A refusal with no slot left to replace, or a
+second refusal, stops Equip as `job-refused`.
+
+Equip never retries a sent request other than that job change, and never
+undoes one; the game's own restrictions still apply. A one-line
 status under the list shows progress, and the reason if Equip stops early;
 hover over a shortened line for the whole text. The window never changes size
 for it.
@@ -975,8 +987,9 @@ These functions are available only to the addon with ID `gearsets`.
 - `bahamut.record_delete(name, profile)` returns a status string.
 - `bahamut.gearsets_equip(intent)` copies a whole-set intent, `slots` keyed by
   slot position with `{ state = 'empty' }` or `{ state = 'item', uid }` for
-  every slot, and returns an admission boolean and reason. Admission is not
-  equip success; read the outcome from `bahamut.gearsets_result()`.
+  every slot, and an optional `job`: a job ID to take or 0 to leave the job.
+  It returns an admission boolean and reason. Admission is not equip success;
+  read the outcome from `bahamut.gearsets_result()`.
 - `bahamut.gearsets_cancel()` stops unsent operations.
 - `bahamut.gearsets_result()` returns `phase`, `reason`, `submissions`,
   optional stopping `slot`, and a `changed` array of observed slot positions.

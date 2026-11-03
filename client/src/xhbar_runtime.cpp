@@ -363,6 +363,9 @@ struct Seen
     bool          locked  = false;
     int           mode    = -1;
     bool          map     = false;
+    bool          combo   = false;
+
+    std::array<std::int32_t, 2> comboNext{};
 };
 
 Seen gSeen;
@@ -384,12 +387,14 @@ void RefreshSlots(void* mainModule)
         std::uint32_t        icon         = 0;
         std::uint32_t        remaining    = 0;
         bool                 incompatible = false;
+        bool                 comboReady   = false;
         if (target.page != 0)
         {
             const auto position = static_cast<std::size_t>((target.page - 1) * 10 + target.button - 1);
             if (action && current.commands[position] > 0)
             {
-                icon = current.icons[position];
+                icon       = current.icons[position];
+                comboReady = ComboReady(states, current.commands[position]);
                 if (states.valid)
                 {
                     remaining    = static_cast<std::uint32_t>(std::min(states.remaining[position], 0xffff));
@@ -398,18 +403,20 @@ void RefreshSlots(void* mainModule)
             }
         }
         const std::uint64_t value = (icon & 0x00ffffffu) | (static_cast<std::uint64_t>(target.page) << 24) | (static_cast<std::uint64_t>(remaining) << 32) |
-                                    (static_cast<std::uint64_t>(incompatible ? 1 : 0) << 48);
+                                    (static_cast<std::uint64_t>(incompatible ? 1 : 0) << 48) | (static_cast<std::uint64_t>(comboReady ? 1 : 0) << 49);
         const std::uint64_t old   = gSlotViews[slot].exchange(value, std::memory_order_acq_rel);
         // Log recast transitions, not each countdown tick.
         const bool started = ((old >> 32) & 0xffff) != 0;
-        if (target.page != 0 && ((old & 0x00ffffffu) != icon || ((old >> 48) & 1) != (incompatible ? 1u : 0u) || started != (remaining != 0)))
-            Log("slot,t=%llu,position=%d,page=%d,icon=%u,remaining=%u,incompatible=%d,now=%d",
+        if (target.page != 0 &&
+            ((old & 0x00ffffffu) != icon || ((old >> 48) & 3) != ((value >> 48) & 3) || started != (remaining != 0)))
+            Log("slot,t=%llu,position=%d,page=%d,icon=%u,remaining=%u,incompatible=%d,combo=%d,now=%d",
                 LogTime(),
                 (target.page - 1) * 10 + target.button,
                 current.page,
                 icon,
                 remaining,
                 incompatible ? 1 : 0,
+                comboReady ? 1 : 0,
                 states.now);
     }
     if (current.valid)
@@ -427,9 +434,11 @@ void RefreshSlots(void* mainModule)
         Log("menu,t=%llu,valid=%d,window=%08x,macro=%d,page=%d", LogTime(), current.valid ? 1 : 0, current.window, current.macroType, current.page);
     if (states.valid != gSeen.states || states.shared != gSeen.shared)
         Log("player,t=%llu,valid=%d,shared=%08x,now=%d", LogTime(), states.valid ? 1 : 0, states.shared, states.now);
+    if (states.comboValid != gSeen.combo || states.comboNext != gSeen.comboNext)
+        Log("combo,t=%llu,valid=%d,next=%d/%d", LogTime(), states.comboValid ? 1 : 0, states.comboNext[0], states.comboNext[1]);
     if (desktop.valid != gSeen.desktop || desktop.locked != gSeen.locked || desktop.mode != gSeen.mode || desktop.map != gSeen.map)
         Log("desktop,t=%llu,valid=%d,mode=%d,locked=%d,map=%d", LogTime(), desktop.valid ? 1 : 0, desktop.mode, desktop.locked ? 1 : 0, desktop.map ? 1 : 0);
-    gSeen = { current.valid, current.window, current.valid ? current.macroType : -1, states.valid, states.shared, desktop.valid, desktop.locked, desktop.mode, desktop.map };
+    gSeen = { current.valid, current.window, current.valid ? current.macroType : -1, states.valid, states.shared, desktop.valid, desktop.locked, desktop.mode, desktop.map, states.comboValid, states.comboNext };
 }
 
 // Grid_Content: template [[W+0x318]+0xB0] (0x00936DF0), logical parent +0x240 must be W; unreadable differs from absent.
@@ -681,7 +690,11 @@ SlotView SlotDisplay(std::size_t slot)
     if (slot >= gSlotViews.size())
         return {};
     const std::uint64_t value = gSlotViews[slot].load(std::memory_order_acquire);
-    return { static_cast<std::uint32_t>(value & 0x00ffffffu), static_cast<int>((value >> 24) & 0xff), static_cast<int>((value >> 32) & 0xffff), ((value >> 48) & 1) != 0 };
+    return { static_cast<std::uint32_t>(value & 0x00ffffffu),
+             static_cast<int>((value >> 24) & 0xff),
+             static_cast<int>((value >> 32) & 0xffff),
+             ((value >> 48) & 1) != 0,
+             ((value >> 49) & 1) != 0 };
 }
 
 void ConfigureSettings(const std::filesystem::path& file)

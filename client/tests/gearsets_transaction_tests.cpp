@@ -30,13 +30,14 @@ GearsetsView EmptyView()
 
 GearsetIntent Intent(const GearsetsView& view)
 {
-    return { view.session, view.inventory.equipment.slots, view.classId, view.jobId };
+    return { view.session, view.inventory.equipment.slots, std::nullopt };
 }
 
 class FakeExecutor final : public GearsetsExecutor
 {
 public:
     std::vector<GearsetsOperation> sent;
+    std::vector<std::uint8_t>      jobs;
     bool                           reject       = false;
     bool                           restricted   = false;
     bool                           allowUnequip = true;
@@ -67,6 +68,14 @@ public:
         if (busy)
             return GearsetsSubmission::Deferred;
         sent.push_back(operation);
+        return reject ? GearsetsSubmission::Rejected : GearsetsSubmission::Accepted;
+    }
+
+    GearsetsSubmission SubmitJob(std::uint8_t mode) override
+    {
+        if (busy)
+            return GearsetsSubmission::Deferred;
+        jobs.push_back(mode);
         return reject ? GearsetsSubmission::Rejected : GearsetsSubmission::Accepted;
     }
 
@@ -189,7 +198,7 @@ bool TestClassTransition()
     executor.Confirm(view);
     machine.Step(view, executor);
     machine.Step(view, executor);
-    ok = Expect(machine.Result().phase == GearsetsPhase::Complete && view.classId == 4 && view.jobId == 0, "the set completes in the observed class; saved job metadata never requests a job change") && ok;
+    ok = Expect(machine.Result().phase == GearsetsPhase::Complete && view.classId == 4 && view.jobId == 0 && executor.jobs.empty(), "the set completes in the observed class; a set naming no job never requests a job change") && ok;
 
     view                  = EmptyView();
     view.inventory.bag[2] = { EquipmentSlotState::Item, 22, 200 };
@@ -421,9 +430,209 @@ bool TestStops()
     return Expect(machine.Result().phase == GearsetsPhase::Rejected && machine.Result().reason == "executor-unavailable" && machine.Result().submissions == 0, "production executor stays unavailable even for a matching set") && ok;
 }
 
+// Class 4 wears nothing; the set's main hand 11 is class 3's, with body 22.
+struct JobCase
+{
+    GearsetsView        view = EmptyView();
+    GearsetIntent       intent;
+    FakeExecutor        executor;
+    GearsetsTransaction machine;
+
+    explicit JobCase(std::optional<std::uint8_t> job)
+    {
+        view.classId          = 4;
+        view.inventory.bag[1] = { EquipmentSlotState::Item, 11, 100 };
+        view.inventory.bag[2] = { EquipmentSlotState::Item, 22, 200 };
+        intent                = Intent(view);
+        intent.slots[0]       = { 0, EquipmentSlotState::Item, 11, 100 };
+        intent.slots[7]       = { 10, EquipmentSlotState::Item, 22, 200 };
+        intent.job            = job;
+        executor.settleMs     = 20;
+    }
+
+    void MainHand()
+    {
+        machine.Begin(intent, view, executor);
+        machine.Step(view, executor);
+        view.classId = 3;
+        executor.Confirm(view);
+        machine.Step(view, executor);
+        view.nowMs += 20;
+    }
+
+    void Job(std::uint8_t job)
+    {
+        view.jobId = job;
+        ++view.nowMs;
+    }
+
+    void Body()
+    {
+        executor.Confirm(view);
+        machine.Step(view, executor);
+        machine.Step(view, executor);
+    }
+};
+
+bool TestJob()
+{
+    bool ok = true;
+    {
+        JobCase take(16);
+        take.MainHand();
+        take.machine.Step(take.view, take.executor);
+        ok = Expect(take.executor.jobs == std::vector<std::uint8_t>{ 1 } && take.executor.sent.size() == 1 && take.machine.Result().reason == "awaiting-job",
+                    "a job is taken after the main hand settles and before the other slots") &&
+             ok;
+        take.Job(16);
+        take.machine.Step(take.view, take.executor);
+        take.machine.Step(take.view, take.executor);
+        ok = Expect(take.executor.sent.size() == 2 && take.executor.sent.back().target.slot == 10, "the other slots follow the confirmed job") && ok;
+        take.Body();
+        ok = Expect(take.machine.Result().phase == GearsetsPhase::Complete && take.executor.jobs.size() == 1, "the set completes in its job") && ok;
+    }
+    {
+        JobCase retry(16);
+        retry.MainHand();
+        retry.machine.Step(retry.view, retry.executor);
+        retry.view.nowMs += 50;
+        retry.machine.Step(retry.view, retry.executor);
+        ok = Expect(retry.machine.Active() && retry.executor.jobs.size() == 1, "a refused first attempt does not stop the set") && ok;
+        retry.machine.Step(retry.view, retry.executor);
+        ok = Expect(retry.executor.sent.size() == 2 && retry.executor.sent.back().target.slot == 10, "the slots follow a refused first attempt") && ok;
+        retry.Body();
+        ok = Expect(retry.executor.jobs == std::vector<std::uint8_t>{ 1, 1 } && retry.machine.Result().reason == "awaiting-job", "the job is tried again once the slots are worn") && ok;
+        retry.Job(16);
+        retry.machine.Step(retry.view, retry.executor);
+        retry.machine.Step(retry.view, retry.executor);
+        ok = Expect(retry.machine.Result().phase == GearsetsPhase::Complete, "the second attempt completes the set") && ok;
+    }
+    {
+        JobCase refused(16);
+        refused.MainHand();
+        refused.machine.Step(refused.view, refused.executor);
+        refused.view.nowMs += 50;
+        refused.machine.Step(refused.view, refused.executor);
+        refused.machine.Step(refused.view, refused.executor);
+        refused.Body();
+        refused.view.nowMs += 50;
+        refused.machine.Step(refused.view, refused.executor);
+        ok               = Expect(refused.machine.Result().phase == GearsetsPhase::Partial && refused.machine.Result().reason == "job-refused" && refused.executor.jobs.size() == 2,
+                                  "two refusals stop with the slots already changed") &&
+                           ok;
+        const auto count = refused.executor.jobs.size();
+        refused.machine.Step(refused.view, refused.executor);
+        ok = Expect(refused.executor.jobs.size() == count, "a refused job is not retried again") && ok;
+    }
+    {
+        JobCase late(16);
+        late.MainHand();
+        late.machine.Step(late.view, late.executor);
+        late.view.nowMs += 50;
+        late.machine.Step(late.view, late.executor);
+        late.machine.Step(late.view, late.executor);
+        late.Job(16);
+        late.Body();
+        ok = Expect(late.machine.Result().phase == GearsetsPhase::Complete && late.executor.jobs.size() == 1, "a late job confirmation completes without another attempt") && ok;
+    }
+    for (const bool cancelled : { false, true })
+    {
+        JobCase leave(0);
+        leave.view.classId                      = 3;
+        leave.view.jobId                        = 16;
+        leave.view.inventory.equipment.slots[0] = leave.intent.slots[0];
+        leave.view.inventory.equipment.slots[7] = leave.intent.slots[7];
+        leave.view.inventory.bag[1]             = { EquipmentSlotState::Empty, 0, 0 };
+        leave.view.inventory.bag[2]             = { EquipmentSlotState::Empty, 0, 0 };
+        leave.machine.Begin(leave.intent, leave.view, leave.executor);
+        leave.machine.Step(leave.view, leave.executor);
+        ok = Expect(leave.executor.jobs == std::vector<std::uint8_t>{ 2 } && leave.executor.sent.empty(), "a class set leaves the job with mode 2") && ok;
+        if (cancelled)
+            leave.machine.Cancel();
+        leave.Job(0);
+        leave.machine.Step(leave.view, leave.executor);
+        leave.machine.Step(leave.view, leave.executor);
+        ok = Expect(leave.machine.Result().phase == (cancelled ? GearsetsPhase::Partial : GearsetsPhase::Complete),
+                    cancelled ? "a cancel after the only change, a job's, is partial" : "leaving the job completes the worn set") &&
+             ok;
+    }
+    {
+        JobCase worn(16);
+        worn.view.inventory.equipment.slots[7] = worn.intent.slots[7];
+        worn.view.inventory.bag[2]             = { EquipmentSlotState::Empty, 0, 0 };
+        worn.MainHand();
+        worn.machine.Step(worn.view, worn.executor);
+        worn.view.nowMs += 50;
+        worn.machine.Step(worn.view, worn.executor);
+        worn.machine.Step(worn.view, worn.executor);
+        ok = Expect(worn.machine.Result().phase == GearsetsPhase::Partial && worn.machine.Result().reason == "job-refused" && worn.executor.jobs.size() == 1,
+                    "a refusal with no slot left to replace is not retried") &&
+             ok;
+    }
+    for (const bool arrives : { true, false })
+    {
+        JobCase lateClass(16);
+        lateClass.machine.Begin(lateClass.intent, lateClass.view, lateClass.executor);
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        lateClass.executor.Confirm(lateClass.view);
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        lateClass.view.nowMs += 20;
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        ok = Expect(lateClass.machine.Active() && lateClass.machine.Result().reason == "waiting-class" && lateClass.executor.jobs.empty(), "a job waits for the main hand's class") && ok;
+        if (!arrives)
+        {
+            lateClass.view.nowMs += 50;
+            lateClass.machine.Step(lateClass.view, lateClass.executor);
+            ok = Expect(lateClass.machine.Result().phase == GearsetsPhase::Partial && lateClass.machine.Result().reason == "job-class-mismatch" && lateClass.executor.jobs.empty(),
+                        "a class that never arrives stops without a job request") &&
+                 ok;
+            continue;
+        }
+        lateClass.view.classId = 3;
+        lateClass.view.nowMs += 5;
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        ok = Expect(lateClass.machine.Active() && lateClass.machine.Result().reason == "settling", "the late class settles like a main hand") && ok;
+        lateClass.view.nowMs += 20;
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        ok = Expect(lateClass.executor.jobs == std::vector<std::uint8_t>{ 1 } && lateClass.executor.sent.size() == 1, "the job follows the late class") && ok;
+        lateClass.Job(16);
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        lateClass.machine.Step(lateClass.view, lateClass.executor);
+        lateClass.Body();
+        ok = Expect(lateClass.machine.Result().phase == GearsetsPhase::Complete, "the set completes after a late class") && ok;
+    }
+    {
+        JobCase mismatch(27);
+        mismatch.view.inventory.equipment.slots[0] = mismatch.intent.slots[0];
+        mismatch.view.inventory.bag[1]             = { EquipmentSlotState::Empty, 0, 0 };
+        mismatch.machine.Begin(mismatch.intent, mismatch.view, mismatch.executor);
+        mismatch.machine.Step(mismatch.view, mismatch.executor);
+        ok = Expect(mismatch.machine.Result().phase == GearsetsPhase::Rejected && mismatch.machine.Result().reason == "job-class-mismatch" && mismatch.executor.jobs.empty(),
+                    "a job of another class sends nothing") &&
+             ok;
+        JobCase invalid(5);
+        invalid.machine.Begin(invalid.intent, invalid.view, invalid.executor);
+        ok = Expect(invalid.machine.Result().reason == "invalid-intent", "an ID that is not a job is refused") && ok;
+    }
+    {
+        JobCase cancel(16);
+        cancel.MainHand();
+        cancel.machine.Step(cancel.view, cancel.executor);
+        cancel.machine.Cancel();
+        ok = Expect(cancel.machine.Active() && cancel.machine.Result().reason == "cancelling", "a cancel waits for a pending job") && ok;
+        cancel.Job(16);
+        cancel.machine.Step(cancel.view, cancel.executor);
+        ok = Expect(cancel.machine.Result().phase == GearsetsPhase::Partial && cancel.machine.Result().reason == "cancelled" && cancel.executor.sent.size() == 1,
+                    "the cancelled set accounts for the job and sends nothing more") &&
+             ok;
+    }
+    return ok;
+}
+
 } // namespace
 
 bool RunGearsetsTransactionTests()
 {
-    return TestPreflight() && TestOrderMovementAndImmutableIntent() && TestClassTransition() && TestLateClassChange() && TestDeferred() && TestCancelWhileSettling() && TestStops();
+    return TestPreflight() && TestOrderMovementAndImmutableIntent() && TestClassTransition() && TestLateClassChange() && TestDeferred() && TestCancelWhileSettling() && TestStops() &&
+           TestJob();
 }

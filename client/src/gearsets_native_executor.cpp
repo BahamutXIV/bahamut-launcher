@@ -52,6 +52,10 @@ constexpr std::uint32_t kManagerBusy        = 0x1Eu;
 // reproduce it from the actor-id map.
 constexpr std::uint32_t kEquipCommandActor     = 12009u;
 constexpr std::uint32_t kEquipCommandReference = 0xA0F02EE9u;
+// Uncaptured: static actors are 0xA0F00000 | ID, as 12009 shows and
+// bahamut:src/map/actor/static_actors.h kStaticActorIdBase assigns.
+constexpr std::uint32_t kChangeJobCommandActor     = 12017u;
+constexpr std::uint32_t kChangeJobCommandReference = 0xA0F02EF1u;
 
 bool ReadRaw(void*, std::uint32_t address, void* out, std::size_t size)
 {
@@ -73,12 +77,24 @@ std::uint32_t Address(const void* pointer)
     return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(pointer));
 }
 
+GearsetsSubmission SendRecord(std::uint32_t network, const std::array<std::uint8_t, kGearsetsCommandRequestSize>& payload)
+{
+    // Zero the unread record bytes; builder layout: client/README.md#client-evidence.
+    alignas(4) std::array<std::uint8_t, kRecordPayload + kGearsetsCommandRequestSize> record{};
+    std::memcpy(record.data() + 0x00u, &kRecordOpcode, sizeof(kRecordOpcode));
+    std::memcpy(record.data() + 0x04u, &kRecordSize, sizeof(kRecordSize));
+    std::memcpy(record.data() + kRecordPayload, payload.data(), payload.size());
+    const auto sendPacket = reinterpret_cast<SendPacket>(static_cast<std::uintptr_t>(kSendPacketAddress));
+    return sendPacket(reinterpret_cast<void*>(static_cast<std::uintptr_t>(network)), record.data(), 0u, 0u) ? GearsetsSubmission::Accepted
+                                                                                                            : GearsetsSubmission::Rejected;
+}
+
 } // namespace
 
 namespace bahamut_client
 {
 
-std::optional<GearsetsNativeRoute> ReadGearsetsNativeRoute(const GearsetsNativeMemory& memory, std::uint32_t container, std::uint32_t player)
+std::optional<GearsetsNativeRoute> ReadGearsetsNativeRoute(const GearsetsNativeMemory& memory, std::uint32_t container, std::uint32_t player, GearsetsNativeCommand command)
 {
     if (container == 0u || player == 0u)
         return std::nullopt;
@@ -115,12 +131,13 @@ std::optional<GearsetsNativeRoute> ReadGearsetsNativeRoute(const GearsetsNativeM
     const auto eventType = memory.Get<std::uint8_t>(kEventTypeGlobal);
     if (!eventType || *eventType != 0u)
         return std::nullopt;
-    const GearsetsStaticActorLookup command = FindLoadedStaticActor(memory, engine, kEquipCommandActor);
+    const bool                      equip  = command == GearsetsNativeCommand::Equip;
+    const GearsetsStaticActorLookup lookup = FindLoadedStaticActor(memory, engine, equip ? kEquipCommandActor : kChangeJobCommandActor);
     // Only the reference reaches the wire; whether the client has loaded the
     // command actor does not.
-    if (command.reference != kEquipCommandReference)
+    if (lookup.reference != (equip ? kEquipCommandReference : kChangeJobCommandReference))
         return std::nullopt;
-    return GearsetsNativeRoute{ network, *actor, command.reference, *stateWord, *eventType };
+    return GearsetsNativeRoute{ network, *actor, lookup.reference, *stateWord, *eventType };
 }
 
 std::optional<GearsetsEquipCommandRequest> GearsetsNativeRequest(const GearsetsOperation& operation, const GearsetsNativeRoute& route)
@@ -141,6 +158,11 @@ std::optional<GearsetsEquipCommandRequest> GearsetsNativeRequest(const GearsetsO
     request.bagSlot = *operation.bagSlot;
     request.uid     = operation.target.uid;
     return request;
+}
+
+GearsetsJobCommandRequest GearsetsNativeJobRequest(std::uint8_t mode, const GearsetsNativeRoute& route)
+{
+    return GearsetsJobCommandRequest{ route.actor, route.owner, route.stateWord, route.eventType, mode };
 }
 
 std::optional<GearsetsPlan> GearsetsNativeExecutor::Plan(const GearsetIntent&) const
@@ -175,16 +197,17 @@ GearsetsSubmission GearsetsNativeExecutor::Submit(const GearsetsOperation& opera
     const auto request = GearsetsNativeRequest(operation, *route);
     if (!request)
         return GearsetsSubmission::Unavailable;
-    const auto payload = EncodeGearsetsEquipCommandRequest(*request);
+    return SendRecord(route->network, EncodeGearsetsEquipCommandRequest(*request));
+}
 
-    // Zero the unread record bytes; builder layout: client/README.md#client-evidence.
-    alignas(4) std::array<std::uint8_t, kRecordPayload + kGearsetsCommandRequestSize> record{};
-    std::memcpy(record.data() + 0x00u, &kRecordOpcode, sizeof(kRecordOpcode));
-    std::memcpy(record.data() + 0x04u, &kRecordSize, sizeof(kRecordSize));
-    std::memcpy(record.data() + kRecordPayload, payload.data(), payload.size());
-    const auto sendPacket = reinterpret_cast<SendPacket>(static_cast<std::uintptr_t>(kSendPacketAddress));
-    return sendPacket(reinterpret_cast<void*>(static_cast<std::uintptr_t>(route->network)), record.data(), 0u, 0u) ? GearsetsSubmission::Accepted
-                                                                                                                   : GearsetsSubmission::Rejected;
+GearsetsSubmission GearsetsNativeExecutor::SubmitJob(std::uint8_t mode)
+{
+    if (Address(GetModuleHandleW(nullptr)) != kImageBase)
+        return GearsetsSubmission::Unavailable;
+    const auto route = ReadGearsetsNativeRoute(kMemory, Address(container_), Address(player_), GearsetsNativeCommand::ChangeJob);
+    if (!route)
+        return GearsetsSubmission::Deferred;
+    return SendRecord(route->network, EncodeGearsetsJobCommandRequest(GearsetsNativeJobRequest(mode, *route)));
 }
 
 } // namespace bahamut_client

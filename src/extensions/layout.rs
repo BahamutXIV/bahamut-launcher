@@ -38,6 +38,7 @@ pub struct ExtensionLayout {
     pub addon_settings: PathBuf,
     pub launcher_logs: PathBuf,
     pub chat_logs: PathBuf,
+    pub crash_logs: PathBuf,
     pub screenshots: PathBuf,
 }
 
@@ -60,6 +61,7 @@ impl ExtensionLayout {
             addon_settings: config.join("addons"),
             launcher_logs: logs.join("launcher"),
             chat_logs: logs.join("chat"),
+            crash_logs: logs.join("crashes"),
             screenshots: state_root.join(SCREENSHOTS_DIR_NAME),
             logs,
             install_root: install_root.to_path_buf(),
@@ -170,6 +172,7 @@ mod tests {
         assert_eq!(layout.addon_settings, root.join("config/addons"));
         assert_eq!(layout.launcher_logs, root.join("logs/launcher"));
         assert_eq!(layout.chat_logs, root.join("logs/chat"));
+        assert_eq!(layout.crash_logs, root.join("logs/crashes"));
     }
 
     #[test]

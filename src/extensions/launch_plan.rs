@@ -21,6 +21,7 @@ pub const ADDON_MANIFESTS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_ADDON_MANIFESTS";
 pub const ADDON_CATALOG_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_ADDON_CATALOG";
 pub const ADDON_SETTINGS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_ADDON_SETTINGS";
 pub const CHAT_LOGS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CHAT_LOGS";
+pub const CRASH_LOGS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_CRASH_LOGS";
 pub const DAT_PACKAGE_ROOTS_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_DAT_PACKAGE_ROOTS";
 pub const STARTUP_SCRIPT_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_STARTUP_SCRIPT";
 pub const SCREENSHOT_PLUGIN_ENVIRONMENT: &str = "BAHAMUT_RUNTIME_SCREENSHOT_PLUGIN";
@@ -51,6 +52,7 @@ pub struct ExtensionLaunchRequest {
     pub addon_catalog: Vec<PathBuf>,
     pub addon_settings_path: PathBuf,
     pub chat_logs_path: PathBuf,
+    pub crash_logs_path: PathBuf,
     pub dat_roots: Vec<PathBuf>,
     pub startup_script_path: PathBuf,
     pub screenshot_plugin_path: PathBuf,
@@ -182,6 +184,7 @@ struct EnvironmentPaths {
     screenshots: OsString,
     addon_settings: OsString,
     chat_logs: OsString,
+    crash_logs: OsString,
     screenshot_plugin: OsString,
     discord_rpc_plugin: OsString,
 }
@@ -221,6 +224,7 @@ fn map_guest_paths(
     let screenshots = guest_path_arg(guest, "screenshots", &request.screenshots_path)?;
     let addon_settings = guest_path_arg(guest, "addon settings", &request.addon_settings_path)?;
     let chat_logs = guest_path_arg(guest, "chat logs", &request.chat_logs_path)?;
+    let crash_logs = guest_path_arg(guest, "crash logs", &request.crash_logs_path)?;
     let screenshot_plugin =
         guest_path_arg(guest, "screenshot plugin", &request.screenshot_plugin_path)?;
     let discord_rpc_plugin =
@@ -233,6 +237,7 @@ fn map_guest_paths(
             screenshots,
             addon_settings,
             chat_logs,
+            crash_logs,
             screenshot_plugin,
             discord_rpc_plugin,
         },
@@ -305,6 +310,7 @@ fn helper_environment(
     ));
     environment.push((ADDON_SETTINGS_ENVIRONMENT.into(), paths.addon_settings));
     environment.push((CHAT_LOGS_ENVIRONMENT.into(), paths.chat_logs));
+    environment.push((CRASH_LOGS_ENVIRONMENT.into(), paths.crash_logs));
     environment.push((
         DAT_PACKAGE_ROOTS_ENVIRONMENT.into(),
         encode_path_list(guest, "DAT overlay root", &request.dat_roots)?,
@@ -427,6 +433,7 @@ mod tests {
             ],
             addon_settings_path: PathBuf::from("mock-root/config/addons"),
             chat_logs_path: PathBuf::from("mock-root/logs/chat"),
+            crash_logs_path: PathBuf::from("mock-root/logs/crashes"),
             dat_roots: vec![PathBuf::from("mock-root/plugins/dats/alpha")],
             startup_script_path: PathBuf::from("mock-root/scripts/default.txt"),
             screenshot_plugin_path: PathBuf::from("mock-root/plugins/screenshot.dll"),
@@ -469,7 +476,7 @@ mod tests {
         assert_eq!(args[7], "3132372E302E302E3100");
         assert_eq!(args[8], "--launch-argument");
         assert_eq!(args[9], request().launch_argument);
-        assert_eq!(invocation.environment.len(), 24);
+        assert_eq!(invocation.environment.len(), 25);
         assert_eq!(invocation.environment[0].0, STARTUP_SCRIPT_ENVIRONMENT);
         assert_eq!(invocation.environment[0].1, request().startup_script_path);
         assert_eq!(invocation.environment[1].0, SCREENSHOT_PLUGIN_ENVIRONMENT);
@@ -523,41 +530,43 @@ mod tests {
         assert_eq!(invocation.environment[12].1, request().addon_settings_path);
         assert_eq!(invocation.environment[13].0, CHAT_LOGS_ENVIRONMENT);
         assert_eq!(invocation.environment[13].1, request().chat_logs_path);
-        assert_eq!(invocation.environment[14].0, DAT_PACKAGE_ROOTS_ENVIRONMENT);
+        assert_eq!(invocation.environment[14].0, CRASH_LOGS_ENVIRONMENT);
+        assert_eq!(invocation.environment[14].1, request().crash_logs_path);
+        assert_eq!(invocation.environment[15].0, DAT_PACKAGE_ROOTS_ENVIRONMENT);
         assert_eq!(
-            invocation.environment[14].1,
+            invocation.environment[15].1,
             OsString::from("mock-root/plugins/dats/alpha")
         );
-        assert_eq!(invocation.environment[15].0, BORDERLESS_ENVIRONMENT);
-        assert_eq!(invocation.environment[15].1, "false");
-        assert_eq!(invocation.environment[16].0, BORDERLESS_MONITOR_ENVIRONMENT);
-        assert_eq!(invocation.environment[16].1, "");
-        assert_eq!(
-            invocation.environment[17].0,
-            OBJECT_DISTANCE_ENABLED_ENVIRONMENT
-        );
-        assert_eq!(invocation.environment[17].1, "false");
+        assert_eq!(invocation.environment[16].0, BORDERLESS_ENVIRONMENT);
+        assert_eq!(invocation.environment[16].1, "false");
+        assert_eq!(invocation.environment[17].0, BORDERLESS_MONITOR_ENVIRONMENT);
+        assert_eq!(invocation.environment[17].1, "");
         assert_eq!(
             invocation.environment[18].0,
-            OBJECT_DISTANCE_PERCENT_ENVIRONMENT
+            OBJECT_DISTANCE_ENABLED_ENVIRONMENT
         );
-        assert_eq!(invocation.environment[18].1, "200");
+        assert_eq!(invocation.environment[18].1, "false");
         assert_eq!(
             invocation.environment[19].0,
+            OBJECT_DISTANCE_PERCENT_ENVIRONMENT
+        );
+        assert_eq!(invocation.environment[19].1, "200");
+        assert_eq!(
+            invocation.environment[20].0,
             CAMERA_ZOOM_ENABLED_ENVIRONMENT
         );
-        assert_eq!(invocation.environment[19].1, "false");
-        assert_eq!(invocation.environment[20].0, CAMERA_ZOOM_LIMIT_ENVIRONMENT);
-        assert_eq!(invocation.environment[20].1, "15");
-        assert_eq!(invocation.environment[21].0, XHBAR_ENABLED_ENVIRONMENT);
-        assert_eq!(invocation.environment[21].1, "false");
-        assert_eq!(invocation.environment[22].0, LAUNCHER_VERSION_ENVIRONMENT);
+        assert_eq!(invocation.environment[20].1, "false");
+        assert_eq!(invocation.environment[21].0, CAMERA_ZOOM_LIMIT_ENVIRONMENT);
+        assert_eq!(invocation.environment[21].1, "15");
+        assert_eq!(invocation.environment[22].0, XHBAR_ENABLED_ENVIRONMENT);
+        assert_eq!(invocation.environment[22].1, "false");
+        assert_eq!(invocation.environment[23].0, LAUNCHER_VERSION_ENVIRONMENT);
         assert_eq!(
-            invocation.environment[22].1,
+            invocation.environment[23].1,
             OsString::from(env!("BAHAMUT_GIT_DESCRIBE"))
         );
-        assert_eq!(invocation.environment[23].0, SERVER_ID_ENVIRONMENT);
-        assert_eq!(invocation.environment[23].1, "0123456789abcdef");
+        assert_eq!(invocation.environment[24].0, SERVER_ID_ENVIRONMENT);
+        assert_eq!(invocation.environment[24].1, "0123456789abcdef");
     }
 
     #[test]
@@ -568,12 +577,12 @@ mod tests {
         request.object_distance_percent = 150;
         let invocation = plan_verified_extension_launch(&request).unwrap();
         assert_eq!(
-            invocation.environment[19].0,
+            invocation.environment[20].0,
             CAMERA_ZOOM_ENABLED_ENVIRONMENT
         );
-        assert_eq!(invocation.environment[19].1, "true");
-        assert_eq!(invocation.environment[18].1, "150");
-        assert_eq!(invocation.environment[20].1, "12");
+        assert_eq!(invocation.environment[20].1, "true");
+        assert_eq!(invocation.environment[19].1, "150");
+        assert_eq!(invocation.environment[21].1, "12");
     }
 
     #[test]
@@ -752,7 +761,7 @@ mod tests {
     fn wine_plan_maps_path_environment_and_keeps_scalars() {
         let wine = wine_plan(&request());
         let host = plan_verified_extension_launch(&request()).unwrap();
-        assert_eq!(wine.environment.len(), 24);
+        assert_eq!(wine.environment.len(), 25);
         let mapped = [
             (
                 STARTUP_SCRIPT_ENVIRONMENT,
@@ -777,6 +786,7 @@ mod tests {
             ),
             (ADDON_SETTINGS_ENVIRONMENT, r"Z:\mock-root\config\addons"),
             (CHAT_LOGS_ENVIRONMENT, r"Z:\mock-root\logs\chat"),
+            (CRASH_LOGS_ENVIRONMENT, r"Z:\mock-root\logs\crashes"),
             (
                 DAT_PACKAGE_ROOTS_ENVIRONMENT,
                 r"Z:\mock-root\plugins\dats\alpha",

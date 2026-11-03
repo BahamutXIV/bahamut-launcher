@@ -34,6 +34,7 @@ struct SlotView
     int           page         = 0;
     int           remaining    = 0;     // whole recast seconds left
     bool          incompatible = false; // class cannot use it
+    bool          comboReady   = false;
 };
 
 SlotView SlotDisplay(std::size_t slot);

@@ -119,6 +119,65 @@ The native suite covers:
 The direct-launch test also checks that launching without extensions neither
 loads `bahamut.dll` or `screenshot.dll` nor creates the event environment.
 
+## Crash logs
+
+When `BAHAMUT_RUNTIME_CRASH_LOGS` names a directory, `bahamut.dll` installs an
+unhandled-exception filter ([crash log](src/crash_log.h)) during
+initialization. An empty or absent value leaves crash logging off. The
+directory is created if missing; files are never deleted.
+
+The first unhandled exception in the game process writes
+`game-YYYYMMDDTHHMMSSZ-<pid>.log` (UTC). The log is ASCII with one fact per
+line:
+
+- launcher version, process ID and the ID of the faulting thread;
+- one `startup_addon:` line per addon ID selected at startup, within 512
+  characters of IDs; when some do not fit, a `startup_addons_truncated: yes`
+  line follows. Later loads and unloads are not tracked;
+- exception code and name, and for access violations the access kind and
+  target address;
+- the faulting address and the x86 registers;
+- `stack_snapshot_bytes`, then up to 1024 stack dwords from ESP that fall
+  inside the executable span of a listed module, read from a copy of the stack
+  taken at the fault (ESP up to 4 KiB or the end of its memory region);
+- the loaded modules, capped at 256, each with base, SizeOfImage and
+  TimeDateStamp, plus the PDB GUID, age and file name only for a module with a
+  readable RSDS CodeView record;
+- a final `end of crash log` line, which a cut-off log lacks.
+
+Code addresses print as `module+0xOFFSET`, or `?` outside listed modules,
+including modules past the cap. The module list lets maintainers match symbols.
+MSVC Release builds emit PDBs that embed only their file name. The stack values
+are unverified candidates: a span can cover non-code gaps between sections, and
+a value may be stale data rather than a return address. The log does not hold
+memory contents beyond registers and those values.
+
+The filter calls the previous filter and returns its result, or continues
+the search if none existed, preserving the game's own handling. The
+retail client sets its own unhandled-exception filter during startup. The
+module therefore reinstalls its filter once, on the first game frame, and
+chains to whatever it displaced. A filter the game installs after that frame
+replaces it. A chained filter that leads back to the crash filter on the same
+thread gets a continue-search result instead of looping.
+
+Capture runs on a thread started at install with its own stack, so a stack
+overflow or damaged heap on the faulting thread does not stop it. The faulting
+thread copies the exception record, context and stack window into static
+storage, signals the capture thread, waits up to 20 s, then chains. A thread
+that faults meanwhile waits the same way. Threads inside the filter are tracked
+in a fixed array of 64 thread IDs; a thread already present is a re-entry, and
+one that finds the array full waits and chains. If the capture thread cannot
+start, crash logging stays off. Capture is best effort: process exit may cut
+off capture after the timeout; a failed write drops the rest of the log,
+including `end of crash log`; exceptions that never reach the filter, such as
+a fast-fail stack buffer overrun, write nothing.
+
+The heap may be corrupt at crash time, so the capture allocates nothing from
+the CRT heap and uses no iostreams or `std::string`. The directory path,
+launcher version and addon IDs are prepared at install; the log is formatted
+into fixed buffers with Win32 calls. The `bahamut-crash-log` CTests use
+synthetic exceptions and never crash the test process.
+
 ## Autologin
 
 The [autologin service](src/autologin.h) drives the retail Bootup title and
@@ -218,6 +277,13 @@ clock is the network module's whole seconds at `N+0x30C` (`0x0075BD80`). The
 overlay greys a bound action on recast, with its seconds left, or one the
 class cannot use. It does not judge MP, TP or range.
 
+Action combos follow the native bar's `updateComboInfo`. The server sets
+`playerWork.comboNextCommandId`, two command IDs in the player work's own
+sync group, while a chain is open and zeroes them when it closes. The overlay
+gives each bound action matching either ID a steady red border and a second
+border pulsing over 0.8 s, regardless of recast. A failed combo read drops
+only the outline; recast and compatibility stay current.
+
 The overlay shows both sets whenever the action menu is readable, Desktop
 leaves user control unlocked and no full map is open. While a trigger is held
 the other side dims, and a combo set replaces its first trigger's side.
@@ -278,8 +344,8 @@ bar is left alone. A restore the client keeps rejecting is retried on every
 step; after 60 attempts, no new hide starts for the session.
 
 For live acceptance, `BAHAMUT_TEST_XHBAR_LOG_FILE` names a new file that
-receives menu, player, Desktop, slot-state and hide events; the launcher never
-sets it.
+receives menu, player, combo, Desktop, slot-state and hide events; the
+launcher never sets it.
 
 ### Tests and limits
 
@@ -287,16 +353,18 @@ The policy tests cover thirty-two slot edges, trigger ownership and combos,
 captured releases, context changes, generation invalidation, optional
 set-chord priority, and the shortcut mapping. The adapter tests cover the
 observed Xbox masks and state filtering; axis words and other bytes stay
-intact. The slot reader tests run the menu, player-work, Desktop and map
-reads, with their guards, against synthetic memory. These tests run without the
-retail client.
+intact. The slot reader tests run the menu, player-work, action-combo, Desktop
+and map reads, with their guards, against synthetic memory. These tests run
+without the retail client.
 
 Manual retail sessions with an Xbox controller showed chorded and combo slots
 firing on every page, recast greying, the native bar hidden and restored by
 the macro bar, the overlay withheld during NPC dialogue, a cutscene and
 loading screens, no native response to LT+A or LT+Up, neither trigger opening
-its native macro bar, and no dispatch with chat input open. DirectInput pads
-and other contexts have not been tried in game.
+its native macro bar, and no dispatch with chat input open. The action-combo
+field was found in game but read only as zero, with no chain open; the
+outline has not been seen in game. DirectInput pads and other contexts have
+not been tried in game.
 
 ## Limits and related docs
 
@@ -313,8 +381,8 @@ and platform status.
 The `gearsets` addon is disabled by default. `/gearsets` toggles the Gear Sets
 window, and `/gs` is the short form of every `/gearsets` command with the same
 arguments. Selection never equips; double-click a set, use Equip Set, or run
-`/gs equip <set>` to apply it slot by slot, main hand first. Equip never
-requests a Job Change.
+`/gs equip <set>` to apply it slot by slot, main hand first, then the set's
+job.
 Sets are stored per server and character in an editable `sets.lua` file parsed as
 data and never run.
 Controls and host services are described in
@@ -371,11 +439,23 @@ requested slot, and accepts ordering, restriction checks, a confirmation
 deadline, and a settling window only from its executor. The fake-executor
 tests cover sequential operations, explicit Empty/unequip, moved items, an
 observed class change, dependent slots cleared by class transitions,
-deferred submission, cancellation, and partial or unconfirmed outcomes. A
-queued request is not success; `complete` requires a fresh full match.
-Cancellation stops unsent work and accounts for an accepted request that
-subsequently confirms. Sent requests are never retried or rolled back, and
-saved job metadata never requests a Job Change.
+deferred submission, cancellation, partial or unconfirmed outcomes, and the
+job step. A queued request is not success; `complete` requires a fresh full
+match, in the intent's job when it names one. Cancellation stops unsent work
+and accounts for an accepted request that subsequently confirms. Sent slot
+requests are never retried or rolled back.
+
+An intent's optional job is a job ID or 0 for none. Once the main hand is
+worn, and before any other slot, a job that differs from the observed one is
+requested with Change Job mode 1 (take the class's job) or 2 (leave it). The
+equipped main hand may report its class after settling, so the first request
+waits up to the confirmation deadline for the job's class (`waiting-class`).
+If the class still differs, it stops as `job-class-mismatch` without a
+request. The server sends no command reply when it refuses a job change
+because worn gear does not fit the new state, so a change unseen within the
+confirmation deadline is tried once more after the other slots if any were
+sent; otherwise, or on a second miss, it stops as `job-refused`. A change to
+the intent's job counts as the transaction's own, even after its deadline.
 
 `gearsets_native_executor.cpp` submits each operation as the client to server
 0x012D `commandRequest` for EquipCommand (12009) that the retail Gear window
@@ -397,9 +477,16 @@ reader failure stops an active Equip only after a second without a good read.
 On the supported Windows client against a Bahamut server, this request
 equipped a body item and the reader confirmed it.
 
+A job step sends the same 0x012D `commandRequest` for ChangeJobCommand
+(12017) under the same conditions, with reference `0xA0F02EF1`. Neither
+the reference nor the request has been captured: the reference follows
+EquipCommand's `0xA0F00000 | ID` form; the tail follows the retail Change Job
+path, which forwards the mode and three nils.
+
 Live acceptance still requires unequip, same-class and class-changing whole
-sets, moved-UID durability, stable server/character identity,
-missing/restricted items, cancellation, and staged overlay/input checks.
+sets, taking and leaving a job, a refused job change, moved-UID durability,
+stable server/character identity, missing/restricted items, cancellation, and
+staged overlay/input checks.
 Windows fixtures do not establish Wine or other platform behavior.
 
 ### Client evidence
@@ -513,7 +600,8 @@ event name, 128-byte tail, then seven bytes the builder leaves unwritten.
 commandRequest(item, nil, 1, nil x5, equipSlot, itemDBIds) with the
 parameter tags of the captured requests: 07 item reference (owner actor,
 bag slot, package 0), 05 nil, 00 i32, 09 two u64 unique IDs, 0f end. An
-unequip sends a nil item and no unique IDs.
+unequip sends a nil item and no unique IDs. The uncaptured Change Job request
+is commandRequest(mode, nil x3): 00 i32 mode, three 05 nils, 0f end.
 
 #### Game-frame ordering
 

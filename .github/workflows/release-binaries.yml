@@ -338,6 +338,24 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $dist "$name.zip") -Destination dist
           Copy-Item -LiteralPath (Join-Path $dist "$name.zip.sha256") -Destination dist
 
+      # Crash logs name each module with its PDB GUID and age; these PDBs
+      # resolve the logged offsets of the MSVC client binaries.
+      - name: Package client symbols (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SYMBOLS_NAME: bahamut-launcher-${{ needs.resolve.outputs.label }}-windows-client-symbols
+        run: |
+          $pdbs = 'bahamut.pdb', 'screenshot.pdb', 'discord-rpc.pdb' |
+            ForEach-Object { Join-Path 'out/client-release/Release' $_ }
+          foreach ($pdb in $pdbs) {
+            if (-not (Test-Path -LiteralPath $pdb -PathType Leaf)) { throw "missing client symbols: $pdb" }
+          }
+          $zip = Join-Path 'dist' "$env:SYMBOLS_NAME.zip"
+          Compress-Archive -LiteralPath $pdbs -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $env:SYMBOLS_NAME.zip" | Out-File -Encoding ascii -NoNewline "$zip.sha256"
+
       - name: Package (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -782,15 +800,18 @@ jobs:
             "$prefix-macos-universal.zip.sha256"
             "$prefix-linux-flatpak.zip"
             "$prefix-linux-flatpak.zip.sha256"
+            "$prefix-windows-client-symbols.zip"
+            "$prefix-windows-client-symbols.zip.sha256"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           if ! diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}" | sort); then
-            echo "release artifact set does not contain exactly the expected eight files" >&2
+            echo "release artifact set does not contain exactly the expected ten files" >&2
             exit 1
           fi
 
           for archive in \
             "$prefix-windows-x86_64.zip" \
+            "$prefix-windows-client-symbols.zip" \
             "$prefix-linux-x86_64.tar.gz" \
             "$prefix-macos-universal.zip" \
             "$prefix-linux-flatpak.zip"; do
