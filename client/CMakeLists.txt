@@ -331,6 +331,12 @@ add_executable(bahamut-loader
 target_include_directories(bahamut-loader PRIVATE api)
 target_link_libraries(bahamut-loader PRIVATE advapi32 bcrypt psapi)
 bahamut_unicode_entry(bahamut-loader)
+if(MSVC)
+    # Unchanged inputs keep one file hash across releases, along with any
+    # antivirus reputation tied to it.
+    target_compile_options(bahamut-loader PRIVATE "$<$<CONFIG:Release>:/Brepro>")
+    target_link_options(bahamut-loader PRIVATE "$<$<CONFIG:Release>:/Brepro>")
+endif()
 
 # Keep shared test objects separate from the runtime DLL's export/probe variants.
 add_library(bahamut-test-monitor-selection-objects OBJECT src/monitor_selection.cpp)
